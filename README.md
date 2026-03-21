@@ -177,7 +177,24 @@ ward repos inspect my-service                   # deep inspect one repo
 
 ### `ward tui`
 
-Interactive terminal UI. Keys: `1`-`3` switch tabs, `/` filter, `Tab` cycle systems, `q` quit.
+Interactive terminal dashboard for browsing repos, security state, and applying changes.
+
+```
+Keys:
+  1/2/3/?          Switch tabs (Repos, Security, Actions, Help)
+  Tab / Shift+Tab  Cycle systems
+  Enter / l        Load repos for current system
+  j/k or arrows    Navigate list
+  /                Filter repos (supports ! for exclusion)
+  a                Apply security to selected repo
+  r / R            Reload / force reload
+  q                Quit
+
+Filter syntax:
+  foo              Show repos matching "foo"
+  !ops             Hide repos matching "ops"
+  foo !ops         Show "foo", hide "ops"
+```
 
 ────────────────────────────────────────
 
