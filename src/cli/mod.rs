@@ -76,8 +76,8 @@ pub enum Command {
     /// Launch interactive terminal UI
     Tui,
 
-    /// Create a ward.toml in the current directory
-    Init,
+    /// Interactive setup wizard (creates ward.toml)
+    Init(init::InitCommand),
 
     /// Generate shell completions
     #[command(hide = true)]

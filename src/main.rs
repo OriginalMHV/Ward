@@ -21,6 +21,11 @@ async fn main() -> Result<()> {
 
     init_tracing(cli.verbose);
 
+    // Init handles its own client creation (manifest may not exist yet)
+    if let Command::Init(cmd) = cli.command {
+        return cmd.run().await;
+    }
+
     let manifest = Manifest::load(cli.config.as_deref())?;
     let org = cli.org.as_deref().unwrap_or(&manifest.org.name);
     let client = Client::new(org, cli.parallelism).await?;
@@ -66,7 +71,7 @@ async fn main() -> Result<()> {
         Command::Rollback(cmd) => cmd.run(&client).await,
         Command::Audit(cmd) => cmd.run(&client, &manifest, cli.system.as_deref()).await,
         Command::Tui => ward::cli::tui::run(&client, &manifest).await,
-        Command::Init => ward::cli::init::run(),
+        Command::Init(_) => unreachable!(),
         Command::Completions { .. } => unreachable!(),
     }
 }
