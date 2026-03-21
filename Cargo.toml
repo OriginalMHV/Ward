@@ -1,13 +1,16 @@
 [package]
-name = "ward"
+name = "ward-cli"
 version = "0.1.0"
 edition = "2024"
 authors = ["Michael Herland Valen"]
 description = "GitHub repository management for developers. Plan, apply, verify."
 license = "MIT"
-repository = "https://github.com/michaelvalen/ward"
+repository = "https://github.com/OriginalMHV/Ward"
+homepage = "https://github.com/OriginalMHV/Ward"
+readme = "README.md"
 keywords = ["github", "cli", "repository-management", "security", "devtools"]
 categories = ["command-line-utilities", "development-tools"]
+rust-version = "1.85"
 
 [lib]
 name = "ward"
@@ -84,3 +87,8 @@ serde_yaml = "0.9.34"
 lto = true
 codegen-units = 1
 strip = true
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

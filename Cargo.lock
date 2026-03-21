@@ -3128,7 +3128,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ward"
+name = "ward-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
