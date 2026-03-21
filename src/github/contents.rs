@@ -48,11 +48,8 @@ impl Client {
     pub fn decode_content(content: &FileContent) -> Result<String> {
         let raw = content.content.as_deref().unwrap_or("");
         let cleaned: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
-        let bytes = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            &cleaned,
-        )
-        .context("Failed to decode base64 content")?;
+        let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &cleaned)
+            .context("Failed to decode base64 content")?;
         String::from_utf8(bytes).context("File content is not valid UTF-8")
     }
 }

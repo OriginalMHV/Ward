@@ -17,9 +17,7 @@ pub struct RepoSettings {
 impl Client {
     /// Get repository settings.
     pub async fn get_settings(&self, repo: &str) -> Result<RepoSettings> {
-        let resp = self
-            .get(&format!("/repos/{}/{repo}", self.org))
-            .await?;
+        let resp = self.get(&format!("/repos/{}/{repo}", self.org)).await?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -31,11 +29,7 @@ impl Client {
     }
 
     /// Update repository settings.
-    pub async fn update_settings(
-        &self,
-        repo: &str,
-        settings: &serde_json::Value,
-    ) -> Result<()> {
+    pub async fn update_settings(&self, repo: &str, settings: &serde_json::Value) -> Result<()> {
         let resp = self
             .patch_json(&format!("/repos/{}/{repo}", self.org), settings)
             .await?;

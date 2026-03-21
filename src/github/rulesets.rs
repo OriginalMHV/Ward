@@ -57,7 +57,9 @@ impl Client {
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("Failed to create Copilot review ruleset for {repo} (HTTP {status}): {body}");
+            anyhow::bail!(
+                "Failed to create Copilot review ruleset for {repo} (HTTP {status}): {body}"
+            );
         }
 
         Ok(())

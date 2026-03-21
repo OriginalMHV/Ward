@@ -13,16 +13,18 @@ pub async fn execute_security_plan(
     audit_log: &AuditLog,
 ) -> Result<ExecutionReport> {
     let multi = MultiProgress::new();
-    let style = ProgressStyle::with_template(
-        "  {spinner:.green} [{elapsed_precise}] {msg}",
-    )?;
+    let style = ProgressStyle::with_template("  {spinner:.green} [{elapsed_precise}] {msg}")?;
 
     let mut report = ExecutionReport::default();
 
     for plan in plans.iter().filter(|p| p.has_changes()) {
         let pb = multi.add(ProgressBar::new_spinner());
         pb.set_style(style.clone());
-        pb.set_message(format!("{}: applying {} changes...", plan.repo, plan.changes.len()));
+        pb.set_message(format!(
+            "{}: applying {} changes...",
+            plan.repo,
+            plan.changes.len()
+        ));
 
         match apply_repo_security(client, plan, audit_log).await {
             Ok(()) => {
@@ -39,11 +41,7 @@ pub async fn execute_security_plan(
     Ok(report)
 }
 
-async fn apply_repo_security(
-    client: &Client,
-    plan: &RepoPlan,
-    audit_log: &AuditLog,
-) -> Result<()> {
+async fn apply_repo_security(client: &Client, plan: &RepoPlan, audit_log: &AuditLog) -> Result<()> {
     for change in &plan.changes {
         match change.feature.as_str() {
             "dependabot_alerts" if change.desired => {
@@ -145,7 +143,11 @@ impl ExecutionReport {
                 style("⚠️").yellow(),
                 self.succeeded,
                 self.failed.len(),
-                if self.failed.len() == 1 { "repo" } else { "repos" }
+                if self.failed.len() == 1 {
+                    "repo"
+                } else {
+                    "repos"
+                }
             );
             for (repo, err) in &self.failed {
                 println!("    {} {}: {}", style("❌").red(), repo, err);

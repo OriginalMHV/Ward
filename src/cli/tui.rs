@@ -3,23 +3,23 @@ use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
+    event::{self, Event, KeyCode, KeyEventKind},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
+    Frame, Terminal,
     layout::{Constraint, Direction, Layout, Rect},
     prelude::CrosstermBackend,
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap},
-    Frame, Terminal,
 };
 
 use crate::config::Manifest;
+use crate::github::Client;
 use crate::github::repos::Repository;
 use crate::github::security::SecurityState;
-use crate::github::Client;
 
 enum Tab {
     Repos,
@@ -116,69 +116,68 @@ async fn run_loop(
     loop {
         terminal.draw(|f| draw(f, app))?;
 
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind != KeyEventKind::Press {
-                    continue;
-                }
+        if event::poll(Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+        {
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
 
-                if app.is_filtering {
-                    match key.code {
-                        KeyCode::Esc => {
-                            app.is_filtering = false;
-                            app.filter.clear();
-                        }
-                        KeyCode::Enter => {
-                            app.is_filtering = false;
-                        }
-                        KeyCode::Backspace => {
-                            app.filter.pop();
-                        }
-                        KeyCode::Char(c) => {
-                            app.filter.push(c);
-                            app.list_state.select(Some(0));
-                        }
-                        _ => {}
-                    }
-                    continue;
-                }
-
+            if app.is_filtering {
                 match key.code {
-                    KeyCode::Char('q') => app.should_quit = true,
-                    KeyCode::Char('1') => app.tab = Tab::Repos,
-                    KeyCode::Char('2') => app.tab = Tab::Security,
-                    KeyCode::Char('?') => app.tab = Tab::Help,
-                    KeyCode::Char('/') => {
-                        app.is_filtering = true;
+                    KeyCode::Esc => {
+                        app.is_filtering = false;
                         app.filter.clear();
                     }
-                    KeyCode::Char('l') | KeyCode::Enter => {
-                        load_repos(app, client, manifest).await?;
+                    KeyCode::Enter => {
+                        app.is_filtering = false;
                     }
-                    KeyCode::Char('s') => {
-                        // Cycle through systems
-                        if !app.systems.is_empty() {
-                            app.selected_system =
-                                (app.selected_system + 1) % app.systems.len();
-                            app.status_msg = format!(
-                                "System: {} — press 'l' to load",
-                                app.systems[app.selected_system].1
-                            );
-                        }
+                    KeyCode::Backspace => {
+                        app.filter.pop();
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        let len = app.filtered_repos().len();
-                        if len > 0 {
-                            let i = app.list_state.selected().unwrap_or(0);
-                            app.list_state.select(Some((i + 1).min(len - 1)));
-                        }
-                    }
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        let i = app.list_state.selected().unwrap_or(0);
-                        app.list_state.select(Some(i.saturating_sub(1)));
+                    KeyCode::Char(c) => {
+                        app.filter.push(c);
+                        app.list_state.select(Some(0));
                     }
                     _ => {}
                 }
+                continue;
+            }
+
+            match key.code {
+                KeyCode::Char('q') => app.should_quit = true,
+                KeyCode::Char('1') => app.tab = Tab::Repos,
+                KeyCode::Char('2') => app.tab = Tab::Security,
+                KeyCode::Char('?') => app.tab = Tab::Help,
+                KeyCode::Char('/') => {
+                    app.is_filtering = true;
+                    app.filter.clear();
+                }
+                KeyCode::Char('l') | KeyCode::Enter => {
+                    load_repos(app, client, manifest).await?;
+                }
+                KeyCode::Char('s') => {
+                    // Cycle through systems
+                    if !app.systems.is_empty() {
+                        app.selected_system = (app.selected_system + 1) % app.systems.len();
+                        app.status_msg = format!(
+                            "System: {} — press 'l' to load",
+                            app.systems[app.selected_system].1
+                        );
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    let len = app.filtered_repos().len();
+                    if len > 0 {
+                        let i = app.list_state.selected().unwrap_or(0);
+                        app.list_state.select(Some((i + 1).min(len - 1)));
+                    }
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    let i = app.list_state.selected().unwrap_or(0);
+                    app.list_state.select(Some(i.saturating_sub(1)));
+                }
+                _ => {}
             }
         }
 
@@ -222,7 +221,7 @@ fn draw(f: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // header + tabs
-            Constraint::Min(10),  // main content
+            Constraint::Min(10),   // main content
             Constraint::Length(3), // status bar
         ])
         .split(f.area());
@@ -270,11 +269,7 @@ fn draw_repos_tab(f: &mut Frame, area: Rect, app: &App) {
     let items: Vec<ListItem> = filtered
         .iter()
         .map(|entry| {
-            let lang = entry
-                .repo
-                .language
-                .as_deref()
-                .unwrap_or("-");
+            let lang = entry.repo.language.as_deref().unwrap_or("-");
             let sec_icon = entry
                 .security
                 .as_ref()
@@ -289,10 +284,7 @@ fn draw_repos_tab(f: &mut Frame, area: Rect, app: &App) {
 
             ListItem::new(Line::from(vec![
                 Span::raw(format!("{sec_icon} ")),
-                Span::styled(
-                    entry.repo.name.clone(),
-                    Style::default().fg(Color::White),
-                ),
+                Span::styled(entry.repo.name.clone(), Style::default().fg(Color::White)),
                 Span::raw("  "),
                 Span::styled(lang, Style::default().fg(Color::DarkGray)),
             ]))
@@ -383,15 +375,21 @@ fn draw_repos_tab(f: &mut Frame, area: Rect, app: &App) {
 
 fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
     if app.repos.is_empty() {
-        let msg = Paragraph::new("  Press 'l' to load repos, then switch to this tab.")
-            .block(Block::default().borders(Borders::ALL).title(" Security Overview "));
+        let msg = Paragraph::new("  Press 'l' to load repos, then switch to this tab.").block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Security Overview "),
+        );
         f.render_widget(msg, area);
         return;
     }
 
     let mut lines = vec![
         Line::from(Span::styled(
-            format!("  {:35} {:6} {:6} {:6} {:6} {:6}", "Repository", "Dep.A", "SecSc", "AI", "Push", "SecUp"),
+            format!(
+                "  {:35} {:6} {:6} {:6} {:6} {:6}",
+                "Repository", "Dep.A", "SecSc", "AI", "Push", "SecUp"
+            ),
             Style::default().fg(Color::Cyan).bold(),
         )),
         Line::from(""),
@@ -432,12 +430,20 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
     lines.push(Line::from(Span::styled(
         format!("  Summary: {secured} secured, {issues} need attention"),
         Style::default()
-            .fg(if issues > 0 { Color::Yellow } else { Color::Green })
+            .fg(if issues > 0 {
+                Color::Yellow
+            } else {
+                Color::Green
+            })
             .bold(),
     )));
 
     let widget = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title(" Security Overview "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Security Overview "),
+        )
         .wrap(Wrap { trim: false });
 
     f.render_widget(widget, area);
@@ -446,7 +452,10 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
 fn draw_help_tab(f: &mut Frame, area: Rect) {
     let help = vec![
         Line::from(""),
-        Line::from(Span::styled("  Keyboard Shortcuts", Style::default().fg(Color::Cyan).bold())),
+        Line::from(Span::styled(
+            "  Keyboard Shortcuts",
+            Style::default().fg(Color::Cyan).bold(),
+        )),
         Line::from(""),
         Line::from("  1       Switch to Repos tab"),
         Line::from("  2       Switch to Security tab"),
@@ -460,14 +469,16 @@ fn draw_help_tab(f: &mut Frame, area: Rect) {
         Line::from("  Esc     Clear filter"),
         Line::from("  q       Quit"),
         Line::from(""),
-        Line::from(Span::styled("  About", Style::default().fg(Color::Cyan).bold())),
+        Line::from(Span::styled(
+            "  About",
+            Style::default().fg(Color::Cyan).bold(),
+        )),
         Line::from(""),
         Line::from("  Ward — GitHub repository management for developers."),
         Line::from("  plan → apply → verify."),
     ];
 
-    let widget = Paragraph::new(help)
-        .block(Block::default().borders(Borders::ALL).title(" Help "));
+    let widget = Paragraph::new(help).block(Block::default().borders(Borders::ALL).title(" Help "));
 
     f.render_widget(widget, area);
 }
@@ -485,11 +496,13 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
         Span::raw("  │  "),
         Span::styled(&app.status_msg, Style::default().fg(Color::DarkGray)),
         Span::raw("  │  "),
-        Span::styled("q:quit  s:system  l:load  /:filter", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            "q:quit  s:system  l:load  /:filter",
+            Style::default().fg(Color::DarkGray),
+        ),
     ]);
 
-    let widget = Paragraph::new(status)
-        .block(Block::default().borders(Borders::TOP));
+    let widget = Paragraph::new(status).block(Block::default().borders(Borders::TOP));
 
     f.render_widget(widget, area);
 }

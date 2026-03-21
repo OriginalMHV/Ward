@@ -153,11 +153,10 @@ impl Client {
 }
 
 fn check_rate_limit(resp: &reqwest::Response) {
-    if let Some(remaining) = resp.headers().get("x-ratelimit-remaining") {
-        if let Ok(remaining) = remaining.to_str().unwrap_or("?").parse::<u32>() {
-            if remaining < 100 {
-                tracing::warn!("GitHub API rate limit low: {remaining} remaining");
-            }
-        }
+    if let Some(remaining) = resp.headers().get("x-ratelimit-remaining")
+        && let Ok(remaining) = remaining.to_str().unwrap_or("?").parse::<u32>()
+        && remaining < 100
+    {
+        tracing::warn!("GitHub API rate limit low: {remaining} remaining");
     }
 }
