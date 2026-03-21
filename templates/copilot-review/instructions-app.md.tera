@@ -30,17 +30,14 @@ When reviewing code in this repository, focus on the following areas:
 - Verify authentication and authorization on all endpoints
 - Flag overly permissive CORS or Spring Security configurations
 - Sensitive data must not be logged (passwords, tokens, personal data)
-- KeyVault secrets must be referenced via Spring property placeholders (`${SECRET-NAME}`), never hardcoded
-- Masterpassword-encrypted values should not exist in new code — use Azure KeyVault instead
 
 ## Spring Boot
 - Constructor injection only — no field injection with `@Autowired`
 - Verify proper transaction boundaries (`@Transactional` scope and propagation)
 - `@ConfigurationProperties` should use `@Validated` with constraint annotations
-- No environment-specific values in base `application.yaml` — use profile-specific files (`-atest`, `-prod`, `-default`)
+- No environment-specific values in base `application.yaml` — use profile-specific files
 - Actuator: `/actuator/info` for probes (not `/health` — avoids cascading failures), don't expose sensitive endpoints in production
 - Spring Security: use lambda DSL (`.authorizeHttpRequests(auth -> ...)`) not deprecated `.and()` chaining
-- `@EnableMethodSecurity` replaces `@EnableGlobalMethodSecurity`
 - `.requestMatchers()` replaces `.antMatchers()`
 
 ## Dependencies & Build
@@ -59,5 +56,5 @@ When reviewing code in this repository, focus on the following areas:
 - Integration tests: `@SpringBootTest` or `@WebMvcTest` — prefer over extensive mocking
 
 ## CI/CD
-- Workflow files: use GAP proxy actions (`exampleorg/gap/actions/*`), not upstream actions directly
-- Branch image tags: `latest_{branch-name}` (slashes become hyphens)
+- Verify workflow actions are pinned to specific versions
+- Branch image tags should follow a consistent naming convention

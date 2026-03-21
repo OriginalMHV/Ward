@@ -523,7 +523,7 @@ async fn commit_and_pr(params: &CommitPrParams<'_>) -> Result<String> {
         "## Ward — automated template commit\n\n\
          Template: `{template}`\n\
          File: `{target_path}`\n\n\
-         This PR was created by [ward](https://github.com/michaelvalen/ward).\n\n\
+         This PR was created by [ward](https://github.com/OriginalMHV/ward).\n\n\
          ---\n\
          *Review the file contents, then merge.*"
     );

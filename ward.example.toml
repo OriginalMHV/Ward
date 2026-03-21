@@ -1,5 +1,5 @@
 [org]
-name = "ExampleOrg"
+name = "my-github-org"
 
 [security]
 secret_scanning = true
@@ -10,45 +10,25 @@ dependabot_security_updates = true
 
 [templates]
 branch = "chore/ward-setup"
-reviewers = ["RoarAudunMyrset", "norabakke", "steinham", "SteffenMag", "annabelleraaberg"]
+reviewers = ["alice", "bob"]
 commit_message_prefix = "chore: "
 
 [templates.registries.gradle-artifactory]
 type = "maven-repository"
-url = "https://example.jfrog.io/artifactory/maven"
-jfrog_oidc_provider = "jman-provider-128604831"
+url = "https://your-artifactory.example.com/artifactory/maven"
+# jfrog_oidc_provider = "your-oidc-provider-id"
 
 [[systems]]
-id = "sys-auth"
-name = "ERA"
-exclude = ["system", "operations?", "workflows"]
+id = "backend"
+name = "Backend Services"
+exclude = ["operations?", "workflows", "system"]
 
 [[systems]]
-id = "sys-billing"
-name = "CAAM"
-exclude = ["system", "operations?", "workflows"]
+id = "frontend"
+name = "Frontend Apps"
+exclude = ["operations?", "workflows"]
 
 [[systems]]
-id = "sys-core"
-name = "Party Management"
-exclude = ["system", "operations?", "workflows"]
-
-[[systems]]
-id = "sys-registry"
-name = "Party Registry"
-exclude = ["system", "operations?", "workflows"]
-
-[[systems]]
-id = "sys-log"
-name = "ECL"
-exclude = ["system", "operations?", "workflows"]
-
-[[systems]]
-id = "sys-test"
-name = "TestGenLab"
-exclude = ["system", "operations?", "workflows"]
-
-[[systems]]
-id = "s02361"
-name = "CDC"
-exclude = ["system", "operations?", "workflows"]
+id = "platform"
+name = "Platform & Infra"
+exclude = ["operations?", "workflows"]

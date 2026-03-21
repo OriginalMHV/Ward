@@ -1,9 +1,12 @@
 # Ward
 
 ```
-                            ╦ ╦╔═╗╦═╗╔╦╗
-                            ║║║╠═╣╠╦╝ ║║
-                            ╚╩╝╩ ╩╩╚══╩╝
+              __     __     ______     ______     _____
+             /\ \  _ \ \   /\  __ \   /\  == \   /\  __-.
+             \ \ \/ ".\ \  \ \  __ \  \ \  __<   \ \ \/\ \
+              \ \__/".~\_\  \ \_\ \_\  \ \_\ \_\  \ \____-
+               \/_/   \/_/   \/_/\/_/   \/_/ /_/   \/____/
+
               github repository management for developers
 ```
 
@@ -52,7 +55,7 @@ cargo install --path .
 **Build from repo:**
 
 ```bash
-git clone https://github.com/michaelvalen/ward.git
+git clone https://github.com/OriginalMHV/ward.git
 cd ward
 cargo build --release
 # Binary at ./target/release/ward
@@ -97,16 +100,16 @@ ward init
 vim ward.toml
 
 # 3. See what's out there
-ward repos list --system sys-core
+ward repos list --system backend
 
 # 4. Plan security changes (dry-run, safe)
-ward security plan --system sys-core
+ward security plan --system backend
 
 # 5. Apply when ready
-ward security apply --system sys-core
+ward security apply --system backend
 
 # 6. Verify it stuck
-ward security audit --system sys-core
+ward security audit --system backend
 
 # 7. Explore interactively
 ward tui
@@ -180,7 +183,7 @@ The token needs these scopes: `repo`, `read:org`, `workflow`.
 
 ```bash
 # List all repos for a system
-ward repos list --system sys-core
+ward repos list --system backend
 
 # List all repos in the org
 ward repos list --org my-org
@@ -192,7 +195,7 @@ ward repos inspect my-repo-name
 **Example output:**
 
 ```
-  12 repositories in my-org (system: sys-core)
+  12 repositories in my-org (system: backend)
 
   Repository                              Language        Visibility   Branch
   my-service-api                           Kotlin          private      main
@@ -206,22 +209,22 @@ The core workflow: **plan → apply → verify**.
 
 ```bash
 # Plan: see what would change (safe, read-only)
-ward security plan --system sys-core
+ward security plan --system backend
 
 # Apply: make the changes, then auto-verify
-ward security apply --system sys-core
+ward security apply --system backend
 
 # Apply to a single repo
 ward security apply --repo my-service-api
 
 # Apply without confirmation prompt
-ward security apply --system sys-core --yes
+ward security apply --system backend --yes
 
 # Skip post-apply verification
-ward security apply --system sys-core --yes --skip-verify
+ward security apply --system backend --yes --skip-verify
 
 # Audit: check current state across all repos
-ward security audit --system sys-core
+ward security audit --system backend
 ```
 
 **Features managed:**
@@ -237,7 +240,7 @@ ward security audit --system sys-core
 **Example plan output:**
 
 ```
-  Security Plan — sys-core
+  Security Plan — backend
   ────────────────────────────────────────────────────────────
   ⚡ my-service-api
      secret_scanning: off → on
@@ -256,10 +259,10 @@ Deploy configuration files (Dependabot, CodeQL, dependency-submission workflows)
 
 ```bash
 # Plan: preview what files would be committed
-ward commit plan --template dependabot --system sys-core
+ward commit plan --template dependabot --system backend
 
 # Apply: commit files and create PRs
-ward commit apply --template codeql --system sys-core
+ward commit apply --template codeql --system backend
 
 # Single repo
 ward commit apply --template dependency-submission --repo my-service-api
@@ -304,17 +307,17 @@ Declarative management of repository rulesets and configuration files.
 
 ```bash
 # Plan: see what rulesets/settings would change
-ward settings plan --ruleset copilot-review --system sys-core
+ward settings plan --ruleset copilot-review --system backend
 
 # Apply copilot code review ruleset to all repos
-ward settings apply --ruleset copilot-review --system sys-core
+ward settings apply --ruleset copilot-review --system backend
 
 # Deploy copilot review instructions (auto-detects app vs ops repos)
-ward settings plan --copilot-instructions --system sys-core
-ward settings apply --copilot-instructions --system sys-core
+ward settings plan --copilot-instructions --system backend
+ward settings apply --copilot-instructions --system backend
 
 # Audit current ruleset state
-ward settings audit --system sys-core
+ward settings audit --system backend
 ```
 
 **Rulesets:**
@@ -334,10 +337,10 @@ Ward auto-detects whether a repository is an application or operations repo (bas
 
 ```bash
 # Full audit with table output
-ward audit --system sys-core
+ward audit --system backend
 
 # JSON output for dashboards
-ward audit --system sys-core --format json
+ward audit --system backend --format json
 
 # All systems
 ward audit
@@ -360,7 +363,7 @@ Generates a comprehensive compliance report including:
   "repositories": [
     {
       "name": "my-service-api",
-      "system_id": "sys-core",
+      "system_id": "backend",
       "project_type": "gradle",
       "is_ops_repo": false,
       "versions": {
@@ -471,8 +474,8 @@ All via the GitHub API. No filesystem, no temp directories, no partial states. T
 Every mutation is logged to `~/.ward/audit.log` as JSON lines:
 
 ```json
-{"timestamp":"2026-03-21T15:30:00Z","repo":"sys-core-party-search","action":"enable_secret_scanning","status":"success","before":false,"after":true}
-{"timestamp":"2026-03-21T15:30:01Z","repo":"sys-core-party-search","action":"set_push_protection","status":"success","before":false,"after":true}
+{"timestamp":"2026-03-21T15:30:00Z","repo":"backend-user-service","action":"enable_secret_scanning","status":"success","before":false,"after":true}
+{"timestamp":"2026-03-21T15:30:01Z","repo":"backend-user-service","action":"set_push_protection","status":"success","before":false,"after":true}
 ```
 
 Query with `jq`:
@@ -635,10 +638,10 @@ updates:
 
 ```bash
 # Preview
-ward commit plan --template dependabot --system sys-core
+ward commit plan --template dependabot --system backend
 
 # Apply
-ward commit apply --template dependabot --system sys-core
+ward commit apply --template dependabot --system backend
 ```
 
 ### Enable all security features for a single repo
@@ -651,38 +654,38 @@ ward security apply --repo my-critical-service --yes
 
 ```bash
 # 1. Enable API-level security features
-ward security apply --system sys-core --yes
+ward security apply --system backend --yes
 
 # 2. Deploy Dependabot config
-ward commit apply --template dependabot --system sys-core --yes
+ward commit apply --template dependabot --system backend --yes
 
 # 3. Deploy CodeQL workflow
-ward commit apply --template codeql --system sys-core --yes
+ward commit apply --template codeql --system backend --yes
 
 # 4. Deploy dependency submission
-ward commit apply --template dependency-submission --system sys-core --yes
+ward commit apply --template dependency-submission --system backend --yes
 
 # 5. Set up Copilot code review rulesets
-ward settings apply --ruleset copilot-review --system sys-core
+ward settings apply --ruleset copilot-review --system backend
 
 # 6. Deploy Copilot review instructions
-ward settings apply --copilot-instructions --system sys-core
+ward settings apply --copilot-instructions --system backend
 
 # 7. Audit the result
-ward security audit --system sys-core
+ward security audit --system backend
 ```
 
 ### Generate JSON dashboard data
 
 ```bash
-ward audit --system sys-core --format json > dashboard-data.json
+ward audit --system backend --format json > dashboard-data.json
 ```
 
 ### CI/CD integration
 
 ```bash
 # In a GitHub Action or scheduled job
-ward security plan --system sys-core --json | jq '.[] | select(.changes | length > 0)'
+ward security plan --system backend --json | jq '.[] | select(.changes | length > 0)'
 ```
 
 ### Interactive exploration
@@ -710,7 +713,7 @@ If you're hitting GitHub API rate limits:
 
 ```bash
 # Reduce parallelism
-ward security plan --system sys-core --parallelism 2
+ward security plan --system backend --parallelism 2
 
 # Check remaining rate limit
 gh api /rate_limit | jq .rate
@@ -720,7 +723,7 @@ gh api /rate_limit | jq .rate
 
 ```bash
 # Increase verbosity to see template context
-ward commit plan --template codeql --system sys-core -vvv
+ward commit plan --template codeql --system backend -vvv
 ```
 
 ### Version detection fallback

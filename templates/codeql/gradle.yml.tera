@@ -19,7 +19,6 @@ jobs:
     name: Analyze Java/Kotlin
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
       security-events: write
       actions: read
       contents: read
@@ -34,7 +33,7 @@ jobs:
             build-mode: none
     steps:
       - name: Checkout repository
-        uses: exampleorg/gap/actions/checkout@v4
+        uses: actions/checkout@v4
 
       - if: matrix.language == 'java-kotlin'
         name: Set up JDK
@@ -45,32 +44,22 @@ jobs:
 
       - if: matrix.language == 'java-kotlin'
         name: Set up Gradle
-        uses: exampleorg/gap/gradle/actions/setup-gradle@v5
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: wrapper
           cache-read-only: true
 
-      - if: matrix.language == 'java-kotlin'
-        name: Set up JFrog
-        id: jfrogsetup
-        uses: exampleorg/sys-ci-jman/setup-jfrog-cli@v0.7.3
-
       - name: Init CodeQL
-        uses: exampleorg/gap/github/codeql-action/init@v4
+        uses: github/codeql-action/init@v3
         with:
           languages: ${{ "{{" }} matrix.language {{ "}}" }}
           build-mode: ${{ "{{" }} matrix.build-mode {{ "}}" }}
 
       - if: matrix.language == 'java-kotlin'
         name: Gradle Build
-        env:
-          JFROG_USERNAME: '${{ "{{" }} steps.jfrogsetup.outputs.oidc-user {{ "}}" }}'
-          JFROG_PASSWORD: '${{ "{{" }} steps.jfrogsetup.outputs.oidc-token {{ "}}" }}'
-        run: |
-          jf rt ping
-          ./gradlew build -x test --rerun-tasks
+        run: ./gradlew build -x test --rerun-tasks
 
       - name: Perform CodeQL Analysis
-        uses: exampleorg/gap/github/codeql-action/analyze@v4
+        uses: github/codeql-action/analyze@v3
         with:
           category: "/language:${{ "{{" }}matrix.language{{ "}}" }}"

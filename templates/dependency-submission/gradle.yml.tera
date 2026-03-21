@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: write
-  id-token: write
 
 env:
   JAVA_VERSION: {{ java_version | default(value="21") }}
@@ -20,20 +19,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: exampleorg/gap/actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Set up JDK
-        uses: exampleorg/gap/actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: ${{ "{{" }} env.JAVA_VERSION {{ "}}" }}
 
-      - name: Set up JFrog
-        id: jfrogsetup
-        uses: exampleorg/sys-ci-jman/setup-jfrog-cli@v0.7.3
-
       - name: Submit dependency graph
-        uses: exampleorg/gap/gradle/actions/dependency-submission@v5
-        env:
-          JFROG_USERNAME: '${{ "{{" }} steps.jfrogsetup.outputs.oidc-user {{ "}}" }}'
-          JFROG_PASSWORD: '${{ "{{" }} steps.jfrogsetup.outputs.oidc-token {{ "}}" }}'
+        uses: gradle/actions/dependency-submission@v4
