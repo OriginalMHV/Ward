@@ -139,7 +139,10 @@ mod tests {
 
     #[test]
     fn test_node_version_no_engines() {
-        assert_eq!(extract_node_version(r#"{"name": "app", "version": "1.0"}"#), None);
+        assert_eq!(
+            extract_node_version(r#"{"name": "app", "version": "1.0"}"#),
+            None
+        );
     }
 
     #[test]

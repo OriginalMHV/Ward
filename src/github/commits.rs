@@ -71,7 +71,7 @@ pub struct CommitFile {
 
 impl Client {
     /// Create an atomic multi-file commit using the Git Trees API.
-    /// This avoids cloning the repo — everything happens via the API.
+    /// This avoids cloning the repo - everything happens via the API.
     pub async fn create_commit(
         &self,
         repo: &str,

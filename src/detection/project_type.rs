@@ -47,22 +47,34 @@ mod tests {
 
     #[test]
     fn detect_gradle_kts() {
-        assert_eq!(ProjectType::from_files(&files(&["build.gradle.kts", "settings.gradle.kts"])), ProjectType::Gradle);
+        assert_eq!(
+            ProjectType::from_files(&files(&["build.gradle.kts", "settings.gradle.kts"])),
+            ProjectType::Gradle
+        );
     }
 
     #[test]
     fn detect_gradle_groovy() {
-        assert_eq!(ProjectType::from_files(&files(&["build.gradle"])), ProjectType::Gradle);
+        assert_eq!(
+            ProjectType::from_files(&files(&["build.gradle"])),
+            ProjectType::Gradle
+        );
     }
 
     #[test]
     fn detect_npm() {
-        assert_eq!(ProjectType::from_files(&files(&["package.json", "package-lock.json"])), ProjectType::Npm);
+        assert_eq!(
+            ProjectType::from_files(&files(&["package.json", "package-lock.json"])),
+            ProjectType::Npm
+        );
     }
 
     #[test]
     fn detect_cargo() {
-        assert_eq!(ProjectType::from_files(&files(&["Cargo.toml", "Cargo.lock"])), ProjectType::Cargo);
+        assert_eq!(
+            ProjectType::from_files(&files(&["Cargo.toml", "Cargo.lock"])),
+            ProjectType::Cargo
+        );
     }
 
     #[test]
@@ -72,12 +84,18 @@ mod tests {
 
     #[test]
     fn detect_unknown_for_unrecognized() {
-        assert_eq!(ProjectType::from_files(&files(&["Makefile", "go.mod"])), ProjectType::Unknown);
+        assert_eq!(
+            ProjectType::from_files(&files(&["Makefile", "go.mod"])),
+            ProjectType::Unknown
+        );
     }
 
     #[test]
     fn gradle_takes_priority_over_npm() {
-        assert_eq!(ProjectType::from_files(&files(&["build.gradle.kts", "package.json"])), ProjectType::Gradle);
+        assert_eq!(
+            ProjectType::from_files(&files(&["build.gradle.kts", "package.json"])),
+            ProjectType::Gradle
+        );
     }
 
     #[test]

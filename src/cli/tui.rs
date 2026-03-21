@@ -89,7 +89,7 @@ pub async fn run(client: &Client, manifest: &Manifest) -> Result<()> {
         .collect();
 
     if systems.is_empty() {
-        anyhow::bail!("No systems defined in ward.toml — add [[systems]] entries first");
+        anyhow::bail!("No systems defined in ward.toml - add [[systems]] entries first");
     }
 
     enable_raw_mode()?;
@@ -161,7 +161,7 @@ async fn run_loop(
                     if !app.systems.is_empty() {
                         app.selected_system = (app.selected_system + 1) % app.systems.len();
                         app.status_msg = format!(
-                            "System: {} — press 'l' to load",
+                            "System: {} - press 'l' to load",
                             app.systems[app.selected_system].1
                         );
                     }
@@ -249,7 +249,7 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
         .block(
             Block::default()
                 .borders(Borders::BOTTOM)
-                .title(" Ward — GitHub Repository Management "),
+                .title(" Ward: GitHub Repository Management "),
         )
         .select(selected)
         .style(Style::default().fg(Color::Gray))
@@ -474,7 +474,7 @@ fn draw_help_tab(f: &mut Frame, area: Rect) {
             Style::default().fg(Color::Cyan).bold(),
         )),
         Line::from(""),
-        Line::from("  Ward — GitHub repository management for developers."),
+        Line::from("  Ward - GitHub repository management for developers."),
         Line::from("  plan → apply → verify."),
     ];
 

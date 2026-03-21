@@ -20,7 +20,7 @@ pub fn resolve_token() -> Result<String> {
     let output = std::process::Command::new("gh")
         .args(["auth", "token"])
         .output()
-        .context("Failed to run 'gh auth token' — is the GitHub CLI installed?")?;
+        .context("Failed to run 'gh auth token' - is the GitHub CLI installed?")?;
 
     if !output.status.success() {
         anyhow::bail!(
@@ -35,7 +35,7 @@ pub fn resolve_token() -> Result<String> {
         .to_owned();
 
     if token.is_empty() {
-        anyhow::bail!("gh auth token returned empty — run 'gh auth login' first");
+        anyhow::bail!("gh auth token returned empty - run 'gh auth login' first");
     }
 
     tracing::debug!("Using token from gh auth token");

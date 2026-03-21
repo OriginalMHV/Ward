@@ -4,7 +4,7 @@ use console::style;
 use dialoguer::Confirm;
 
 use crate::config::Manifest;
-use crate::config::templates::load_templates;
+use crate::config::templates::load_templates_with_custom_dir;
 use crate::engine::audit_log::AuditLog;
 use crate::github::Client;
 use crate::github::commits::CommitFile;
@@ -149,7 +149,7 @@ async fn plan(
 
     println!();
     println!(
-        "  {} Settings plan — scanning {} repos...",
+        "  {} Settings plan: scanning {} repos...",
         style("🔍").bold(),
         repos.len()
     );
@@ -257,7 +257,7 @@ async fn apply(
             });
         }
         println!(
-            "  {} {} — {}",
+            "  {} {} - {}",
             style("⚡").yellow(),
             state.repo,
             actions.join(", ")
@@ -277,7 +277,13 @@ async fn apply(
     }
 
     let audit_log = AuditLog::new()?;
-    let tera = load_templates()?;
+    let tera = load_templates_with_custom_dir(
+        manifest
+            .templates
+            .custom_dir
+            .as_ref()
+            .map(std::path::Path::new),
+    )?;
     let mut succeeded = 0usize;
     let mut failed: Vec<(String, String)> = Vec::new();
 
@@ -414,7 +420,7 @@ async fn deploy_instructions(
         .create_pull_request(
             repo,
             &format!("{commit_prefix}add Copilot review instructions"),
-            "## Ward — Copilot review instructions\n\n\
+            "## Ward: Copilot review instructions\n\n\
              Deploys `.github/copilot-instructions.md` for automatic Copilot code review.\n\n\
              ---\n\
              *Review the instructions, then merge.*",
@@ -477,7 +483,7 @@ async fn audit(
 
     println!();
     println!(
-        "  {} Settings audit — {} repos",
+        "  {} Settings audit: {} repos",
         style("🔍").bold(),
         repos.len()
     );

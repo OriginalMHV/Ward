@@ -4,7 +4,7 @@ use console::style;
 use dialoguer::Confirm;
 
 use crate::config::Manifest;
-use crate::config::templates::load_templates;
+use crate::config::templates::load_templates_with_custom_dir;
 use crate::detection::project_type::ProjectType;
 use crate::detection::versions;
 use crate::engine::audit_log::AuditLog;
@@ -123,7 +123,13 @@ async fn detect_and_render(
         _ => {}
     }
 
-    let tera = load_templates()?;
+    let tera = load_templates_with_custom_dir(
+        manifest
+            .templates
+            .custom_dir
+            .as_ref()
+            .map(std::path::Path::new),
+    )?;
     let rendered = tera
         .render(tera_template_name, &tera_context)
         .with_context(|| format!("Failed to render template {tera_template_name}"))?;
@@ -520,7 +526,7 @@ async fn commit_and_pr(params: &CommitPrParams<'_>) -> Result<String> {
     // Create PR
     let pr_title = format!("{commit_prefix}add {template} configuration");
     let pr_body = format!(
-        "## Ward — automated template commit\n\n\
+        "## Ward: automated template commit\n\n\
          Template: `{template}`\n\
          File: `{target_path}`\n\n\
          This PR was created by [ward](https://github.com/OriginalMHV/ward).\n\n\

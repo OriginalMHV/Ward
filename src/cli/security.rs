@@ -258,7 +258,7 @@ fn print_plan_table(plans: &[planner::RepoPlan], system_id: &str) {
     println!();
     println!(
         "  {}",
-        style(format!("Security Plan — {system_id}")).bold().cyan()
+        style(format!("Security Plan: {system_id}")).bold().cyan()
     );
     println!("  {}", style("─".repeat(60)).dim());
 

@@ -1,1 +1,1 @@
-// Output formatting utilities — table rendering helpers
+// Output formatting utilities - table rendering helpers
