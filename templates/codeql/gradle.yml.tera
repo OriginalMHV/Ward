@@ -1,0 +1,76 @@
+{# Ward template: .github/workflows/codeql.yml for Gradle projects #}
+name: CodeQL
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - "**"
+  schedule:
+    - cron: '00 0 * * 0'
+
+env:
+  JAVA_VERSION: {{ java_version | default(value="21") }}
+
+jobs:
+  analyze:
+    name: Analyze Java/Kotlin
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      security-events: write
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: java-kotlin
+            build-mode: manual
+          - language: actions
+            build-mode: none
+    steps:
+      - name: Checkout repository
+        uses: telenornorgeinternal/gap/actions/checkout@v4
+
+      - if: matrix.language == 'java-kotlin'
+        name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ "{{" }} env.JAVA_VERSION {{ "}}" }}
+
+      - if: matrix.language == 'java-kotlin'
+        name: Set up Gradle
+        uses: telenornorgeinternal/gap/gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: wrapper
+          cache-read-only: true
+
+      - if: matrix.language == 'java-kotlin'
+        name: Set up JFrog
+        id: jfrogsetup
+        uses: telenornorgeinternal/s07496-jman/setup-jfrog-cli@v0.7.3
+
+      - name: Init CodeQL
+        uses: telenornorgeinternal/gap/github/codeql-action/init@v4
+        with:
+          languages: ${{ "{{" }} matrix.language {{ "}}" }}
+          build-mode: ${{ "{{" }} matrix.build-mode {{ "}}" }}
+
+      - if: matrix.language == 'java-kotlin'
+        name: Gradle Build
+        env:
+          JFROG_USERNAME: '${{ "{{" }} steps.jfrogsetup.outputs.oidc-user {{ "}}" }}'
+          JFROG_PASSWORD: '${{ "{{" }} steps.jfrogsetup.outputs.oidc-token {{ "}}" }}'
+        run: |
+          jf rt ping
+          ./gradlew build -x test --rerun-tasks
+
+      - name: Perform CodeQL Analysis
+        uses: telenornorgeinternal/gap/github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ "{{" }}matrix.language{{ "}}" }}"
