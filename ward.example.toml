@@ -35,6 +35,8 @@ allow_deletions = false
 id = "backend"
 name = "Backend Services"
 exclude = ["operations?", "workflows", "system"]
+# Explicit repos (in addition to prefix-matched ones)
+# repos = ["standalone-service", "shared-library"]
 
 [[systems]]
 id = "frontend"

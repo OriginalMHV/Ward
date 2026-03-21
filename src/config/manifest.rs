@@ -122,6 +122,9 @@ pub struct SystemConfig {
     pub exclude: Vec<String>,
 
     #[serde(default)]
+    pub repos: Vec<String>,
+
+    #[serde(default)]
     pub security: Option<SecurityConfig>,
 }
 
@@ -158,6 +161,14 @@ impl Manifest {
             .iter()
             .find(|s| s.id == system_id)
             .map(|s| s.exclude.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn explicit_repos_for_system(&self, system_id: &str) -> Vec<String> {
+        self.systems
+            .iter()
+            .find(|s| s.id == system_id)
+            .map(|s| s.repos.clone())
             .unwrap_or_default()
     }
 }
@@ -303,6 +314,36 @@ mod tests {
         "#;
         let m: Manifest = toml::from_str(toml).unwrap();
         assert_eq!(m.exclude_patterns_for_system("be"), vec!["ops", "infra"]);
+    }
+
+    #[test]
+    fn system_with_explicit_repos() {
+        let toml = r#"
+            [org]
+            name = "org"
+            [[systems]]
+            id = "be"
+            name = "Backend"
+            repos = ["standalone-service", "legacy-api"]
+        "#;
+        let m: Manifest = toml::from_str(toml).unwrap();
+        assert_eq!(
+            m.explicit_repos_for_system("be"),
+            vec!["standalone-service", "legacy-api"]
+        );
+    }
+
+    #[test]
+    fn system_without_explicit_repos_returns_empty() {
+        let toml = r#"
+            [org]
+            name = "org"
+            [[systems]]
+            id = "be"
+            name = "Backend"
+        "#;
+        let m: Manifest = toml::from_str(toml).unwrap();
+        assert!(m.explicit_repos_for_system("be").is_empty());
     }
 
     #[test]

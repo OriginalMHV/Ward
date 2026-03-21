@@ -184,6 +184,7 @@ fn spawn_repo_load(
     let base_url = client.base_url.clone();
     let semaphore = client.semaphore.clone();
     let excludes = manifest.exclude_patterns_for_system(system_id);
+    let explicit = manifest.explicit_repos_for_system(system_id);
     let sys_id = system_id.to_owned();
 
     tokio::spawn(async move {
@@ -194,7 +195,10 @@ fn spawn_repo_load(
             base_url,
         };
 
-        match bg_client.list_repos_for_system(&sys_id, &excludes).await {
+        match bg_client
+            .list_repos_for_system(&sys_id, &excludes, &explicit)
+            .await
+        {
             Ok(repos) => {
                 let entries: Vec<RepoEntry> = repos
                     .into_iter()
@@ -1564,16 +1568,29 @@ fn draw_help_tab(f: &mut Frame, area: Rect) {
         Line::from(Span::styled(format!("  {}", "─".repeat(13)), dim)),
         Line::from(vec![
             Span::styled("  foo", key),
-            Span::raw("           Show repos matching \"foo\""),
+            Span::raw("             Show repos matching \"foo\""),
         ]),
         Line::from(vec![
             Span::styled("  !ops", key),
-            Span::raw("          Hide repos matching \"ops\""),
+            Span::raw("            Hide repos matching \"ops\""),
+        ]),
+        Line::from(vec![
+            Span::styled("  !ops !sys", key),
+            Span::raw("       Hide \"ops\" AND \"sys\" repos"),
         ]),
         Line::from(vec![
             Span::styled("  foo !ops", key),
-            Span::raw("      Show \"foo\", hide \"ops\""),
+            Span::raw("        Show \"foo\", hide \"ops\""),
         ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Stack ! terms like kanban labels to narrow your view.",
+            dim,
+        )),
+        Line::from(Span::styled(
+            "  E.g. !operation !workflow shows only app repos.",
+            dim,
+        )),
     ];
 
     let widget = Paragraph::new(help).block(Block::default().borders(Borders::ALL).title(" Help "));
