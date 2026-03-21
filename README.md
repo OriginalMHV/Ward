@@ -66,13 +66,15 @@ ward completions fish > ~/.config/fish/completions/ward.fish
 ## 🚀 Quick Start
 
 ```bash
-ward init                               # scaffold ward.toml
-vim ward.toml                           # set your org + systems
+ward init                               # interactive setup wizard
+vim ward.toml                           # review and adjust config
 ward repos list --system backend        # see what's out there
 ward security plan --system backend     # dry-run: what would change?
 ward security apply --system backend    # apply + auto-verify
 ward tui                                # interactive dashboard
 ```
+
+Use `ward init --non-interactive` to scaffold a minimal ward.toml without the wizard.
 
 ────────────────────────────────────────
 
