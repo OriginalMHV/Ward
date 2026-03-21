@@ -1,0 +1,40 @@
+{# Ward template: .github/copilot-instructions.md for operations/GitOps repositories #}
+When reviewing changes in this GitOps operations repository, focus on the following areas:
+
+## YAML & Helm
+- Validate YAML syntax and indentation (2-space indent, no tabs)
+- Check Helm `values.yaml` structure: all required fields present (image, resources, probes, service, ingress)
+- Verify `Chart.yaml`: `appVersion` and chart `version` are set correctly
+- Flag any hardcoded image tags that should use `latest` or semantic versions
+- Ensure Helm template values are properly quoted when needed
+- `app-chart-generic` dependency version should use wildcard (`1.x.x`) for auto-resolution
+- Verify `imagePullPolicy: Always` when using `latest` tags
+
+## Secrets & Security
+- No plaintext secrets, passwords, tokens, or credentials anywhere in the repo
+- Secrets must use SealedSecrets (Bitnami) or Azure KeyVault references
+- Flag any base64-encoded values that look like credentials but aren't SealedSecrets
+- No sensitive data in ConfigMaps — use Secrets or KeyVault instead
+- No wildcard RBAC permissions unless explicitly justified
+- Azure Workload Identity: verify `azure.workload.identity/use: "true"` label is present on pods that need KeyVault access
+- Service account must have the correct `azure.workload.identity/client-id` annotation
+
+## Configuration Consistency
+- Verify atest (`t-*`) and production (`p-*`) configs are structurally consistent
+- Flag settings present in atest but missing in production (or vice versa)
+- KeyVault endpoints must match environment: `t-{system-id}-{abbrev}` for atest, `p-{system-id}-{abbrev}` for prod
+- Spring profiles: `spring.profiles.active=atest` in test, `spring.profiles.active=prod` in production
+- No environment-specific values in base `application.yaml` — only in profile-specific files
+- Verify no duplicate property keys within the same YAML file
+
+## Resource & Probe Configuration
+- Resource requests and limits must be set for all containers
+- Production resource limits should be >= atest limits
+- Liveness and readiness probes must be configured — prefer `/actuator/info` (not `/health`)
+- `initialDelaySeconds` should be sufficient for Spring Boot startup (typically 60-90s)
+- Verify `JAVA_TOOL_OPTIONS` includes reasonable `-Xms` and `-Xmx` values that fit within memory limits
+
+## Deployment Safety
+- Pod disruption budgets should exist for production services (`minAvailable: "1"`)
+- Replica counts: production should have >= 2 replicas
+- `example.no/auto-rollout-for-tags: latest` annotation must NOT be changed

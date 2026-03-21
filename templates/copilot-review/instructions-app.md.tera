@@ -1,0 +1,63 @@
+{# Ward template: .github/copilot-instructions.md for application repositories #}
+When reviewing code in this repository, focus on the following areas:
+
+## Code Quality
+- Prefer immutability: `val` over `var` in Kotlin, `final` in Java
+- Flag commented-out code — it should be deleted, git remembers
+- Verify proper error handling: no swallowed exceptions, no empty catch blocks
+- Check for resource leaks (streams, connections, response bodies not closed)
+- Flag unnecessary abstractions or over-engineering — keep it simple
+- Prefer composition over inheritance
+
+## Kotlin Idioms
+- Use data classes for DTOs, sealed classes for restricted hierarchies, extension functions where they improve readability
+- Flag Java-style patterns: `getInstance()` singletons, unnecessary `!!`, `lateinit` where `lazy` fits better
+- Use scope functions (`let`, `apply`, `also`, `run`) appropriately — don't nest them
+- Prefer `when` expressions over `if-else` chains for multiple branches
+- Use `require()` / `check()` for precondition validation
+
+## Java Patterns
+- Use records for immutable data carriers
+- Use `var` for local variables when the type is obvious from context
+- Use `Optional` return types instead of nullable returns in public APIs
+- Lombok: verify `@Getter/@Setter` aren't on classes that should be records
+- `@ConfigurationProperties` classes need `spring-boot-configuration-processor` as `annotationProcessor`
+
+## Security
+- No secrets, credentials, API keys, or tokens in code — ever
+- Validate and sanitize all external input (request params, headers, body)
+- Check for SQL injection, XSS, and path traversal vulnerabilities
+- Verify authentication and authorization on all endpoints
+- Flag overly permissive CORS or Spring Security configurations
+- Sensitive data must not be logged (passwords, tokens, personal data)
+- KeyVault secrets must be referenced via Spring property placeholders (`${SECRET-NAME}`), never hardcoded
+- Masterpassword-encrypted values should not exist in new code — use Azure KeyVault instead
+
+## Spring Boot
+- Constructor injection only — no field injection with `@Autowired`
+- Verify proper transaction boundaries (`@Transactional` scope and propagation)
+- `@ConfigurationProperties` should use `@Validated` with constraint annotations
+- No environment-specific values in base `application.yaml` — use profile-specific files (`-atest`, `-prod`, `-default`)
+- Actuator: `/actuator/info` for probes (not `/health` — avoids cascading failures), don't expose sensitive endpoints in production
+- Spring Security: use lambda DSL (`.authorizeHttpRequests(auth -> ...)`) not deprecated `.and()` chaining
+- `@EnableMethodSecurity` replaces `@EnableGlobalMethodSecurity`
+- `.requestMatchers()` replaces `.antMatchers()`
+
+## Dependencies & Build
+- No snapshot dependencies on main branch
+- Verify dependency versions are consistent (no duplicate versions of the same lib)
+- Gradle: use `./gradlew`, never system Gradle or Maven
+- JIB base image should reference the correct JDK version (`eclipse-temurin:{version}-jre`)
+- `gradle.properties` should have `org.gradle.parallel=true` and `org.gradle.caching=true`
+
+## Testing
+- Tests verify behavior, not implementation details
+- Test names describe the scenario, not the method under test
+- No test logic or test utilities in production code (`src/main`)
+- Verify edge cases and error paths are tested, not just happy paths
+- Kotlin: use MockK, not Mockito
+- Integration tests: `@SpringBootTest` or `@WebMvcTest` — prefer over extensive mocking
+
+## CI/CD
+- Workflow files: use GAP proxy actions (`exampleorg/gap/actions/*`), not upstream actions directly
+- Branch image tags: `latest_{branch-name}` (slashes become hyphens)

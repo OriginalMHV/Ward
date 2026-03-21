@@ -3,6 +3,7 @@ pub mod commit;
 pub mod init;
 pub mod repos;
 pub mod security;
+pub mod settings;
 
 use clap::Parser;
 
@@ -53,6 +54,9 @@ pub enum Command {
 
     /// Manage security features (Dependabot, secret scanning, CodeQL)
     Security(security::SecurityCommand),
+
+    /// Manage repository settings and rulesets
+    Settings(settings::SettingsCommand),
 
     /// Commit files/templates to repositories
     Commit(commit::CommitCommand),
