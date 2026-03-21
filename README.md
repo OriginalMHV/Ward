@@ -22,7 +22,7 @@
 Ward is a Rust CLI that treats repository management like infrastructure-as-code.
 Declare your desired state in `ward.toml`, diff it against reality, apply the changes, and verify the result. No shell scripts, no cloning, no guessing.
 
-## ⚡ Features
+## Features
 
 - **Security management** - Dependabot, secret scanning, push protection across repos in one command
 - **Template commits** - deploy workflow configs via the Git Trees API (no cloning needed)
@@ -36,18 +36,27 @@ Declare your desired state in `ward.toml`, diff it against reality, apply the ch
 
 ────────────────────────────────────────
 
-## 📦 Install
+## Install
 
 ```bash
-# from source
-cargo install --path .
+# from crates.io (recommended)
+cargo install ward-cli
 
-# or build manually
-git clone https://github.com/OriginalMHV/ward.git
-cd ward && cargo build --release
+# homebrew (macOS / Linux)
+brew install OriginalMHV/tap/ward-cli
+
+# shell script (macOS / Linux)
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/OriginalMHV/Ward/releases/latest/download/ward-cli-installer.sh | sh
+
+# powershell (Windows)
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/OriginalMHV/Ward/releases/latest/download/ward-cli-installer.ps1 | iex"
+
+# from source
+git clone https://github.com/OriginalMHV/Ward.git
+cd Ward && cargo install --path .
 ```
 
-Requires Rust ≥ 1.70 and a GitHub token (`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`).
+Requires Rust >= 1.85 (source install only) and a GitHub token (`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`).
 Token scopes needed: `repo`, `read:org`, `workflow`.
 
 <details>
@@ -63,7 +72,7 @@ ward completions fish > ~/.config/fish/completions/ward.fish
 
 ────────────────────────────────────────
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 ward init                               # interactive setup wizard
@@ -78,7 +87,7 @@ Use `ward init --non-interactive` to scaffold a minimal ward.toml without the wi
 
 ────────────────────────────────────────
 
-## ⚙️ Configuration
+## Configuration
 
 ```toml
 [org]
@@ -113,7 +122,7 @@ Systems group repos by name prefix: `id = "backend"` matches `backend-*` repos. 
 
 ────────────────────────────────────────
 
-## 🛠 Commands
+## Commands
 
 Every mutating command follows **plan → apply → verify**.
 
