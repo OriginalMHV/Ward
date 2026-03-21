@@ -17,8 +17,12 @@ use ratatui::{
 };
 use tokio::sync::mpsc;
 
+use crate::config::manifest::BranchProtectionConfig;
+use crate::config::templates::load_templates_with_custom_dir;
 use crate::config::{Manifest, SecurityConfig};
+use crate::detection::project_type::ProjectType;
 use crate::github::Client;
+use crate::github::commits::CommitFile;
 use crate::github::repos::Repository;
 use crate::github::security::SecurityState;
 
@@ -35,11 +39,19 @@ enum BgMessage {
     ReposLoaded(Vec<RepoEntry>),
     SecurityLoaded(usize, SecurityState),
     SecurityApplied(String, std::result::Result<(), String>),
+    ProtectionApplied(String, std::result::Result<(), String>),
+    TemplateDeployed(String, String, std::result::Result<String, String>),
+    SettingsApplied(String, std::result::Result<String, String>),
     Error(String),
 }
 
 enum PendingAction {
     ApplySecurity(String),
+    ApplyProtection(String),
+    SelectTemplate(String),
+    DeployTemplate(String, String),
+    ApplySettings(String),
+    BulkApplySecurity,
 }
 
 struct App {
@@ -56,6 +68,7 @@ struct App {
     spinner_frame: usize,
     pending_confirm: Option<PendingAction>,
     cache: std::collections::HashMap<String, Vec<RepoEntry>>,
+    bulk_progress: Option<(usize, usize)>,
 }
 
 #[derive(Clone)]
@@ -82,6 +95,7 @@ impl App {
             spinner_frame: 0,
             pending_confirm: None,
             cache: std::collections::HashMap::new(),
+            bulk_progress: None,
         }
     }
 
@@ -275,6 +289,344 @@ fn spawn_security_apply(
     });
 }
 
+fn spawn_protection_apply(
+    tx: &mpsc::UnboundedSender<BgMessage>,
+    client: &Client,
+    repo: &str,
+    branch: &str,
+    config: &BranchProtectionConfig,
+) {
+    let tx = tx.clone();
+    let http = client.http.clone();
+    let org = client.org.clone();
+    let base_url = client.base_url.clone();
+    let semaphore = client.semaphore.clone();
+    let repo = repo.to_owned();
+    let branch = branch.to_owned();
+    let cfg = config.clone();
+
+    tokio::spawn(async move {
+        let bg_client = Client {
+            http,
+            org,
+            semaphore,
+            base_url,
+        };
+
+        let result = bg_client
+            .update_branch_protection(&repo, &branch, &cfg)
+            .await;
+
+        let msg = match result {
+            Ok(()) => BgMessage::ProtectionApplied(repo, Ok(())),
+            Err(e) => BgMessage::ProtectionApplied(repo, Err(e.to_string())),
+        };
+        let _ = tx.send(msg);
+    });
+}
+
+fn spawn_template_deploy(
+    tx: &mpsc::UnboundedSender<BgMessage>,
+    client: &Client,
+    manifest: &Manifest,
+    repo_name: &str,
+    default_branch: &str,
+    template_name: &str,
+) {
+    let tx = tx.clone();
+    let http = client.http.clone();
+    let org = client.org.clone();
+    let base_url = client.base_url.clone();
+    let semaphore = client.semaphore.clone();
+    let repo = repo_name.to_owned();
+    let default_br = default_branch.to_owned();
+    let template = template_name.to_owned();
+    let branch_name = manifest.templates.branch.clone();
+    let reviewers = manifest.templates.reviewers.clone();
+    let commit_prefix = manifest.templates.commit_message_prefix.clone();
+    let custom_dir = manifest.templates.custom_dir.clone();
+    let registries = manifest.templates.registries.clone();
+
+    tokio::spawn(async move {
+        let bg_client = Client {
+            http,
+            org,
+            semaphore,
+            base_url,
+        };
+
+        let result = async {
+            let (target_path, template_category) = match template.as_str() {
+                "dependabot" => (".github/dependabot.yml", "dependabot"),
+                "codeql" => (".github/workflows/codeql.yml", "codeql"),
+                "dependency-submission" => (
+                    ".github/workflows/dependency-submission.yml",
+                    "dependency-submission",
+                ),
+                _ => return Err(format!("Unknown template: {template}")),
+            };
+
+            // Detect project type
+            let project_type = detect_project_type_bg(&bg_client, &repo)
+                .await
+                .map_err(|e| format!("Detection failed: {e}"))?;
+
+            let tera_template_name = match (&project_type, template_category) {
+                (ProjectType::Gradle, "dependabot") => "dependabot/gradle.yml.tera",
+                (ProjectType::Npm, "dependabot") => "dependabot/npm.yml.tera",
+                (ProjectType::Gradle, "codeql") => "codeql/gradle.yml.tera",
+                (ProjectType::Npm, "codeql") => "codeql/npm.yml.tera",
+                (ProjectType::Gradle, "dependency-submission") => {
+                    "dependency-submission/gradle.yml.tera"
+                }
+                (pt, cat) => {
+                    return Err(format!("No template for {cat} + {pt} in {repo}"));
+                }
+            };
+
+            let mut ctx = tera::Context::new();
+            ctx.insert("default_branch", &default_br);
+
+            match project_type {
+                ProjectType::Gradle => {
+                    let java_ver = detect_java_version_bg(&bg_client, &repo)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    ctx.insert("java_version", &java_ver.to_string());
+                    if let Some(reg) = registries.get("gradle-artifactory") {
+                        ctx.insert("registry_url", &reg.url);
+                        if let Some(ref provider) = reg.jfrog_oidc_provider {
+                            ctx.insert("jfrog_oidc_provider", provider);
+                        }
+                    }
+                }
+                ProjectType::Npm => {
+                    let node_ver = detect_node_version_bg(&bg_client, &repo)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    ctx.insert("node_version", &node_ver);
+                }
+                _ => {}
+            }
+
+            let tera =
+                load_templates_with_custom_dir(custom_dir.as_deref().map(std::path::Path::new))
+                    .map_err(|e| format!("Template load error: {e}"))?;
+            let rendered = tera
+                .render(tera_template_name, &ctx)
+                .map_err(|e| format!("Render error: {e}"))?;
+
+            // Check if file already exists and matches
+            if let Ok(Some(existing)) = bg_client.get_file(&repo, target_path, None).await
+                && let Ok(decoded) = Client::decode_content(&existing)
+                && decoded.trim() == rendered.trim()
+            {
+                return Err(format!("{repo}: already up to date"));
+            }
+
+            bg_client
+                .create_branch(&repo, &branch_name, &default_br)
+                .await
+                .map_err(|e| format!("Branch error: {e}"))?;
+
+            let message = format!("{commit_prefix}add {template} configuration");
+            let files = vec![CommitFile {
+                path: target_path.to_owned(),
+                content: rendered,
+            }];
+            bg_client
+                .create_commit(&repo, &branch_name, &message, &files)
+                .await
+                .map_err(|e| format!("Commit error: {e}"))?;
+
+            let pr_title = format!("{commit_prefix}add {template} configuration");
+            let pr_body = format!(
+                "## Ward: automated template commit\n\n\
+                 Template: `{template}`\nFile: `{target_path}`\n\n\
+                 This PR was created by [ward](https://github.com/OriginalMHV/ward).\n\n\
+                 ---\n*Review the file contents, then merge.*"
+            );
+            let pr = bg_client
+                .create_pull_request(
+                    &repo,
+                    &pr_title,
+                    &pr_body,
+                    &branch_name,
+                    &default_br,
+                    &reviewers,
+                )
+                .await
+                .map_err(|e| format!("PR error: {e}"))?;
+
+            Ok(pr.html_url)
+        }
+        .await;
+
+        let _ = tx.send(BgMessage::TemplateDeployed(repo, template, result));
+    });
+}
+
+fn spawn_settings_apply(
+    tx: &mpsc::UnboundedSender<BgMessage>,
+    client: &Client,
+    manifest: &Manifest,
+    repo_name: &str,
+    default_branch: &str,
+) {
+    let tx = tx.clone();
+    let http = client.http.clone();
+    let org = client.org.clone();
+    let base_url = client.base_url.clone();
+    let semaphore = client.semaphore.clone();
+    let repo = repo_name.to_owned();
+    let default_br = default_branch.to_owned();
+    let branch_name = manifest.templates.branch.clone();
+    let reviewers = manifest.templates.reviewers.clone();
+    let commit_prefix = manifest.templates.commit_message_prefix.clone();
+    let custom_dir = manifest.templates.custom_dir.clone();
+    let is_ops = repo.ends_with("-operation")
+        || repo.ends_with("-operations")
+        || repo.ends_with("-ops")
+        || repo.ends_with("-gitops");
+
+    tokio::spawn(async move {
+        let bg_client = Client {
+            http,
+            org,
+            semaphore,
+            base_url,
+        };
+
+        let result = async {
+            let mut actions: Vec<String> = Vec::new();
+
+            // Check and create copilot review ruleset
+            let rulesets = bg_client
+                .list_rulesets(&repo)
+                .await
+                .map_err(|e| format!("List rulesets: {e}"))?;
+            let has_copilot_review = rulesets.iter().any(|r| r.name == "Copilot Code Review");
+            if !has_copilot_review {
+                bg_client
+                    .create_copilot_review_ruleset(&repo)
+                    .await
+                    .map_err(|e| format!("Create ruleset: {e}"))?;
+                actions.push("ruleset created".to_owned());
+            }
+
+            // Check and deploy copilot instructions
+            let has_instructions = bg_client
+                .get_file(&repo, ".github/copilot-instructions.md", None)
+                .await
+                .map_err(|e| format!("Check instructions: {e}"))?
+                .is_some();
+
+            if !has_instructions {
+                let template_name = if is_ops {
+                    "copilot-review/instructions-ops.md.tera"
+                } else {
+                    "copilot-review/instructions-app.md.tera"
+                };
+
+                let tera =
+                    load_templates_with_custom_dir(custom_dir.as_deref().map(std::path::Path::new))
+                        .map_err(|e| format!("Template load: {e}"))?;
+                let rendered = tera
+                    .render(template_name, &tera::Context::new())
+                    .map_err(|e| format!("Render: {e}"))?;
+
+                bg_client
+                    .create_branch(&repo, &branch_name, &default_br)
+                    .await
+                    .map_err(|e| format!("Branch: {e}"))?;
+
+                let files = vec![CommitFile {
+                    path: ".github/copilot-instructions.md".to_owned(),
+                    content: rendered,
+                }];
+                bg_client
+                    .create_commit(
+                        &repo,
+                        &branch_name,
+                        &format!("{commit_prefix}add Copilot review instructions"),
+                        &files,
+                    )
+                    .await
+                    .map_err(|e| format!("Commit: {e}"))?;
+
+                let pr = bg_client
+                    .create_pull_request(
+                        &repo,
+                        &format!("{commit_prefix}add Copilot review instructions"),
+                        "## Ward: Copilot review instructions\n\n\
+                         Deploys `.github/copilot-instructions.md` for Copilot code review.\n\n\
+                         ---\n*Review the instructions, then merge.*",
+                        &branch_name,
+                        &default_br,
+                        &reviewers,
+                    )
+                    .await
+                    .map_err(|e| format!("PR: {e}"))?;
+                actions.push(format!("instructions PR: {}", pr.html_url));
+            }
+
+            if actions.is_empty() {
+                Ok("already up to date".to_owned())
+            } else {
+                Ok(actions.join("; "))
+            }
+        }
+        .await;
+
+        let _ = tx.send(BgMessage::SettingsApplied(repo, result));
+    });
+}
+
+async fn detect_project_type_bg(client: &Client, repo: &str) -> Result<ProjectType> {
+    if client
+        .get_file(repo, "build.gradle.kts", None)
+        .await?
+        .is_some()
+    {
+        return Ok(ProjectType::Gradle);
+    }
+    if client.get_file(repo, "build.gradle", None).await?.is_some() {
+        return Ok(ProjectType::Gradle);
+    }
+    if client.get_file(repo, "package.json", None).await?.is_some() {
+        return Ok(ProjectType::Npm);
+    }
+    if client.get_file(repo, "Cargo.toml", None).await?.is_some() {
+        return Ok(ProjectType::Cargo);
+    }
+    Ok(ProjectType::Unknown)
+}
+
+async fn detect_java_version_bg(client: &Client, repo: &str) -> Result<u8> {
+    for file in &["build.gradle.kts", "build.gradle"] {
+        if let Some(content) = client.get_file(repo, file, None).await? {
+            let text = Client::decode_content(&content)?;
+            if let Some(ver) = crate::detection::versions::extract_java_version(&text) {
+                return Ok(ver);
+            }
+        }
+    }
+    Ok(21)
+}
+
+async fn detect_node_version_bg(client: &Client, repo: &str) -> Result<String> {
+    if let Some(content) = client.get_file(repo, "package.json", None).await? {
+        let text = Client::decode_content(&content)?;
+        if let Some(ver) = crate::detection::versions::extract_node_version(&text) {
+            let major: String = ver.chars().filter(|c| c.is_ascii_digit()).collect();
+            if !major.is_empty() {
+                return Ok(major);
+            }
+        }
+    }
+    Ok("20".to_owned())
+}
+
 fn switch_to_cached_or_prompt(app: &mut App) {
     let (sys_id, sys_name) = &app.systems[app.selected_system];
     if let Some(cached) = app.cache.get(sys_id) {
@@ -334,12 +686,70 @@ async fn run_loop(
                     }
                 }
                 BgMessage::SecurityApplied(repo, result) => {
+                    let spinner = app.spinner_char();
                     match result {
                         Ok(()) => {
                             app.status_msg = format!("Applied security to {repo}");
+                            if let Some((ref mut done, total)) = app.bulk_progress {
+                                *done += 1;
+                                if *done >= total {
+                                    app.status_msg =
+                                        format!("Bulk security complete: {total}/{total}");
+                                    app.bulk_progress = None;
+                                    app.loading = false;
+                                } else {
+                                    app.status_msg =
+                                        format!("[{spinner}] Bulk security: {done}/{total}...");
+                                }
+                            } else {
+                                app.loading = false;
+                            }
                         }
                         Err(e) => {
                             app.status_msg = format!("Failed to apply to {repo}: {e}");
+                            if let Some((ref mut done, total)) = app.bulk_progress {
+                                *done += 1;
+                                if *done >= total {
+                                    app.status_msg =
+                                        format!("Bulk security done ({total}), last error: {e}");
+                                    app.bulk_progress = None;
+                                    app.loading = false;
+                                }
+                            } else {
+                                app.loading = false;
+                            }
+                        }
+                    }
+                }
+                BgMessage::ProtectionApplied(repo, result) => {
+                    match result {
+                        Ok(()) => {
+                            app.status_msg = format!("Applied branch protection to {repo}");
+                        }
+                        Err(e) => {
+                            app.status_msg = format!("Failed branch protection on {repo}: {e}");
+                        }
+                    }
+                    app.loading = false;
+                }
+                BgMessage::TemplateDeployed(repo, template, result) => {
+                    match result {
+                        Ok(pr_url) => {
+                            app.status_msg = format!("Deployed {template} to {repo}: {pr_url}");
+                        }
+                        Err(e) => {
+                            app.status_msg = format!("Template {template} failed on {repo}: {e}");
+                        }
+                    }
+                    app.loading = false;
+                }
+                BgMessage::SettingsApplied(repo, result) => {
+                    match result {
+                        Ok(detail) => {
+                            app.status_msg = format!("Settings applied to {repo}: {detail}");
+                        }
+                        Err(e) => {
+                            app.status_msg = format!("Settings failed on {repo}: {e}");
                         }
                     }
                     app.loading = false;
@@ -358,18 +768,119 @@ async fn run_loop(
                 continue;
             }
 
-            // Confirmation mode: only y/n accepted
+            // Confirmation mode: only y/n accepted (and template sub-menu keys)
             if app.pending_confirm.is_some() {
                 match key.code {
                     KeyCode::Char('y') => {
-                        if let Some(PendingAction::ApplySecurity(repo)) = app.pending_confirm.take()
+                        let action = app.pending_confirm.take();
+                        match action {
+                            Some(PendingAction::ApplySecurity(repo)) => {
+                                let sys_id = &app.systems[app.selected_system].0;
+                                let sec_config = manifest.security_for_system(sys_id).clone();
+                                app.loading = true;
+                                app.status_msg = format!(
+                                    "[{}] Applying security to {repo}...",
+                                    app.spinner_char()
+                                );
+                                spawn_security_apply(&tx, client, &repo, &sec_config);
+                            }
+                            Some(PendingAction::ApplyProtection(repo)) => {
+                                if let Some(entry) = app.repos.iter().find(|e| e.repo.name == repo)
+                                {
+                                    let branch = entry.repo.default_branch.clone();
+                                    let cfg = manifest.branch_protection.clone();
+                                    app.loading = true;
+                                    app.status_msg = format!(
+                                        "[{}] Applying protection to {repo}...",
+                                        app.spinner_char()
+                                    );
+                                    spawn_protection_apply(&tx, client, &repo, &branch, &cfg);
+                                }
+                            }
+                            Some(PendingAction::DeployTemplate(repo, template)) => {
+                                if let Some(entry) = app.repos.iter().find(|e| e.repo.name == repo)
+                                {
+                                    let default_br = entry.repo.default_branch.clone();
+                                    app.loading = true;
+                                    app.status_msg = format!(
+                                        "[{}] Deploying {template} to {repo}...",
+                                        app.spinner_char()
+                                    );
+                                    spawn_template_deploy(
+                                        &tx,
+                                        client,
+                                        manifest,
+                                        &repo,
+                                        &default_br,
+                                        &template,
+                                    );
+                                }
+                            }
+                            Some(PendingAction::ApplySettings(repo)) => {
+                                if let Some(entry) = app.repos.iter().find(|e| e.repo.name == repo)
+                                {
+                                    let default_br = entry.repo.default_branch.clone();
+                                    app.loading = true;
+                                    app.status_msg = format!(
+                                        "[{}] Applying settings to {repo}...",
+                                        app.spinner_char()
+                                    );
+                                    spawn_settings_apply(&tx, client, manifest, &repo, &default_br);
+                                }
+                            }
+                            Some(PendingAction::BulkApplySecurity) => {
+                                let filtered: Vec<String> = app
+                                    .filtered_repos()
+                                    .iter()
+                                    .map(|e| e.repo.name.clone())
+                                    .collect();
+                                let total = filtered.len();
+                                let sys_id = &app.systems[app.selected_system].0;
+                                let sec_config = manifest.security_for_system(sys_id).clone();
+                                app.loading = true;
+                                app.bulk_progress = Some((0, total));
+                                app.status_msg =
+                                    format!("[{}] Bulk security: 0/{total}...", app.spinner_char());
+                                for repo in &filtered {
+                                    spawn_security_apply(&tx, client, repo, &sec_config);
+                                }
+                            }
+                            Some(PendingAction::SelectTemplate(_)) | None => {}
+                        }
+                    }
+                    // Template sub-menu key handling
+                    KeyCode::Char('d') => {
+                        if let Some(PendingAction::SelectTemplate(repo)) =
+                            app.pending_confirm.take()
                         {
-                            let sys_id = &app.systems[app.selected_system].0;
-                            let sec_config = manifest.security_for_system(sys_id).clone();
-                            app.loading = true;
+                            app.pending_confirm = Some(PendingAction::DeployTemplate(
+                                repo.clone(),
+                                "dependabot".to_owned(),
+                            ));
+                            app.status_msg = format!("Deploy dependabot to {repo}? (y/n)");
+                        }
+                    }
+                    KeyCode::Char('c') => {
+                        if let Some(PendingAction::SelectTemplate(repo)) =
+                            app.pending_confirm.take()
+                        {
+                            app.pending_confirm = Some(PendingAction::DeployTemplate(
+                                repo.clone(),
+                                "codeql".to_owned(),
+                            ));
+                            app.status_msg = format!("Deploy codeql to {repo}? (y/n)");
+                        }
+                    }
+                    KeyCode::Char('s') => {
+                        if let Some(PendingAction::SelectTemplate(repo)) =
+                            app.pending_confirm.take()
+                        {
+                            app.pending_confirm = Some(PendingAction::DeployTemplate(
+                                repo.clone(),
+                                "dependency-submission".to_owned(),
+                            ));
                             app.status_msg =
-                                format!("[{}] Applying security to {repo}...", app.spinner_char());
-                            spawn_security_apply(&tx, client, &repo, &sec_config);
+                                format!("Deploy dependency-submission to {repo}? (y/n)");
                         }
                     }
                     KeyCode::Char('n') | KeyCode::Esc => {
@@ -417,6 +928,38 @@ async fn run_loop(
                         let repo = entry.repo.name.clone();
                         app.pending_confirm = Some(PendingAction::ApplySecurity(repo.clone()));
                         app.status_msg = format!("Apply security to {repo}? (y/n)");
+                    }
+                }
+                KeyCode::Char('p') => {
+                    if let Some(entry) = app.selected_repo() {
+                        let repo = entry.repo.name.clone();
+                        app.pending_confirm = Some(PendingAction::ApplyProtection(repo.clone()));
+                        app.status_msg = format!("Apply branch protection to {repo}? (y/n)");
+                    }
+                }
+                KeyCode::Char('t') => {
+                    if let Some(entry) = app.selected_repo() {
+                        let repo = entry.repo.name.clone();
+                        app.pending_confirm = Some(PendingAction::SelectTemplate(repo));
+                        app.status_msg =
+                            "Deploy template: (d)ependabot (c)odeql (s)ubmission".to_owned();
+                    }
+                }
+                KeyCode::Char('S') => {
+                    if let Some(entry) = app.selected_repo() {
+                        let repo = entry.repo.name.clone();
+                        app.pending_confirm = Some(PendingAction::ApplySettings(repo.clone()));
+                        app.status_msg = format!(
+                            "Apply settings (copilot ruleset + instructions) to {repo}? (y/n)"
+                        );
+                    }
+                }
+                KeyCode::Char('A') => {
+                    let count = app.filtered_repos().len();
+                    if count > 0 {
+                        app.pending_confirm = Some(PendingAction::BulkApplySecurity);
+                        app.status_msg =
+                            format!("Apply security to all {count} filtered repos? (y/n)");
                     }
                 }
                 KeyCode::Char('r') => {
@@ -607,6 +1150,47 @@ fn draw_repos_tab(f: &mut Frame, area: Rect, app: &App) {
                 Style::default().fg(Color::Cyan).bold(),
             )),
             Line::from(""),
+        ];
+
+        // Description (truncated to 2 lines)
+        if let Some(ref desc) = entry.repo.description
+            && !desc.is_empty()
+        {
+            let max_chars = 80;
+            if desc.len() > max_chars {
+                let first = &desc[..max_chars];
+                let rest = &desc[max_chars..];
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(first, Style::default().fg(Color::DarkGray)),
+                ]));
+                let trimmed = if rest.len() > max_chars {
+                    format!("{}...", &rest[..max_chars.min(rest.len())])
+                } else {
+                    rest.to_owned()
+                };
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(trimmed, Style::default().fg(Color::DarkGray)),
+                ]));
+            } else {
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(desc.clone(), Style::default().fg(Color::DarkGray)),
+                ]));
+            }
+            lines.push(Line::from(""));
+        }
+
+        if entry.repo.archived {
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled("[ARCHIVED]", Style::default().fg(Color::Red).bold()),
+            ]));
+            lines.push(Line::from(""));
+        }
+
+        lines.extend([
             Line::from(vec![
                 Span::raw("  Language:   "),
                 Span::styled(
@@ -627,7 +1211,7 @@ fn draw_repos_tab(f: &mut Frame, area: Rect, app: &App) {
                 "  Security",
                 Style::default().fg(Color::Cyan).bold(),
             )),
-        ];
+        ]);
 
         if let Some(s) = sec {
             let features = [
@@ -815,9 +1399,9 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_actions_tab(f: &mut Frame, area: Rect) {
-    let dim = Style::default().fg(Color::DarkGray);
     let key_style = Style::default().fg(Color::Yellow).bold();
     let heading = Style::default().fg(Color::Cyan).bold();
+    let dim = Style::default().fg(Color::DarkGray);
 
     let lines = vec![
         Line::from(""),
@@ -828,8 +1412,33 @@ fn draw_actions_tab(f: &mut Frame, area: Rect) {
         Line::from(""),
         Line::from(vec![
             Span::styled("  a", key_style),
-            Span::raw("    Apply security settings to selected repo"),
+            Span::raw("    Apply security settings"),
         ]),
+        Line::from(vec![
+            Span::styled("  p", key_style),
+            Span::raw("    Apply branch protection"),
+        ]),
+        Line::from(vec![
+            Span::styled("  t", key_style),
+            Span::raw("    Deploy template (sub-menu: dependabot/codeql/submission)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  S", key_style),
+            Span::raw("    Apply settings (copilot ruleset + instructions)"),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Bulk Actions (on all filtered repos)",
+            heading,
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  A", key_style),
+            Span::raw("    Apply security to all filtered repos"),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled("  Navigation", heading)),
+        Line::from(""),
         Line::from(vec![
             Span::styled("  r", key_style),
             Span::raw("    Refresh/reload current system"),
@@ -839,10 +1448,14 @@ fn draw_actions_tab(f: &mut Frame, area: Rect) {
             Span::raw("    Force reload (ignore cache)"),
         ]),
         Line::from(""),
-        Line::from(Span::styled("  Planned (not yet implemented):", dim)),
-        Line::from(Span::styled("  - Branch protection apply", dim)),
-        Line::from(Span::styled("  - Template deployment", dim)),
-        Line::from(Span::styled("  - Settings management", dim)),
+        Line::from(Span::styled(
+            "  Templates deploy a branch + commit + PR for the selected repo.",
+            dim,
+        )),
+        Line::from(Span::styled(
+            "  Settings creates a copilot review ruleset and instructions file.",
+            dim,
+        )),
     ];
 
     let widget =
@@ -863,12 +1476,12 @@ fn draw_help_tab(f: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("  Navigation", heading),
             Span::raw("                        "),
-            Span::styled("Actions", heading),
+            Span::styled("Repo Actions", heading),
         ]),
         Line::from(vec![
             Span::styled(format!("  {sep}"), dim),
             Span::raw("                        "),
-            Span::styled("─".repeat(7), dim),
+            Span::styled("─".repeat(12), dim),
         ]),
         Line::from(vec![
             Span::styled("  j/k", key),
@@ -879,18 +1492,20 @@ fn draw_help_tab(f: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("  Tab/s", key),
             Span::raw("          Next system      "),
-            Span::styled("r", key),
-            Span::raw("          Reload system"),
+            Span::styled("p", key),
+            Span::raw("          Apply branch protection"),
         ]),
         Line::from(vec![
             Span::styled("  Shift+Tab", key),
             Span::raw("      Previous system  "),
-            Span::styled("R", key),
-            Span::raw("          Force reload"),
+            Span::styled("t", key),
+            Span::raw("          Deploy template (sub-menu)"),
         ]),
         Line::from(vec![
             Span::styled("  Enter/l", key),
-            Span::raw("        Load repos"),
+            Span::raw("        Load repos         "),
+            Span::styled("S", key),
+            Span::raw("          Apply settings (copilot)"),
         ]),
         Line::from(vec![
             Span::styled("  /", key),
@@ -899,33 +1514,50 @@ fn draw_help_tab(f: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("  Esc", key),
             Span::raw("            Clear filter         "),
-            Span::styled("Tabs", heading),
+            Span::styled("Bulk Actions", heading),
         ]),
         Line::from(vec![
             Span::raw("                                    "),
-            Span::styled("─".repeat(4), dim),
+            Span::styled("─".repeat(12), dim),
         ]),
         Line::from(vec![
             Span::styled("  General", heading),
             Span::raw("                           "),
+            Span::styled("A", key),
+            Span::raw("   Bulk apply security"),
+        ]),
+        Line::from(vec![Span::styled(format!("  {}", "─".repeat(9)), dim)]),
+        Line::from(vec![
+            Span::styled("  q", key),
+            Span::raw("              Quit                "),
+            Span::styled("Tabs", heading),
+        ]),
+        Line::from(vec![
+            Span::styled("  r", key),
+            Span::raw("              Reload              "),
+            Span::styled("─".repeat(4), dim),
+        ]),
+        Line::from(vec![
+            Span::styled("  R", key),
+            Span::raw("              Force reload        "),
             Span::styled("1", key),
             Span::raw("   Repos"),
         ]),
         Line::from(vec![
-            Span::styled(format!("  {}", "─".repeat(9)), dim),
-            Span::raw("                           "),
+            Span::styled("  ?", key),
+            Span::raw("              Help                "),
             Span::styled("2", key),
             Span::raw("   Security"),
         ]),
         Line::from(vec![
-            Span::styled("  q", key),
-            Span::raw("              Quit                "),
+            Span::raw("                                    "),
             Span::styled("3", key),
             Span::raw("   Actions"),
         ]),
         Line::from(vec![
-            Span::styled("  ?", key),
-            Span::raw("              Help"),
+            Span::raw("                                    "),
+            Span::styled("?", key),
+            Span::raw("   Help"),
         ]),
         Line::from(""),
         Line::from(Span::styled("  Filter Syntax", heading)),
@@ -994,7 +1626,7 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
         Span::styled(&status_detail, Style::default().fg(Color::DarkGray)),
         Span::raw(" | "),
         Span::styled(
-            "q:quit Tab:sys Enter:load /:filter a:apply",
+            "q:quit Tab:sys Enter:load /:filter a/p/t:actions A:bulk",
             Style::default().fg(Color::DarkGray),
         ),
     ]);

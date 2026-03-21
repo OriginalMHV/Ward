@@ -102,7 +102,7 @@ fn default_one() -> u32 {
     1
 }
 
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct RegistryConfig {
     #[serde(rename = "type")]
     pub registry_type: String,
