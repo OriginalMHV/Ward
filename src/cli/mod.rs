@@ -23,7 +23,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub org: Option<String>,
 
-    /// Filter to a specific system (e.g., s07411)
+    /// Filter to a specific system (e.g., backend)
     #[arg(long, global = true)]
     pub system: Option<String>,
 

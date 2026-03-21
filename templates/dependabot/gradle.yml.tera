@@ -3,7 +3,7 @@ version: 2
 registries:
   gradle-artifactory:
     type: maven-repository
-    url: {{ registry_url | default(value="https://telenor.jfrog.io/artifactory/maven") }}
+    url: {{ registry_url | default(value="https://repo.maven.apache.org/maven2") }}
 {% if jfrog_oidc_provider %}
     jfrog-oidc-provider-name: '{{ jfrog_oidc_provider }}'
     audience: '{{ jfrog_oidc_provider }}'
