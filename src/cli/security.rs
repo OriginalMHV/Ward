@@ -66,7 +66,10 @@ async fn resolve_repos(
     })?;
 
     let excludes = manifest.exclude_patterns_for_system(sys);
-    let repos = client.list_repos_for_system(sys, &excludes).await?;
+    let explicit = manifest.explicit_repos_for_system(sys);
+    let repos = client
+        .list_repos_for_system(sys, &excludes, &explicit)
+        .await?;
     Ok(repos.into_iter().map(|r| r.name).collect())
 }
 

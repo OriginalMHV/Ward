@@ -106,9 +106,10 @@ commit_message_prefix = "chore: "
 id = "backend"
 name = "Backend Services"
 exclude = ["operations?", "workflows"]
+# repos = ["standalone-service", "shared-lib"]   # explicit repo names (no prefix needed)
 ```
 
-Systems group repos by name prefix. `exclude` filters by regex. Security and branch protection settings can be overridden per-system.
+Systems group repos by name prefix: `id = "backend"` matches `backend-*` repos. The `exclude` field filters by regex on the suffix. You can also list repos explicitly with `repos` for repos that don't follow the prefix convention. Security and branch protection settings can be overridden per-system.
 
 ────────────────────────────────────────
 
@@ -180,21 +181,33 @@ ward repos inspect my-service                   # deep inspect one repo
 Interactive terminal dashboard for browsing repos, security state, and applying changes.
 
 ```
-Keys:
+Navigation:
   1/2/3/?          Switch tabs (Repos, Security, Actions, Help)
   Tab / Shift+Tab  Cycle systems
   Enter / l        Load repos for current system
   j/k or arrows    Navigate list
-  /                Filter repos (supports ! for exclusion)
-  a                Apply security to selected repo
-  r / R            Reload / force reload
+  /                Filter repos
+  Esc              Clear filter
   q                Quit
+
+Repo Actions (on selected repo):
+  a                Apply security settings
+  p                Apply branch protection
+  t                Deploy template (sub-menu: d/c/s for dependabot/codeql/submission)
+  S                Apply settings (copilot ruleset + instructions)
+
+Bulk Actions:
+  A                Apply security to all filtered repos
+  r / R            Reload / force reload (R clears cache)
 
 Filter syntax:
   foo              Show repos matching "foo"
-  !ops             Hide repos matching "ops"
+  !ops             Hide repos matching "ops"  
+  !ops !system     Hide repos matching "ops" OR "system"
   foo !ops         Show "foo", hide "ops"
 ```
+
+Filters work like kanban board labels: stack multiple `!` terms to exclude categories. Useful for hiding operations/gitops repos while working on application repos.
 
 ────────────────────────────────────────
 

@@ -53,11 +53,13 @@ impl Client {
         Ok(all_repos)
     }
 
-    /// List repos filtered by system ID and exclude patterns.
+    /// List repos filtered by system ID prefix and/or explicit repo names,
+    /// with exclude patterns applied to the combined result.
     pub async fn list_repos_for_system(
         &self,
         system_id: &str,
         exclude_patterns: &[String],
+        explicit_repos: &[String],
     ) -> Result<Vec<Repository>> {
         let all = self.list_repos().await?;
 
@@ -68,7 +70,8 @@ impl Client {
             Some(Regex::new(&pattern).context("Invalid exclude pattern regex")?)
         };
 
-        let filtered: Vec<Repository> = all
+        // Start with prefix-matched repos
+        let mut matched: Vec<Repository> = all
             .into_iter()
             .filter(|r| !r.archived)
             .filter(|r| r.name.starts_with(system_id))
@@ -86,7 +89,23 @@ impl Client {
             })
             .collect();
 
-        Ok(filtered)
+        // Add explicit repos (fetch individually, skip if already matched by prefix)
+        for repo_name in explicit_repos {
+            if matched.iter().any(|r| r.name == *repo_name) {
+                continue;
+            }
+            match self.get_repo(repo_name).await {
+                Ok(repo) if !repo.archived => {
+                    matched.push(repo);
+                }
+                Ok(_) => {} // archived, skip
+                Err(e) => {
+                    tracing::warn!("Failed to fetch explicit repo {repo_name}: {e}");
+                }
+            }
+        }
+
+        Ok(matched)
     }
 
     /// Get a single repository.

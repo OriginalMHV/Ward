@@ -41,7 +41,10 @@ impl ReposCommand {
 async fn list_repos(client: &Client, manifest: &Manifest, system: Option<&str>) -> Result<()> {
     let repos = if let Some(sys) = system {
         let excludes = manifest.exclude_patterns_for_system(sys);
-        client.list_repos_for_system(sys, &excludes).await?
+        let explicit = manifest.explicit_repos_for_system(sys);
+        client
+            .list_repos_for_system(sys, &excludes, &explicit)
+            .await?
     } else {
         client.list_repos().await?
     };
