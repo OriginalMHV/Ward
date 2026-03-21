@@ -1,0 +1,40 @@
+# cargo-deny configuration
+# https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+# Transitive deps we can't control - suppress until upstream fixes
+ignore = [
+    "RUSTSEC-2024-0436", # paste (via ratatui) - use pastey when ratatui migrates
+    "RUSTSEC-2025-0119", # number_prefix (via indicatif) - awaiting upstream update
+]
+
+[licenses]
+# Ward is MIT licensed. Allow permissive licenses only.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "BSL-1.0",
+    "CC0-1.0",
+    "OpenSSL",
+    "MPL-2.0",
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.8
+
+[bans]
+# Warn on multiple versions of the same crate (common in large dep trees)
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+# Only allow crates from crates.io
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

@@ -138,6 +138,29 @@ mod tests {
     }
 
     #[test]
+    fn rendered_templates_produce_valid_yaml() {
+        let tera = load_templates().unwrap();
+        let mut ctx = tera::Context::new();
+        ctx.insert("java_version", "21");
+        ctx.insert("node_version", "20");
+        ctx.insert("default_branch", "main");
+        ctx.insert("registry_url", "https://example.com/maven");
+        ctx.insert("jfrog_oidc_provider", "test-provider");
+
+        for name in tera.get_template_names() {
+            if name.ends_with(".yml.tera") {
+                let rendered = tera.render(name, &ctx).unwrap();
+                let parsed: Result<serde_yaml::Value, _> = serde_yaml::from_str(&rendered);
+                assert!(
+                    parsed.is_ok(),
+                    "Template {name} produced invalid YAML: {}",
+                    parsed.unwrap_err()
+                );
+            }
+        }
+    }
+
+    #[test]
     fn renders_dependabot_gradle_template() {
         let tera = load_templates().unwrap();
         let mut ctx = tera::Context::new();
