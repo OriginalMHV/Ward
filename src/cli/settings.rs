@@ -439,51 +439,6 @@ async fn deploy_instructions(
     Ok(pr.html_url)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn detect_ops_repo_by_operations_suffix() {
-        assert!(is_ops_repo("backend-user-service-operations"));
-    }
-
-    #[test]
-    fn detect_ops_repo_by_operation_singular() {
-        assert!(is_ops_repo("backend-user-service-operation"));
-    }
-
-    #[test]
-    fn detect_ops_repo_by_ops_suffix() {
-        assert!(is_ops_repo("frontend-app-ops"));
-    }
-
-    #[test]
-    fn detect_ops_repo_by_gitops_suffix() {
-        assert!(is_ops_repo("platform-gitops"));
-    }
-
-    #[test]
-    fn detect_ops_repo_with_operation_in_middle() {
-        assert!(!is_ops_repo("my-operation-manager"));
-    }
-
-    #[test]
-    fn detect_ops_repo_by_operation_suffix() {
-        assert!(is_ops_repo("my-service-operation"));
-    }
-
-    #[test]
-    fn regular_repo_not_ops() {
-        assert!(!is_ops_repo("backend-user-service"));
-    }
-
-    #[test]
-    fn regular_repo_with_similar_name() {
-        assert!(!is_ops_repo("backend-optimizer"));
-    }
-}
-
 async fn audit(
     client: &Client,
     manifest: &Manifest,
@@ -550,4 +505,49 @@ async fn audit(
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detect_ops_repo_by_operations_suffix() {
+        assert!(is_ops_repo("backend-user-service-operations"));
+    }
+
+    #[test]
+    fn detect_ops_repo_by_operation_singular() {
+        assert!(is_ops_repo("backend-user-service-operation"));
+    }
+
+    #[test]
+    fn detect_ops_repo_by_ops_suffix() {
+        assert!(is_ops_repo("frontend-app-ops"));
+    }
+
+    #[test]
+    fn detect_ops_repo_by_gitops_suffix() {
+        assert!(is_ops_repo("platform-gitops"));
+    }
+
+    #[test]
+    fn detect_ops_repo_with_operation_in_middle() {
+        assert!(!is_ops_repo("my-operation-manager"));
+    }
+
+    #[test]
+    fn detect_ops_repo_by_operation_suffix() {
+        assert!(is_ops_repo("my-service-operation"));
+    }
+
+    #[test]
+    fn regular_repo_not_ops() {
+        assert!(!is_ops_repo("backend-user-service"));
+    }
+
+    #[test]
+    fn regular_repo_with_similar_name() {
+        assert!(!is_ops_repo("backend-optimizer"));
+    }
 }

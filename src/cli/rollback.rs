@@ -219,6 +219,27 @@ fn classify_rollback(entry: &AuditEntry) -> RollbackAction {
     }
 }
 
+async fn execute_rollback(client: &Client, entry: &AuditEntry) -> Result<()> {
+    match entry.action.as_str() {
+        "set_secret_scanning" => {
+            client
+                .set_security_features(&entry.repo, false, true, true)
+                .await
+        }
+        "set_push_protection" => {
+            client
+                .set_security_features(&entry.repo, true, true, false)
+                .await
+        }
+        "set_secret_scanning_ai_detection" => {
+            client
+                .set_security_features(&entry.repo, true, false, true)
+                .await
+        }
+        _ => anyhow::bail!("Cannot rollback action: {}", entry.action),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,26 +313,5 @@ mod tests {
     fn unknown_action_is_skip() {
         let e = entry("some_future_action", serde_json::Value::Null);
         assert!(classify_rollback(&e).is_skip());
-    }
-}
-
-async fn execute_rollback(client: &Client, entry: &AuditEntry) -> Result<()> {
-    match entry.action.as_str() {
-        "set_secret_scanning" => {
-            client
-                .set_security_features(&entry.repo, false, true, true)
-                .await
-        }
-        "set_push_protection" => {
-            client
-                .set_security_features(&entry.repo, true, true, false)
-                .await
-        }
-        "set_secret_scanning_ai_detection" => {
-            client
-                .set_security_features(&entry.repo, true, false, true)
-                .await
-        }
-        _ => anyhow::bail!("Cannot rollback action: {}", entry.action),
     }
 }
