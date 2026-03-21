@@ -169,14 +169,12 @@ async fn plan(
         }
 
         if do_instructions && !state.has_instructions {
-            let kind = if state.is_ops { "ops" } else { "app" };
             changes.push(if state.is_ops {
                 "deploy copilot-instructions.md (ops)"
             } else {
                 "deploy copilot-instructions.md (app)"
             });
             instructions_needed += 1;
-            let _ = kind;
         }
 
         if changes.is_empty() {
@@ -427,6 +425,46 @@ async fn deploy_instructions(
         .await?;
 
     Ok(pr.html_url)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detect_ops_repo_by_operations_suffix() {
+        assert!(is_ops_repo("backend-user-service-operations"));
+    }
+
+    #[test]
+    fn detect_ops_repo_by_operation_singular() {
+        assert!(is_ops_repo("backend-user-service-operation"));
+    }
+
+    #[test]
+    fn detect_ops_repo_by_ops_suffix() {
+        assert!(is_ops_repo("frontend-app-ops"));
+    }
+
+    #[test]
+    fn detect_ops_repo_by_gitops_suffix() {
+        assert!(is_ops_repo("platform-gitops"));
+    }
+
+    #[test]
+    fn detect_ops_repo_with_operation_in_middle() {
+        assert!(is_ops_repo("my-operation-manager"));
+    }
+
+    #[test]
+    fn regular_repo_not_ops() {
+        assert!(!is_ops_repo("backend-user-service"));
+    }
+
+    #[test]
+    fn regular_repo_with_similar_name() {
+        assert!(!is_ops_repo("backend-optimizer"));
+    }
 }
 
 async fn audit(

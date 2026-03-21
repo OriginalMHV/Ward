@@ -63,6 +63,7 @@ struct RefObject {
 }
 
 /// A file to include in an atomic commit.
+#[derive(Debug, Clone)]
 pub struct CommitFile {
     pub path: String,
     pub content: String,
