@@ -1,7 +1,9 @@
 pub mod audit;
 pub mod commit;
 pub mod init;
+pub mod protection;
 pub mod repos;
+pub mod rollback;
 pub mod security;
 pub mod settings;
 pub mod tui;
@@ -11,7 +13,7 @@ use clap::Parser;
 #[derive(Parser)]
 #[command(
     name = "ward",
-    about = "GitHub repository management for developers — plan, apply, verify.",
+    about = "GitHub repository management for developers. Plan, apply, verify.",
     version,
     propagate_version = true
 )]
@@ -61,6 +63,12 @@ pub enum Command {
 
     /// Commit files/templates to repositories
     Commit(commit::CommitCommand),
+
+    /// Manage branch protection rules
+    Protection(protection::ProtectionCommand),
+
+    /// Rollback changes using the audit log
+    Rollback(rollback::RollbackCommand),
 
     /// Full compliance audit across repos
     Audit(audit::AuditCommand),

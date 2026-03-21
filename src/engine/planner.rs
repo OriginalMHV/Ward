@@ -99,14 +99,22 @@ mod tests {
 
     #[test]
     fn no_changes_when_state_matches_config() {
-        let plan = plan_security("repo", &state(true, true, true, true, true), &config(true, true, true, true, true));
+        let plan = plan_security(
+            "repo",
+            &state(true, true, true, true, true),
+            &config(true, true, true, true, true),
+        );
         assert!(!plan.has_changes());
         assert!(plan.changes.is_empty());
     }
 
     #[test]
     fn all_changes_when_nothing_enabled() {
-        let plan = plan_security("repo", &state(false, false, false, false, false), &config(true, true, true, true, true));
+        let plan = plan_security(
+            "repo",
+            &state(false, false, false, false, false),
+            &config(true, true, true, true, true),
+        );
         assert!(plan.has_changes());
         assert_eq!(plan.changes.len(), 5);
         assert!(plan.changes.iter().all(|c| !c.current && c.desired));
@@ -114,7 +122,11 @@ mod tests {
 
     #[test]
     fn partial_changes() {
-        let plan = plan_security("repo", &state(true, false, true, false, false), &config(true, true, true, true, true));
+        let plan = plan_security(
+            "repo",
+            &state(true, false, true, false, false),
+            &config(true, true, true, true, true),
+        );
         assert_eq!(plan.changes.len(), 3);
         let features: Vec<&str> = plan.changes.iter().map(|c| c.feature.as_str()).collect();
         assert!(features.contains(&"dependabot_security_updates"));
@@ -124,14 +136,22 @@ mod tests {
 
     #[test]
     fn plan_to_disable_features() {
-        let plan = plan_security("repo", &state(true, true, true, true, true), &config(false, false, false, false, false));
+        let plan = plan_security(
+            "repo",
+            &state(true, true, true, true, true),
+            &config(false, false, false, false, false),
+        );
         assert_eq!(plan.changes.len(), 5);
         assert!(plan.changes.iter().all(|c| c.current && !c.desired));
     }
 
     #[test]
     fn repo_name_preserved() {
-        let plan = plan_security("my-cool-repo", &state(false, false, false, false, false), &config(true, true, true, true, true));
+        let plan = plan_security(
+            "my-cool-repo",
+            &state(false, false, false, false, false),
+            &config(true, true, true, true, true),
+        );
         assert_eq!(plan.repo, "my-cool-repo");
     }
 }

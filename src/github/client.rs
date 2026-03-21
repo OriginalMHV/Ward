@@ -133,6 +133,29 @@ impl Client {
         Ok(resp)
     }
 
+    /// Make a PUT request with a JSON body.
+    pub async fn put_json<T: serde::Serialize>(
+        &self,
+        path: &str,
+        body: &T,
+    ) -> Result<reqwest::Response> {
+        let _permit = self.semaphore.acquire().await?;
+        let url = format!("{}{}", self.base_url, path);
+
+        tracing::debug!("PUT {url}");
+
+        let resp = self
+            .http
+            .put(&url)
+            .json(body)
+            .send()
+            .await
+            .with_context(|| format!("PUT {url} failed"))?;
+
+        check_rate_limit(&resp);
+        Ok(resp)
+    }
+
     /// Make a DELETE request.
     pub async fn delete(&self, path: &str) -> Result<reqwest::Response> {
         let _permit = self.semaphore.acquire().await?;

@@ -15,6 +15,9 @@ pub struct Manifest {
     pub templates: TemplateConfig,
 
     #[serde(default)]
+    pub branch_protection: BranchProtectionConfig,
+
+    #[serde(default)]
     pub systems: Vec<SystemConfig>,
 }
 
@@ -56,7 +59,47 @@ pub struct TemplateConfig {
     pub commit_message_prefix: String,
 
     #[serde(default)]
+    pub custom_dir: Option<String>,
+
+    #[serde(default)]
     pub registries: HashMap<String, RegistryConfig>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
+pub struct BranchProtectionConfig {
+    #[serde(default)]
+    pub enabled: bool,
+
+    #[serde(default = "default_one")]
+    pub required_approvals: u32,
+
+    #[serde(default)]
+    pub dismiss_stale_reviews: bool,
+
+    #[serde(default)]
+    pub require_code_owner_reviews: bool,
+
+    #[serde(default)]
+    pub require_status_checks: bool,
+
+    #[serde(default)]
+    pub strict_status_checks: bool,
+
+    #[serde(default)]
+    pub enforce_admins: bool,
+
+    #[serde(default)]
+    pub required_linear_history: bool,
+
+    #[serde(default)]
+    pub allow_force_pushes: bool,
+
+    #[serde(default)]
+    pub allow_deletions: bool,
+}
+
+fn default_one() -> u32 {
+    1
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
@@ -127,6 +170,7 @@ impl Default for Manifest {
             },
             security: SecurityConfig::default(),
             templates: TemplateConfig::default(),
+            branch_protection: BranchProtectionConfig::default(),
             systems: Vec::new(),
         }
     }

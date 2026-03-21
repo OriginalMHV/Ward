@@ -1,47 +1,59 @@
-# Ward
+<div align="center">
 
 ```
-              __     __     ______     ______     _____
-             /\ \  _ \ \   /\  __ \   /\  == \   /\  __-.
-             \ \ \/ ".\ \  \ \  __ \  \ \  __<   \ \ \/\ \
-              \ \__/".~\_\  \ \_\ \_\  \ \_\ \_\  \ \____-
-               \/_/   \/_/   \/_/\/_/   \/_/ /_/   \/____/
-
-              github repository management for developers
+ _    _  ___  ____________
+| |  | |/ _ \ | ___ \  _  \
+| |  | / /_\ \| |_/ / | | |
+| |/\| |  _  ||    /| | | |
+\  /\  / | | || |\ \| |/ /
+ \/  \/\_| |_/\_| \_|___/
 ```
 
-> **plan → apply → verify.**
-> Manage security settings, deploy workflow configs, and audit compliance across hundreds of GitHub repos — without shell scripts.
+**Manage GitHub repos from your terminal.**
 
-Ward is a Rust CLI that treats repository management like infrastructure-as-code. Declare your desired state in `ward.toml`, and Ward diffs reality against it. Every change is planned before execution, verified after, and logged.
+[![Rust](https://img.shields.io/badge/Rust-CC5500?style=flat-square&logo=rust&logoColor=FFBF00&labelColor=1C1C1C)](https://rust-lang.org)
+[![License](https://img.shields.io/badge/License-MIT-6B8E23?style=flat-square&labelColor=1C1C1C)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/OriginalMHV/ward/ci.yml?style=flat-square&label=CI&labelColor=1C1C1C&color=6B8E23)](https://github.com/OriginalMHV/Ward/actions)
 
-## Features
+[Quick Start](#-quick-start) · [Features](#-features) · [Install](#-install) · [Commands](#-commands)
 
-- **Security management** — Enable Dependabot, secret scanning, push protection across repos in one command
-- **Template commits** — Deploy Dependabot configs, CodeQL workflows, and more via the Git Trees API (no cloning)
-- **Settings & rulesets** — Create Copilot code review rulesets, deploy review instructions
-- **Compliance audit** — Version inventory, alert counts, security posture — as JSON or table
-- **Interactive TUI** — Browse repos and security state in a terminal dashboard
-- **Audit trail** — Every mutation logged as JSON lines to `~/.ward/audit.log`
+</div>
 
----
+────────────────────────────────────────
 
-## Install
+Ward is a Rust CLI that treats repository management like infrastructure-as-code.
+Declare your desired state in `ward.toml`, diff it against reality, apply the changes, and verify the result. No shell scripts, no cloning, no guessing.
+
+## ⚡ Features
+
+- **Security management** - Dependabot, secret scanning, push protection across repos in one command
+- **Template commits** - deploy workflow configs via the Git Trees API (no cloning needed)
+- **Branch protection** - declarative rules for PRs, approvals, status checks, force-push policies
+- **Settings & rulesets** - Copilot code review rulesets, review instructions (app vs ops auto-detect)
+- **Compliance audit** - version inventory, alert counts, security posture as JSON or table
+- **Rollback** - reverse applied changes using the audit log
+- **Custom templates** - drop `.tera` files in `~/.ward/templates/` to extend or override builtins
+- **Interactive TUI** - browse repos and security state in a terminal dashboard
+- **Audit trail** - every mutation logged as JSON lines to `~/.ward/audit.log`
+
+────────────────────────────────────────
+
+## 📦 Install
 
 ```bash
-# From source
+# from source
 cargo install --path .
 
-# Or build manually
+# or build manually
 git clone https://github.com/OriginalMHV/ward.git
 cd ward && cargo build --release
 ```
 
-**Requires:** Rust ≥ 1.70 and a GitHub token (`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`).
-
+Requires Rust ≥ 1.70 and a GitHub token (`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`).
 Token scopes needed: `repo`, `read:org`, `workflow`.
 
-### Shell completions
+<details>
+<summary><b>Shell completions</b></summary>
 
 ```bash
 ward completions bash > ~/.bash_completion.d/ward
@@ -49,22 +61,24 @@ ward completions zsh  > ~/.zfunc/_ward
 ward completions fish > ~/.config/fish/completions/ward.fish
 ```
 
----
+</details>
 
-## Quick Start
+────────────────────────────────────────
+
+## 🚀 Quick Start
 
 ```bash
-ward init                                    # scaffold ward.toml
-vim ward.toml                                # set your org + systems
-ward repos list --system backend             # see what's out there
-ward security plan --system backend          # dry-run — what would change?
-ward security apply --system backend         # apply + auto-verify
-ward tui                                     # interactive dashboard
+ward init                               # scaffold ward.toml
+vim ward.toml                           # set your org + systems
+ward repos list --system backend        # see what's out there
+ward security plan --system backend     # dry-run: what would change?
+ward security apply --system backend    # apply + auto-verify
+ward tui                                # interactive dashboard
 ```
 
----
+────────────────────────────────────────
 
-## Configuration
+## ⚙️ Configuration
 
 ```toml
 [org]
@@ -76,10 +90,17 @@ push_protection = true
 dependabot_alerts = true
 dependabot_security_updates = true
 
+[branch_protection]
+enabled = true
+required_approvals = 1
+dismiss_stale_reviews = true
+require_status_checks = true
+
 [templates]
 branch = "chore/ward-setup"
 reviewers = ["alice", "bob"]
 commit_message_prefix = "chore: "
+# custom_dir = "~/.ward/templates"
 
 [[systems]]
 id = "backend"
@@ -87,42 +108,41 @@ name = "Backend Services"
 exclude = ["operations?", "workflows"]
 ```
 
-Systems group repos by name prefix. `exclude` filters out repos matching those patterns (regex). Security settings can be overridden per-system.
+Systems group repos by name prefix. `exclude` filters by regex. Security and branch protection settings can be overridden per-system.
 
----
+────────────────────────────────────────
 
-## Commands
+## 🛠 Commands
 
-Every mutating command follows **plan → apply → verify**: preview changes, execute them, then re-read from the API to confirm.
-
-### `ward repos`
-
-```bash
-ward repos list --system backend        # list repos
-ward repos inspect my-service           # deep inspect (security, metadata)
-```
+Every mutating command follows **plan → apply → verify**.
 
 ### `ward security`
 
 ```bash
-ward security plan --system backend     # what would change? (safe, read-only)
-ward security apply --system backend    # apply changes + auto-verify
-ward security apply --repo my-service --yes   # single repo, skip prompt
-ward security audit --system backend    # current state overview
+ward security plan --system backend             # dry-run (read-only)
+ward security apply --system backend            # apply + verify
+ward security apply --repo my-service --yes     # single repo, skip prompt
+ward security audit --system backend            # current state overview
 ```
 
-Manages: Dependabot alerts, Dependabot security updates, secret scanning, AI detection, push protection.
+### `ward protection`
+
+```bash
+ward protection plan --system backend           # diff branch protection rules
+ward protection apply --system backend          # apply to default branches
+ward protection audit --system backend          # show current state
+```
 
 ### `ward commit`
 
-Deploy config files to repos without cloning — uses the Git Trees API for atomic commits.
+Deploy config files to repos without cloning. Uses the Git Trees API for atomic commits.
 
 ```bash
 ward commit plan --template dependabot --system backend
 ward commit apply --template codeql --system backend
 ```
 
-Templates: `dependabot`, `codeql`, `dependency-submission`. Auto-detects Gradle vs npm and extracts Java/Node versions from build files.
+Built-in templates: `dependabot`, `codeql`, `dependency-submission`. Auto-detects Gradle vs npm and extracts Java/Node versions.
 
 ### `ward settings`
 
@@ -132,39 +152,34 @@ ward settings apply --copilot-instructions --system backend
 ward settings audit --system backend
 ```
 
-Creates Copilot code review rulesets and deploys review instructions (auto-detects app vs ops repos).
+### `ward rollback`
+
+```bash
+ward rollback --last 10                         # show recent audit entries
+ward rollback --last 5 --dry-run                # preview what would reverse
+ward rollback --last 5 --yes                    # reverse last 5 changes
+ward rollback --repo my-service --last 3        # scoped to one repo
+```
 
 ### `ward audit`
 
 ```bash
-ward audit --system backend                  # table output
-ward audit --system backend --format json    # dashboard-compatible JSON
+ward audit --system backend                     # table output
+ward audit --system backend --format json       # machine-readable JSON
 ```
 
-Full compliance report: project types, versions (Java, Spring Boot, Node), security posture, alert counts.
+### `ward repos`
+
+```bash
+ward repos list --system backend                # list repos in a system
+ward repos inspect my-service                   # deep inspect one repo
+```
 
 ### `ward tui`
 
-```bash
-ward tui
-```
+Interactive terminal UI. Keys: `1`-`3` switch tabs, `/` filter, `Tab` cycle systems, `q` quit.
 
-Interactive terminal UI. Browse repos, check security state, filter by system. Keys: `1`-`3` switch tabs, `/` filter, `Tab` cycle systems, `q` quit.
-
----
-
-## Global flags
-
-| Flag | Description |
-|------|-------------|
-| `--org <ORG>` | GitHub organization (overrides ward.toml) |
-| `--system <ID>` | Filter repos by system prefix |
-| `--repo <REPO>` | Target a single repo |
-| `--json` | JSON output |
-| `--parallelism <N>` | Max concurrent API calls (default: 5) |
-| `-v` / `-vv` / `-vvv` | Increase log verbosity |
-
----
+────────────────────────────────────────
 
 ## How it works
 
@@ -175,37 +190,44 @@ Interactive terminal UI. Browse repos, check security state, filter by system. K
   vs desired      audit logging      confirm match
 ```
 
-- **No git cloning** — file commits use the Git Trees API (create blob → tree → commit → update ref). Atomic, no filesystem side effects.
-- **Idempotent** — detects existing state and skips what's already done.
-- **Audit log** — every mutation logged to `~/.ward/audit.log` as JSON lines. Query with `jq`.
+- **No git cloning** - file commits use the Git Trees API (blob → tree → commit → update ref). Atomic, no filesystem side effects.
+- **Idempotent** - detects existing state and skips what's already done.
+- **Audit log** - every mutation logged to `~/.ward/audit.log` as JSON lines. Query with `jq`.
+- **Custom templates** - place `.tera` files in `~/.ward/templates/` to add or override built-in templates. Uses [Tera](https://keats.github.io/tera/) (Jinja2-compatible).
 
----
+────────────────────────────────────────
 
 ## Recipes
 
 ```bash
-# Full security hardening
+# full security hardening
 ward security apply --system backend --yes
 ward commit apply --template dependabot --system backend --yes
 ward commit apply --template codeql --system backend --yes
+ward protection apply --system backend --yes
 ward settings apply --ruleset copilot-review --system backend
 
-# Dashboard JSON
-ward audit --system backend --format json > dashboard.json
-
-# CI drift detection
+# drift detection in CI
 ward security plan --system backend --json | jq '.[] | select(.changes | length > 0)'
+
+# rollback last batch of changes
+ward rollback --last 10 --dry-run
 ```
 
----
+────────────────────────────────────────
 
-## Custom templates
+## Global flags
 
-Templates use [Tera](https://keats.github.io/tera/) (Jinja2-compatible) and are embedded at compile time from `templates/`. Available variables: `java_version`, `node_version`, `default_branch`, `registry_url`, `jfrog_oidc_provider`.
+| Flag | Description |
+|------|-------------|
+| `--org <ORG>` | GitHub org (overrides ward.toml) |
+| `--system <ID>` | Filter repos by system prefix |
+| `--repo <REPO>` | Target a single repo |
+| `--json` | JSON output |
+| `--parallelism <N>` | Max concurrent API calls (default: 5) |
+| `-v` / `-vv` / `-vvv` | Log verbosity |
 
-To add a template: create a `.tera` file in `templates/`, add a match arm in `src/cli/commit.rs`, rebuild.
-
----
+────────────────────────────────────────
 
 ## Contributing
 
@@ -213,13 +235,13 @@ To add a template: create a `.tera` file in `templates/`, add a match arm in `sr
 cargo build && cargo test && cargo clippy
 ```
 
-- **New template** — add `.tera` file + match arm in `cli/commit.rs`
-- **New security feature** — add fields to `SecurityState` + `SecurityConfig`, update planner
-- **New command** — add module in `cli/`, register in `cli/mod.rs` + `main.rs`
+- **New template** - add `.tera` file + match arm in `cli/commit.rs`
+- **New security feature** - add fields to `SecurityState` + `SecurityConfig`, update planner
+- **New command** - add module in `cli/`, register in `cli/mod.rs` + `main.rs`
 
----
+────────────────────────────────────────
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
 

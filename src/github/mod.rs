@@ -1,3 +1,4 @@
+pub mod branch_protection;
 pub mod client;
 pub mod commits;
 pub mod contents;

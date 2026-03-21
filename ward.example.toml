@@ -12,11 +12,24 @@ dependabot_security_updates = true
 branch = "chore/ward-setup"
 reviewers = ["alice", "bob"]
 commit_message_prefix = "chore: "
+# custom_dir = "/path/to/custom/templates"
 
 [templates.registries.gradle-artifactory]
 type = "maven-repository"
 url = "https://your-artifactory.example.com/artifactory/maven"
 # jfrog_oidc_provider = "your-oidc-provider-id"
+
+[branch_protection]
+enabled = true
+required_approvals = 1
+dismiss_stale_reviews = true
+require_code_owner_reviews = false
+require_status_checks = true
+strict_status_checks = false
+enforce_admins = false
+required_linear_history = false
+allow_force_pushes = false
+allow_deletions = false
 
 [[systems]]
 id = "backend"

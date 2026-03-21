@@ -85,7 +85,7 @@ impl AuditCommand {
 
         println!();
         println!(
-            "  {} Full audit — {} repos in system {}",
+            "  {} Full audit: {} repos in system {}",
             style("🔍").bold(),
             repos.len(),
             style(sys).cyan()

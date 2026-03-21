@@ -54,6 +54,16 @@ async fn main() -> Result<()> {
             )
             .await
         }
+        Command::Protection(cmd) => {
+            cmd.run(
+                &client,
+                &manifest,
+                cli.system.as_deref(),
+                cli.repo.as_deref(),
+            )
+            .await
+        }
+        Command::Rollback(cmd) => cmd.run(&client).await,
         Command::Audit(cmd) => cmd.run(&client, &manifest, cli.system.as_deref()).await,
         Command::Tui => ward::cli::tui::run(&client, &manifest).await,
         Command::Init => ward::cli::init::run(),

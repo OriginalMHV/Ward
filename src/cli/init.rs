@@ -33,7 +33,7 @@ pub fn run() -> Result<()> {
     std::fs::write(path, EXAMPLE_MANIFEST)?;
 
     println!(
-        "  {} Created ward.toml — edit it to configure your org and systems.",
+        "  {} Created ward.toml - edit it to configure your org and systems.",
         style("✅").green()
     );
 

@@ -1,1 +1,1 @@
-// Diff display — colorized plan diffs
+// Diff display - colorized plan diffs
