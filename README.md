@@ -1,11 +1,11 @@
 <div align="center">
 
-```
+<pre>
  _ _ _ _____ _____ ____
 | | | |  _  | __  |    \
 | | | |     |    -|  |  |
 |_____|__|__|__|__|____/
-```
+</pre>
 
 **Manage GitHub repos from your terminal.**
 
