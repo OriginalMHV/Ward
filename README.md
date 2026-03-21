@@ -52,7 +52,7 @@ cargo install --path .
 **Build from repo:**
 
 ```bash
-git clone https://github.com/michaelvalen/ward.git
+git clone https://github.com/OriginalMHV/ward.git
 cd ward
 cargo build --release
 # Binary at ./target/release/ward
