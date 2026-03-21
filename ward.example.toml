@@ -1,0 +1,54 @@
+[org]
+name = "TelenorNorgeInternal"
+
+[security]
+secret_scanning = true
+secret_scanning_ai_detection = true
+push_protection = true
+dependabot_alerts = true
+dependabot_security_updates = true
+
+[templates]
+branch = "chore/ward-setup"
+reviewers = ["RoarAudunMyrset", "norabakke", "steinham", "SteffenMag", "annabelleraaberg"]
+commit_message_prefix = "chore: "
+
+[templates.registries.gradle-artifactory]
+type = "maven-repository"
+url = "https://telenor.jfrog.io/artifactory/maven"
+jfrog_oidc_provider = "jman-provider-128604831"
+
+[[systems]]
+id = "s07252"
+name = "ERA"
+exclude = ["system", "operations?", "workflows"]
+
+[[systems]]
+id = "s07313"
+name = "CAAM"
+exclude = ["system", "operations?", "workflows"]
+
+[[systems]]
+id = "s07411"
+name = "Party Management"
+exclude = ["system", "operations?", "workflows"]
+
+[[systems]]
+id = "s07439"
+name = "Party Registry"
+exclude = ["system", "operations?", "workflows"]
+
+[[systems]]
+id = "s07546"
+name = "ECL"
+exclude = ["system", "operations?", "workflows"]
+
+[[systems]]
+id = "s07569"
+name = "TestGenLab"
+exclude = ["system", "operations?", "workflows"]
+
+[[systems]]
+id = "s02361"
+name = "CDC"
+exclude = ["system", "operations?", "workflows"]
