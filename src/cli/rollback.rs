@@ -177,6 +177,18 @@ enum RollbackAction {
     Skip(String),
 }
 
+impl RollbackAction {
+    #[cfg(test)]
+    fn is_reverse(&self) -> bool {
+        matches!(self, RollbackAction::Reverse(_))
+    }
+
+    #[cfg(test)]
+    fn is_skip(&self) -> bool {
+        matches!(self, RollbackAction::Skip(_))
+    }
+}
+
 fn classify_rollback(entry: &AuditEntry) -> RollbackAction {
     match entry.action.as_str() {
         "set_secret_scanning" if entry.after == serde_json::Value::Bool(true) => {
@@ -204,6 +216,82 @@ fn classify_rollback(entry: &AuditEntry) -> RollbackAction {
             "branch protection rollback not supported - re-run with desired config".to_string(),
         ),
         _ => RollbackAction::Skip(format!("unknown action: {}", entry.action)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(action: &str, after: serde_json::Value) -> AuditEntry {
+        AuditEntry {
+            timestamp: String::new(),
+            repo: "test-repo".to_string(),
+            action: action.to_string(),
+            status: "success".to_string(),
+            before: serde_json::Value::Null,
+            after,
+        }
+    }
+
+    #[test]
+    fn secret_scanning_enabled_is_reverse() {
+        let e = entry("set_secret_scanning", serde_json::Value::Bool(true));
+        assert!(classify_rollback(&e).is_reverse());
+    }
+
+    #[test]
+    fn secret_scanning_not_enabled_is_skip() {
+        let e = entry("set_secret_scanning", serde_json::Value::Bool(false));
+        assert!(classify_rollback(&e).is_skip());
+    }
+
+    #[test]
+    fn push_protection_enabled_is_reverse() {
+        let e = entry("set_push_protection", serde_json::Value::Bool(true));
+        assert!(classify_rollback(&e).is_reverse());
+    }
+
+    #[test]
+    fn ai_detection_enabled_is_reverse() {
+        let e = entry(
+            "set_secret_scanning_ai_detection",
+            serde_json::Value::Bool(true),
+        );
+        assert!(classify_rollback(&e).is_reverse());
+    }
+
+    #[test]
+    fn dependabot_alerts_is_skip() {
+        let e = entry("enable_dependabot_alerts", serde_json::Value::Null);
+        assert!(classify_rollback(&e).is_skip());
+    }
+
+    #[test]
+    fn dependabot_security_updates_is_skip() {
+        let e = entry(
+            "enable_dependabot_security_updates",
+            serde_json::Value::Null,
+        );
+        assert!(classify_rollback(&e).is_skip());
+    }
+
+    #[test]
+    fn create_copilot_review_ruleset_is_skip() {
+        let e = entry("create_copilot_review_ruleset", serde_json::Value::Null);
+        assert!(classify_rollback(&e).is_skip());
+    }
+
+    #[test]
+    fn update_branch_protection_is_skip() {
+        let e = entry("update_branch_protection", serde_json::Value::Null);
+        assert!(classify_rollback(&e).is_skip());
+    }
+
+    #[test]
+    fn unknown_action_is_skip() {
+        let e = entry("some_future_action", serde_json::Value::Null);
+        assert!(classify_rollback(&e).is_skip());
     }
 }
 

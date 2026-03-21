@@ -437,3 +437,89 @@ fn print_diff_table(diffs: &[ProtectionDiff]) {
         style(up_to_date).green()
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::manifest::BranchProtectionConfig;
+
+    fn default_state() -> BranchProtectionState {
+        BranchProtectionState {
+            required_pull_request_reviews: false,
+            required_approving_review_count: 1,
+            dismiss_stale_reviews: false,
+            require_code_owner_reviews: false,
+            required_status_checks: false,
+            strict_status_checks: false,
+            enforce_admins: false,
+            required_linear_history: false,
+            allow_force_pushes: false,
+            allow_deletions: false,
+        }
+    }
+
+    fn default_config() -> BranchProtectionConfig {
+        BranchProtectionConfig {
+            enabled: false,
+            required_approvals: 1,
+            dismiss_stale_reviews: false,
+            require_code_owner_reviews: false,
+            require_status_checks: false,
+            strict_status_checks: false,
+            enforce_admins: false,
+            required_linear_history: false,
+            allow_force_pushes: false,
+            allow_deletions: false,
+        }
+    }
+
+    #[test]
+    fn no_changes_when_state_matches_config() {
+        let state = default_state();
+        let config = default_config();
+        let diff = diff_protection("my-repo", "main", &state, &config);
+        assert!(!diff.has_changes());
+    }
+
+    #[test]
+    fn all_fields_produce_changes_when_they_differ() {
+        let state = default_state();
+        let config = BranchProtectionConfig {
+            enabled: true,
+            required_approvals: 2,
+            dismiss_stale_reviews: true,
+            require_code_owner_reviews: true,
+            require_status_checks: true,
+            strict_status_checks: true,
+            enforce_admins: true,
+            required_linear_history: true,
+            allow_force_pushes: true,
+            allow_deletions: true,
+        };
+        let diff = diff_protection("my-repo", "main", &state, &config);
+        assert_eq!(diff.changes.len(), 10);
+    }
+
+    #[test]
+    fn partial_changes_detected() {
+        let state = default_state();
+        let mut config = default_config();
+        config.enforce_admins = true;
+        config.required_approvals = 3;
+
+        let diff = diff_protection("my-repo", "main", &state, &config);
+        assert_eq!(diff.changes.len(), 2);
+        let fields: Vec<&str> = diff.changes.iter().map(|c| c.field.as_str()).collect();
+        assert!(fields.contains(&"enforce_admins"));
+        assert!(fields.contains(&"required_approvals"));
+    }
+
+    #[test]
+    fn repo_and_branch_preserved() {
+        let state = default_state();
+        let config = default_config();
+        let diff = diff_protection("acme-service", "develop", &state, &config);
+        assert_eq!(diff.repo, "acme-service");
+        assert_eq!(diff.branch, "develop");
+    }
+}

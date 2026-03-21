@@ -292,6 +292,53 @@ mod tests {
     }
 
     #[test]
+    fn exclude_patterns_for_known_system() {
+        let toml = r#"
+            [org]
+            name = "org"
+            [[systems]]
+            id = "be"
+            name = "Backend"
+            exclude = ["ops", "infra"]
+        "#;
+        let m: Manifest = toml::from_str(toml).unwrap();
+        assert_eq!(m.exclude_patterns_for_system("be"), vec!["ops", "infra"]);
+    }
+
+    #[test]
+    fn branch_protection_serde_defaults() {
+        let bp: BranchProtectionConfig = toml::from_str("").unwrap();
+        assert!(!bp.enabled);
+        assert_eq!(bp.required_approvals, 1);
+        assert!(!bp.dismiss_stale_reviews);
+        assert!(!bp.require_code_owner_reviews);
+        assert!(!bp.require_status_checks);
+        assert!(!bp.strict_status_checks);
+        assert!(!bp.enforce_admins);
+        assert!(!bp.required_linear_history);
+        assert!(!bp.allow_force_pushes);
+        assert!(!bp.allow_deletions);
+    }
+
+    #[test]
+    fn branch_protection_full_parse() {
+        let toml_str = r#"
+            enabled = true
+            required_approvals = 2
+            dismiss_stale_reviews = true
+            require_code_owner_reviews = true
+            enforce_admins = true
+        "#;
+        let bp: BranchProtectionConfig = toml::from_str(toml_str).unwrap();
+        assert!(bp.enabled);
+        assert_eq!(bp.required_approvals, 2);
+        assert!(bp.dismiss_stale_reviews);
+        assert!(bp.require_code_owner_reviews);
+        assert!(bp.enforce_admins);
+        assert!(!bp.allow_force_pushes);
+    }
+
+    #[test]
     fn default_template_config_values() {
         // derive(Default) gives empty strings/vecs, not the serde defaults
         let tc = TemplateConfig::default();

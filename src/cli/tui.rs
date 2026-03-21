@@ -15,6 +15,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap},
 };
+use tokio::sync::mpsc;
 
 use crate::config::Manifest;
 use crate::github::Client;
@@ -27,6 +28,12 @@ enum Tab {
     Help,
 }
 
+enum BgMessage {
+    ReposLoaded(Vec<RepoEntry>),
+    SecurityLoaded(usize, SecurityState),
+    Error(String),
+}
+
 struct App {
     tab: Tab,
     repos: Vec<RepoEntry>,
@@ -37,8 +44,11 @@ struct App {
     status_msg: String,
     systems: Vec<(String, String)>,
     selected_system: usize,
+    loading: bool,
+    cache: std::collections::HashMap<String, Vec<RepoEntry>>,
 }
 
+#[derive(Clone)]
 struct RepoEntry {
     repo: Repository,
     security: Option<SecurityState>,
@@ -55,9 +65,11 @@ impl App {
             filter: String::new(),
             is_filtering: false,
             should_quit: false,
-            status_msg: "Press 'l' to load repos for selected system".to_owned(),
+            status_msg: "Press Enter to load repos".to_owned(),
             systems,
             selected_system: 0,
+            loading: false,
+            cache: std::collections::HashMap::new(),
         }
     }
 
@@ -107,16 +119,134 @@ pub async fn run(client: &Client, manifest: &Manifest) -> Result<()> {
     result
 }
 
+fn spawn_repo_load(
+    tx: &mpsc::UnboundedSender<BgMessage>,
+    client: &Client,
+    manifest: &Manifest,
+    system_id: &str,
+) {
+    let tx = tx.clone();
+    let org = client.org.clone();
+    let http = client.http.clone();
+    let base_url = client.base_url.clone();
+    let semaphore = client.semaphore.clone();
+    let excludes = manifest.exclude_patterns_for_system(system_id);
+    let sys_id = system_id.to_owned();
+
+    tokio::spawn(async move {
+        let bg_client = Client {
+            http,
+            org,
+            semaphore,
+            base_url,
+        };
+
+        match bg_client.list_repos_for_system(&sys_id, &excludes).await {
+            Ok(repos) => {
+                let entries: Vec<RepoEntry> = repos
+                    .into_iter()
+                    .map(|repo| RepoEntry {
+                        repo,
+                        security: None,
+                    })
+                    .collect();
+                let _ = tx.send(BgMessage::ReposLoaded(entries));
+            }
+            Err(e) => {
+                let _ = tx.send(BgMessage::Error(e.to_string()));
+            }
+        }
+    });
+}
+
+fn spawn_security_load(
+    tx: &mpsc::UnboundedSender<BgMessage>,
+    client: &Client,
+    repos: &[RepoEntry],
+) {
+    for (idx, entry) in repos.iter().enumerate() {
+        let tx = tx.clone();
+        let http = client.http.clone();
+        let org = client.org.clone();
+        let base_url = client.base_url.clone();
+        let semaphore = client.semaphore.clone();
+        let repo_name = entry.repo.name.clone();
+
+        tokio::spawn(async move {
+            let bg_client = Client {
+                http,
+                org,
+                semaphore,
+                base_url,
+            };
+
+            if let Ok(state) = bg_client.get_security_state(&repo_name).await {
+                let _ = tx.send(BgMessage::SecurityLoaded(idx, state));
+            }
+        });
+    }
+}
+
+fn switch_to_cached_or_prompt(app: &mut App) {
+    let (sys_id, sys_name) = &app.systems[app.selected_system];
+    if let Some(cached) = app.cache.get(sys_id) {
+        app.repos = cached.clone();
+        app.list_state.select(Some(0));
+        app.status_msg = format!("{} repos for {sys_name} (cached)", app.repos.len());
+    } else {
+        app.repos.clear();
+        app.list_state.select(Some(0));
+        app.status_msg = format!("{sys_name} ({sys_id}). Press Enter to load.");
+    }
+}
+
 async fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
     client: &Client,
     manifest: &Manifest,
 ) -> Result<()> {
+    let (tx, mut rx) = mpsc::unbounded_channel::<BgMessage>();
+
     loop {
         terminal.draw(|f| draw(f, app))?;
 
-        if event::poll(Duration::from_millis(100))?
+        // Check for background task results (non-blocking)
+        while let Ok(msg) = rx.try_recv() {
+            match msg {
+                BgMessage::ReposLoaded(entries) => {
+                    let count = entries.len();
+                    let (sys_id, sys_name) = &app.systems[app.selected_system];
+                    app.status_msg =
+                        format!("Loaded {count} repos for {sys_name}. Fetching security...");
+                    app.repos = entries;
+                    app.list_state.select(Some(0));
+                    app.loading = false;
+                    app.cache.insert(sys_id.clone(), app.repos.clone());
+                    spawn_security_load(&tx, client, &app.repos);
+                }
+                BgMessage::SecurityLoaded(idx, state) => {
+                    if let Some(entry) = app.repos.get_mut(idx) {
+                        entry.security = Some(state);
+                    }
+                    let loaded = app.repos.iter().filter(|r| r.security.is_some()).count();
+                    let total = app.repos.len();
+                    if loaded == total {
+                        let (sys_id, sys_name) = &app.systems[app.selected_system];
+                        app.status_msg = format!("{total} repos loaded for {sys_name}");
+                        app.cache.insert(sys_id.clone(), app.repos.clone());
+                    } else {
+                        app.status_msg = format!("Security: {loaded}/{total}...");
+                    }
+                }
+                BgMessage::Error(e) => {
+                    app.status_msg = format!("Error: {e}");
+                    app.loading = false;
+                }
+            }
+        }
+
+        if event::poll(Duration::from_millis(50))?
             && let Event::Key(key) = event::read()?
         {
             if key.kind != KeyEventKind::Press {
@@ -154,16 +284,28 @@ async fn run_loop(
                     app.filter.clear();
                 }
                 KeyCode::Char('l') | KeyCode::Enter => {
-                    load_repos(app, client, manifest).await?;
+                    if !app.loading {
+                        app.loading = true;
+                        let sys_id = &app.systems[app.selected_system].0;
+                        app.status_msg =
+                            format!("Loading {}...", app.systems[app.selected_system].1);
+                        spawn_repo_load(&tx, client, manifest, sys_id);
+                    }
                 }
-                KeyCode::Char('s') => {
-                    // Cycle through systems
+                KeyCode::Tab | KeyCode::Char('s') => {
                     if !app.systems.is_empty() {
                         app.selected_system = (app.selected_system + 1) % app.systems.len();
-                        app.status_msg = format!(
-                            "System: {} - press 'l' to load",
-                            app.systems[app.selected_system].1
-                        );
+                        switch_to_cached_or_prompt(app);
+                    }
+                }
+                KeyCode::BackTab => {
+                    if !app.systems.is_empty() {
+                        app.selected_system = if app.selected_system == 0 {
+                            app.systems.len() - 1
+                        } else {
+                            app.selected_system - 1
+                        };
+                        switch_to_cached_or_prompt(app);
                     }
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
@@ -187,42 +329,13 @@ async fn run_loop(
     }
 }
 
-async fn load_repos(app: &mut App, client: &Client, manifest: &Manifest) -> Result<()> {
-    if app.systems.is_empty() {
-        return Ok(());
-    }
-
-    let (sys_id, sys_name) = &app.systems[app.selected_system];
-    app.status_msg = format!("Loading repos for {sys_name}...");
-
-    let excludes = manifest.exclude_patterns_for_system(sys_id);
-    let repos = client.list_repos_for_system(sys_id, &excludes).await?;
-
-    let mut entries = Vec::new();
-    for repo in repos {
-        let security = client.get_security_state(&repo.name).await.ok();
-        entries.push(RepoEntry { repo, security });
-    }
-
-    app.status_msg = format!(
-        "Loaded {} repos for {} ({})",
-        entries.len(),
-        sys_name,
-        sys_id
-    );
-    app.repos = entries;
-    app.list_state.select(Some(0));
-
-    Ok(())
-}
-
 fn draw(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // header + tabs
-            Constraint::Min(10),   // main content
-            Constraint::Length(3), // status bar
+            Constraint::Length(3),
+            Constraint::Min(10),
+            Constraint::Length(3),
         ])
         .split(f.area());
 
@@ -264,7 +377,6 @@ fn draw_repos_tab(f: &mut Frame, area: Rect, app: &App) {
         .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
         .split(area);
 
-    // Repo list
     let filtered = app.filtered_repos();
     let items: Vec<ListItem> = filtered
         .iter()
@@ -291,7 +403,9 @@ fn draw_repos_tab(f: &mut Frame, area: Rect, app: &App) {
         })
         .collect();
 
-    let title = if app.is_filtering {
+    let title = if app.loading {
+        " Repos (loading...) ".to_owned()
+    } else if app.is_filtering {
         format!(" Repos (filter: {}_) ", app.filter)
     } else if app.filter.is_empty() {
         format!(" Repos ({}) ", filtered.len())
@@ -310,7 +424,6 @@ fn draw_repos_tab(f: &mut Frame, area: Rect, app: &App) {
 
     f.render_stateful_widget(list, chunks[0], &mut app.list_state.clone());
 
-    // Detail panel
     let detail = if let Some(entry) = app.selected_repo() {
         let sec = entry.security.as_ref();
         let icon = |b: bool| if b { "✅" } else { "❌" };
@@ -322,14 +435,14 @@ fn draw_repos_tab(f: &mut Frame, area: Rect, app: &App) {
             )),
             Line::from(""),
             Line::from(vec![
-                Span::raw("  Language:  "),
+                Span::raw("  Language:   "),
                 Span::styled(
                     entry.repo.language.as_deref().unwrap_or("-"),
                     Style::default().fg(Color::Yellow),
                 ),
             ]),
             Line::from(vec![
-                Span::raw("  Branch:    "),
+                Span::raw("  Branch:     "),
                 Span::raw(&entry.repo.default_branch),
             ]),
             Line::from(vec![
@@ -358,7 +471,10 @@ fn draw_repos_tab(f: &mut Frame, area: Rect, app: &App) {
                 Line::from(format!("  {} Push Protection", icon(s.push_protection))),
             ]);
         } else {
-            lines.push(Line::from("  (not loaded)"));
+            lines.push(Line::from(Span::styled(
+                "  Loading...",
+                Style::default().fg(Color::DarkGray),
+            )));
         }
 
         lines
@@ -375,7 +491,7 @@ fn draw_repos_tab(f: &mut Frame, area: Rect, app: &App) {
 
 fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
     if app.repos.is_empty() {
-        let msg = Paragraph::new("  Press 'l' to load repos, then switch to this tab.").block(
+        let msg = Paragraph::new("  Press Enter to load repos, then switch to this tab.").block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(" Security Overview "),
@@ -397,6 +513,7 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
 
     let mut secured = 0;
     let mut issues = 0;
+    let mut pending = 0;
 
     for entry in &app.repos {
         let sec = entry.security.as_ref();
@@ -423,12 +540,23 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
                 icon(s.push_protection),
                 icon(s.dependabot_security_updates),
             )));
+        } else {
+            pending += 1;
+            lines.push(Line::from(Span::styled(
+                format!("  {:35}  ...loading", entry.repo.name),
+                Style::default().fg(Color::DarkGray),
+            )));
         }
     }
 
     lines.push(Line::from(""));
+    let summary = if pending > 0 {
+        format!("  {secured} secured, {issues} issues, {pending} loading...")
+    } else {
+        format!("  {secured} secured, {issues} need attention")
+    };
     lines.push(Line::from(Span::styled(
-        format!("  Summary: {secured} secured, {issues} need attention"),
+        summary,
         Style::default()
             .fg(if issues > 0 {
                 Color::Yellow
@@ -457,17 +585,17 @@ fn draw_help_tab(f: &mut Frame, area: Rect) {
             Style::default().fg(Color::Cyan).bold(),
         )),
         Line::from(""),
-        Line::from("  1       Switch to Repos tab"),
-        Line::from("  2       Switch to Security tab"),
-        Line::from("  ?       Show this help"),
-        Line::from("  s       Cycle through systems"),
-        Line::from("  l       Load repos for current system"),
-        Line::from("  Enter   Load repos for current system"),
-        Line::from("  j / ↓   Move down"),
-        Line::from("  k / ↑   Move up"),
-        Line::from("  /       Filter repos by name"),
-        Line::from("  Esc     Clear filter"),
-        Line::from("  q       Quit"),
+        Line::from("  1        Switch to Repos tab"),
+        Line::from("  2        Switch to Security tab"),
+        Line::from("  ?        Show this help"),
+        Line::from("  Tab      Next system"),
+        Line::from("  Sh+Tab   Previous system"),
+        Line::from("  Enter/l  Load repos for current system"),
+        Line::from("  j / ↓    Move down"),
+        Line::from("  k / ↑    Move up"),
+        Line::from("  /        Filter repos by name"),
+        Line::from("  Esc      Clear filter"),
+        Line::from("  q        Quit"),
         Line::from(""),
         Line::from(Span::styled(
             "  About",
@@ -475,7 +603,7 @@ fn draw_help_tab(f: &mut Frame, area: Rect) {
         )),
         Line::from(""),
         Line::from("  Ward - GitHub repository management for developers."),
-        Line::from("  plan → apply → verify."),
+        Line::from("  plan > apply > verify."),
     ];
 
     let widget = Paragraph::new(help).block(Block::default().borders(Borders::ALL).title(" Help "));
@@ -497,7 +625,7 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
         Span::styled(&app.status_msg, Style::default().fg(Color::DarkGray)),
         Span::raw("  │  "),
         Span::styled(
-            "q:quit  s:system  l:load  /:filter",
+            "q:quit  Tab:system  Enter:load  /:filter",
             Style::default().fg(Color::DarkGray),
         ),
     ]);

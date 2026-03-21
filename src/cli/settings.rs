@@ -93,7 +93,10 @@ impl SettingsCommand {
 
 /// Detect if a repo is an operations/GitOps repo (vs application repo).
 fn is_ops_repo(repo_name: &str) -> bool {
-    repo_name.contains("operation") || repo_name.ends_with("-ops") || repo_name.ends_with("-gitops")
+    repo_name.ends_with("-operation")
+        || repo_name.ends_with("-operations")
+        || repo_name.ends_with("-ops")
+        || repo_name.ends_with("-gitops")
 }
 
 struct RepoRulesetState {
@@ -459,7 +462,12 @@ mod tests {
 
     #[test]
     fn detect_ops_repo_with_operation_in_middle() {
-        assert!(is_ops_repo("my-operation-manager"));
+        assert!(!is_ops_repo("my-operation-manager"));
+    }
+
+    #[test]
+    fn detect_ops_repo_by_operation_suffix() {
+        assert!(is_ops_repo("my-service-operation"));
     }
 
     #[test]
