@@ -41,7 +41,7 @@ pub fn extract_node_version(content: &str) -> Option<String> {
         && let Some(engines) = json.get("engines")
         && let Some(node) = engines.get("node")
     {
-        return node.as_str().map(|s| s.to_owned());
+        return node.as_str().map(|s| s.to_string());
     }
     None
 }
@@ -113,5 +113,37 @@ mod tests {
     fn test_no_node_version() {
         let content = r#"{"name": "test"}"#;
         assert_eq!(extract_node_version(content), None);
+    }
+
+    #[test]
+    fn test_java_version_with_extra_whitespace() {
+        assert_eq!(extract_java_version("  jvmToolchain( 21 )  "), Some(21));
+    }
+
+    #[test]
+    fn test_multiple_patterns_first_wins() {
+        let content = "jvmToolchain(17)\nsourceCompatibility = JavaVersion.VERSION_21";
+        assert_eq!(extract_java_version(content), Some(17));
+    }
+
+    #[test]
+    fn test_node_version_range() {
+        let content = r#"{"engines": {"node": ">=18 <22"}}"#;
+        assert_eq!(extract_node_version(content), Some(">=18 <22".to_owned()));
+    }
+
+    #[test]
+    fn test_node_version_invalid_json() {
+        assert_eq!(extract_node_version("not json"), None);
+    }
+
+    #[test]
+    fn test_node_version_no_engines() {
+        assert_eq!(extract_node_version(r#"{"name": "app", "version": "1.0"}"#), None);
+    }
+
+    #[test]
+    fn test_java_version_empty_input() {
+        assert_eq!(extract_java_version(""), None);
     }
 }

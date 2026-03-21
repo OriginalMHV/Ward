@@ -4,7 +4,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, PartialEq, Deserialize)]
 pub struct Manifest {
     pub org: OrgConfig,
 
@@ -18,12 +18,12 @@ pub struct Manifest {
     pub systems: Vec<SystemConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, PartialEq, Deserialize)]
 pub struct OrgConfig {
     pub name: String,
 }
 
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
 pub struct SecurityConfig {
     #[serde(default = "default_true")]
     pub secret_scanning: bool,
@@ -44,7 +44,7 @@ pub struct SecurityConfig {
     pub codeql_advanced_setup: bool,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, PartialEq, Deserialize)]
 pub struct TemplateConfig {
     #[serde(default = "default_branch_name")]
     pub branch: String,
@@ -59,7 +59,7 @@ pub struct TemplateConfig {
     pub registries: HashMap<String, RegistryConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, PartialEq, Deserialize)]
 pub struct RegistryConfig {
     #[serde(rename = "type")]
     pub registry_type: String,
@@ -70,7 +70,7 @@ pub struct RegistryConfig {
     pub audience: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, PartialEq, Deserialize)]
 pub struct SystemConfig {
     pub id: String,
     pub name: String,
@@ -142,4 +142,152 @@ fn default_branch_name() -> String {
 
 fn default_commit_prefix() -> String {
     "chore: ".to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_minimal_manifest() {
+        let toml = r#"
+            [org]
+            name = "test-org"
+        "#;
+        let m: Manifest = toml::from_str(toml).unwrap();
+        assert_eq!(m.org.name, "test-org");
+        // #[serde(default)] on the struct field uses derive(Default), not serde field defaults
+        assert!(!m.security.secret_scanning);
+        assert!(m.systems.is_empty());
+    }
+
+    #[test]
+    fn parse_full_manifest() {
+        let toml = r#"
+            [org]
+            name = "my-org"
+            [security]
+            secret_scanning = false
+            push_protection = true
+            dependabot_alerts = true
+            dependabot_security_updates = false
+            [templates]
+            branch = "feat/setup"
+            reviewers = ["alice"]
+            [[systems]]
+            id = "backend"
+            name = "Backend"
+            exclude = ["ops", "infra"]
+        "#;
+        let m: Manifest = toml::from_str(toml).unwrap();
+        assert_eq!(m.org.name, "my-org");
+        assert!(!m.security.secret_scanning);
+        assert!(m.security.push_protection);
+        assert!(!m.security.dependabot_security_updates);
+        assert_eq!(m.templates.branch, "feat/setup");
+        assert_eq!(m.templates.reviewers, vec!["alice"]);
+        assert_eq!(m.systems.len(), 1);
+        assert_eq!(m.systems[0].id, "backend");
+        assert_eq!(m.systems[0].exclude, vec!["ops", "infra"]);
+    }
+
+    #[test]
+    fn system_lookup() {
+        let toml = r#"
+            [org]
+            name = "org"
+            [[systems]]
+            id = "be"
+            name = "Backend"
+            [[systems]]
+            id = "fe"
+            name = "Frontend"
+        "#;
+        let m: Manifest = toml::from_str(toml).unwrap();
+        assert_eq!(m.system("be").unwrap().name, "Backend");
+        assert_eq!(m.system("fe").unwrap().name, "Frontend");
+        assert!(m.system("missing").is_none());
+    }
+
+    #[test]
+    fn security_for_system_falls_back_to_global() {
+        let toml = r#"
+            [org]
+            name = "org"
+            [security]
+            secret_scanning = false
+            [[systems]]
+            id = "be"
+            name = "Backend"
+        "#;
+        let m: Manifest = toml::from_str(toml).unwrap();
+        assert!(!m.security_for_system("be").secret_scanning);
+    }
+
+    #[test]
+    fn security_for_system_uses_override() {
+        let toml = r#"
+            [org]
+            name = "org"
+            [security]
+            secret_scanning = true
+            [[systems]]
+            id = "be"
+            name = "Backend"
+            [systems.security]
+            secret_scanning = false
+        "#;
+        let m: Manifest = toml::from_str(toml).unwrap();
+        assert!(!m.security_for_system("be").secret_scanning);
+    }
+
+    #[test]
+    fn exclude_patterns_for_unknown_system_returns_empty() {
+        let m = Manifest::default();
+        assert!(m.exclude_patterns_for_system("nope").is_empty());
+    }
+
+    #[test]
+    fn default_template_config_values() {
+        // derive(Default) gives empty strings/vecs, not the serde defaults
+        let tc = TemplateConfig::default();
+        assert_eq!(tc.branch, "");
+        assert_eq!(tc.commit_message_prefix, "");
+        assert!(tc.reviewers.is_empty());
+        assert!(tc.registries.is_empty());
+    }
+
+    #[test]
+    fn serde_template_config_defaults() {
+        // When deserialized with missing fields, serde uses the custom defaults
+        let tc: TemplateConfig = toml::from_str("").unwrap();
+        assert_eq!(tc.branch, "chore/ward-setup");
+        assert_eq!(tc.commit_message_prefix, "chore: ");
+        assert!(tc.reviewers.is_empty());
+        assert!(tc.registries.is_empty());
+    }
+
+    #[test]
+    fn default_security_config_all_false() {
+        // derive(Default) sets all bools to false
+        let sc = SecurityConfig::default();
+        assert!(!sc.secret_scanning);
+        assert!(!sc.secret_scanning_ai_detection);
+        assert!(!sc.push_protection);
+        assert!(!sc.dependabot_alerts);
+        assert!(!sc.dependabot_security_updates);
+        assert!(!sc.codeql_advanced_setup);
+    }
+
+    #[test]
+    fn serde_security_config_defaults_to_true() {
+        // When deserialized with missing fields, serde uses default_true
+        let sc: SecurityConfig = toml::from_str("").unwrap();
+        assert!(sc.secret_scanning);
+        assert!(sc.secret_scanning_ai_detection);
+        assert!(sc.push_protection);
+        assert!(sc.dependabot_alerts);
+        assert!(sc.dependabot_security_updates);
+        assert!(!sc.codeql_advanced_setup); // this one defaults false
+    }
 }

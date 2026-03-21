@@ -74,8 +74,9 @@ impl Client {
             .filter(|r| r.name.starts_with(system_id))
             .filter(|r| {
                 if let Some(ref re) = exclude_regex {
-                    let suffix = r.name.strip_prefix(system_id).unwrap_or(&r.name);
-                    let suffix = suffix.strip_prefix('-').unwrap_or(suffix);
+                    let suffix = r.name.strip_prefix(system_id)
+                        .and_then(|s| s.strip_prefix('-'))
+                        .unwrap_or(&r.name);
                     !re.is_match(suffix)
                 } else {
                     true

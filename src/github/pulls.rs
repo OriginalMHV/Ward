@@ -3,7 +3,7 @@ use serde::Deserialize;
 
 use super::Client;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct PullRequest {
     pub number: u64,
     pub html_url: String,
@@ -12,7 +12,7 @@ pub struct PullRequest {
     pub head: PullRequestHead,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct PullRequestHead {
     #[serde(rename = "ref")]
     pub branch: String,
