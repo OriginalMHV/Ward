@@ -22,6 +22,10 @@ async fn main() -> Result<()> {
             cmd.run(&client, &manifest, cli.system.as_deref(), cli.repo.as_deref())
                 .await
         }
+        Command::Settings(cmd) => {
+            cmd.run(&client, &manifest, cli.system.as_deref(), cli.repo.as_deref())
+                .await
+        }
         Command::Commit(cmd) => {
             cmd.run(&client, &manifest, cli.system.as_deref(), cli.repo.as_deref())
                 .await
