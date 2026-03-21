@@ -4,6 +4,7 @@ pub mod init;
 pub mod repos;
 pub mod security;
 pub mod settings;
+pub mod tui;
 
 use clap::Parser;
 
@@ -63,6 +64,9 @@ pub enum Command {
 
     /// Full compliance audit across repos
     Audit(audit::AuditCommand),
+
+    /// Launch interactive terminal UI
+    Tui,
 
     /// Create a ward.toml in the current directory
     Init,
