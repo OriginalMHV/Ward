@@ -1,0 +1,70 @@
+{# Ward template: .github/workflows/codeql.yml for npm projects #}
+name: CodeQL
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - "**"
+  schedule:
+    - cron: '00 0 * * 0'
+
+env:
+  NODE_VERSION: {{ node_version | default(value="20") }}
+
+jobs:
+  analyze:
+    name: Analyze JavaScript/TypeScript
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      security-events: write
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+            build-mode: none
+          - language: actions
+            build-mode: none
+    steps:
+      - name: Checkout repository
+        uses: exampleorg/gap/actions/checkout@v4
+
+      - if: matrix.language == 'javascript-typescript'
+        name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ "{{" }} env.NODE_VERSION {{ "}}" }}
+          cache: 'npm'
+
+      - if: matrix.language == 'javascript-typescript'
+        name: Set up JFrog
+        id: jfrogsetup
+        uses: exampleorg/sys-ci-jman/setup-jfrog-cli@v0.7.3
+
+      - name: Init CodeQL
+        uses: exampleorg/gap/github/codeql-action/init@v4
+        with:
+          languages: ${{ "{{" }} matrix.language {{ "}}" }}
+          build-mode: ${{ "{{" }} matrix.build-mode {{ "}}" }}
+
+      - if: matrix.language == 'javascript-typescript'
+        name: NPM Install and Build
+        env:
+          JFROG_USERNAME: '${{ "{{" }} steps.jfrogsetup.outputs.oidc-user {{ "}}" }}'
+          JFROG_PASSWORD: '${{ "{{" }} steps.jfrogsetup.outputs.oidc-token {{ "}}" }}'
+        run: |
+          jf rt ping
+          npm ci
+          npm run build --if-present
+
+      - name: Perform CodeQL Analysis
+        uses: exampleorg/gap/github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ "{{" }}matrix.language{{ "}}" }}"
