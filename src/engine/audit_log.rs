@@ -59,10 +59,10 @@ impl AuditLog {
 
         let line = serde_json::to_string(&entry)?;
 
-        if let Ok(mut guard) = self.file.lock() {
-            if let Some(ref mut f) = *guard {
-                writeln!(f, "{line}")?;
-            }
+        if let Ok(mut guard) = self.file.lock()
+            && let Some(ref mut f) = *guard
+        {
+            writeln!(f, "{line}")?;
         }
 
         tracing::debug!("audit: {line}");

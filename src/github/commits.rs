@@ -85,10 +85,7 @@ impl Client {
             let body = resp.text().await.unwrap_or_default();
             anyhow::bail!("Failed to get ref heads/{branch} for {repo} (HTTP {status}): {body}");
         }
-        let ref_info: RefResponse = resp
-            .json()
-            .await
-            .context("Failed to parse ref response")?;
+        let ref_info: RefResponse = resp.json().await.context("Failed to parse ref response")?;
         let base_commit_sha = ref_info.object.sha;
 
         // Get the tree SHA for the base commit
@@ -113,10 +110,7 @@ impl Client {
             };
 
             let resp = self
-                .post_json(
-                    &format!("/repos/{}/{repo}/git/blobs", self.org),
-                    &blob_req,
-                )
+                .post_json(&format!("/repos/{}/{repo}/git/blobs", self.org), &blob_req)
                 .await?;
 
             let blob: CreateBlobResponse = resp.json().await.context("Failed to create blob")?;
@@ -136,13 +130,9 @@ impl Client {
         };
 
         let resp = self
-            .post_json(
-                &format!("/repos/{}/{repo}/git/trees", self.org),
-                &tree_req,
-            )
+            .post_json(&format!("/repos/{}/{repo}/git/trees", self.org), &tree_req)
             .await?;
-        let tree: CreateTreeResponse =
-            resp.json().await.context("Failed to create tree")?;
+        let tree: CreateTreeResponse = resp.json().await.context("Failed to create tree")?;
 
         // Create commit
         let commit_req = CreateCommitRequest {
@@ -157,8 +147,7 @@ impl Client {
                 &commit_req,
             )
             .await?;
-        let commit: CreateCommitResponse =
-            resp.json().await.context("Failed to create commit")?;
+        let commit: CreateCommitResponse = resp.json().await.context("Failed to create commit")?;
 
         // Update branch ref
         let update_ref = UpdateRefRequest {
@@ -199,9 +188,7 @@ impl Client {
 
         if !resp.status().is_success() {
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!(
-                "Failed to get ref for {from_branch} in {repo}: {body}"
-            );
+            anyhow::bail!("Failed to get ref for {from_branch} in {repo}: {body}");
         }
 
         let ref_info: RefResponse = resp.json().await?;
@@ -212,10 +199,7 @@ impl Client {
         });
 
         let resp = self
-            .post_json(
-                &format!("/repos/{}/{repo}/git/refs", self.org),
-                &body,
-            )
+            .post_json(&format!("/repos/{}/{repo}/git/refs", self.org), &body)
             .await?;
 
         let status = resp.status();

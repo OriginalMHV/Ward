@@ -6,8 +6,8 @@ use dialoguer::Confirm;
 use crate::config::Manifest;
 use crate::config::templates::load_templates;
 use crate::engine::audit_log::AuditLog;
-use crate::github::commits::CommitFile;
 use crate::github::Client;
+use crate::github::commits::CommitFile;
 
 #[derive(Args)]
 pub struct SettingsCommand {
@@ -59,7 +59,17 @@ impl SettingsCommand {
             SettingsAction::Plan {
                 ruleset,
                 copilot_instructions,
-            } => plan(client, manifest, system, repo, ruleset.as_deref(), *copilot_instructions).await,
+            } => {
+                plan(
+                    client,
+                    manifest,
+                    system,
+                    repo,
+                    ruleset.as_deref(),
+                    *copilot_instructions,
+                )
+                .await
+            }
             SettingsAction::Apply {
                 ruleset,
                 copilot_instructions,
@@ -83,9 +93,7 @@ impl SettingsCommand {
 
 /// Detect if a repo is an operations/GitOps repo (vs application repo).
 fn is_ops_repo(repo_name: &str) -> bool {
-    repo_name.contains("operation")
-        || repo_name.ends_with("-ops")
-        || repo_name.ends_with("-gitops")
+    repo_name.contains("operation") || repo_name.ends_with("-ops") || repo_name.ends_with("-gitops")
 }
 
 struct RepoRulesetState {
@@ -121,8 +129,7 @@ async fn resolve_repos(
     if let Some(repo_name) = repo {
         return Ok(vec![repo_name.to_owned()]);
     }
-    let sys = system
-        .ok_or_else(|| anyhow::anyhow!("Either --system or --repo is required"))?;
+    let sys = system.ok_or_else(|| anyhow::anyhow!("Either --system or --repo is required"))?;
     let excludes = manifest.exclude_patterns_for_system(sys);
     let repos = client.list_repos_for_system(sys, &excludes).await?;
     Ok(repos.into_iter().map(|r| r.name).collect())
@@ -216,11 +223,7 @@ async fn apply(
     let branch_name = &manifest.templates.branch;
 
     println!();
-    println!(
-        "  {} Scanning {} repos...",
-        style("🔍").bold(),
-        repos.len()
-    );
+    println!("  {} Scanning {} repos...", style("🔍").bold(), repos.len());
 
     // Scan all repos
     let mut work: Vec<(RepoRulesetState, String)> = Vec::new();
@@ -235,14 +238,14 @@ async fn apply(
     }
 
     if work.is_empty() {
-        println!(
-            "\n  {} All repos up to date.",
-            style("✅").green()
-        );
+        println!("\n  {} All repos up to date.", style("✅").green());
         return Ok(());
     }
 
-    println!("\n  {} repos need changes:", style(work.len()).yellow().bold());
+    println!(
+        "\n  {} repos need changes:",
+        style(work.len()).yellow().bold()
+    );
     for (state, _) in &work {
         let mut actions = Vec::new();
         if do_ruleset && !state.has_copilot_review {
@@ -281,11 +284,7 @@ async fn apply(
     let mut failed: Vec<(String, String)> = Vec::new();
 
     for (state, default_branch) in &work {
-        println!(
-            "  {} {} ...",
-            style("▶").magenta(),
-            state.repo
-        );
+        println!("  {} {} ...", style("▶").magenta(), state.repo);
 
         // Create ruleset
         if do_ruleset && !state.has_copilot_review {
@@ -364,11 +363,7 @@ async fn apply(
 
     println!();
     if failed.is_empty() {
-        println!(
-            "  {} All {} repos updated.",
-            style("✅").green(),
-            succeeded
-        );
+        println!("  {} All {} repos updated.", style("✅").green(), succeeded);
     } else {
         println!(
             "  {} {} succeeded, {} failed:",

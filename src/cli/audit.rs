@@ -314,11 +314,7 @@ fn print_table(audits: &[RepoAudit]) {
 
     for a in audits {
         let java = a.versions.java.as_deref().unwrap_or("-");
-        let sboot = a
-            .versions
-            .spring_boot
-            .as_deref()
-            .unwrap_or("-");
+        let sboot = a.versions.spring_boot.as_deref().unwrap_or("-");
 
         let icon = |b: bool| {
             if b {
@@ -411,4 +407,3 @@ mod tests {
         );
     }
 }
-

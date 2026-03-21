@@ -38,11 +38,7 @@ impl ReposCommand {
     }
 }
 
-async fn list_repos(
-    client: &Client,
-    manifest: &Manifest,
-    system: Option<&str>,
-) -> Result<()> {
+async fn list_repos(client: &Client, manifest: &Manifest, system: Option<&str>) -> Result<()> {
     let repos = if let Some(sys) = system {
         let excludes = manifest.exclude_patterns_for_system(sys);
         client.list_repos_for_system(sys, &excludes).await?
@@ -67,16 +63,16 @@ async fn list_repos(
         })
         .collect();
 
-    let _table = Table::new(rows)
-        .with(Style::rounded())
-        .to_string();
+    let _table = Table::new(rows).with(Style::rounded()).to_string();
 
     println!();
     println!(
         "  {} repositories in {}{}\n",
         style(repos.len()).bold().cyan(),
         style(&client.org).bold(),
-        system.map(|s| format!(" (system: {s})")).unwrap_or_default()
+        system
+            .map(|s| format!(" (system: {s})"))
+            .unwrap_or_default()
     );
 
     // Manual header + data table
@@ -118,11 +114,7 @@ async fn inspect_repo(client: &Client, name: &str) -> Result<()> {
         style("Language:").bold(),
         repo.language.as_deref().unwrap_or("-")
     );
-    println!(
-        "  {} {}",
-        style("Visibility:").bold(),
-        repo.visibility
-    );
+    println!("  {} {}", style("Visibility:").bold(), repo.visibility);
     println!(
         "  {} {}",
         style("Default Branch:").bold(),
@@ -153,5 +145,8 @@ fn print_feature(name: &str, enabled: bool) {
     } else {
         style("❌").red()
     };
-    println!("{name}: {icon} {}", if enabled { "enabled" } else { "disabled" });
+    println!(
+        "{name}: {icon} {}",
+        if enabled { "enabled" } else { "disabled" }
+    );
 }

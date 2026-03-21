@@ -5,10 +5,10 @@ pub fn extract_java_version(content: &str) -> Option<u8> {
         let trimmed = line.trim();
 
         // jvmToolchain(21)
-        if trimmed.contains("jvmToolchain") {
-            if let Some(num) = extract_number_from_parens(trimmed) {
-                return Some(num);
-            }
+        if trimmed.contains("jvmToolchain")
+            && let Some(num) = extract_number_from_parens(trimmed)
+        {
+            return Some(num);
         }
 
         // JavaLanguageVersion.of(21)
@@ -21,12 +21,13 @@ pub fn extract_java_version(content: &str) -> Option<u8> {
         }
 
         // sourceCompatibility = JavaVersion.VERSION_21
-        if trimmed.contains("sourceCompatibility") && trimmed.contains("VERSION_") {
-            if let Some(v) = trimmed.split("VERSION_").nth(1) {
-                let cleaned: String = v.chars().take_while(|c| c.is_ascii_digit()).collect();
-                if let Ok(num) = cleaned.parse() {
-                    return Some(num);
-                }
+        if trimmed.contains("sourceCompatibility")
+            && trimmed.contains("VERSION_")
+            && let Some(v) = trimmed.split("VERSION_").nth(1)
+        {
+            let cleaned: String = v.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(num) = cleaned.parse() {
+                return Some(num);
             }
         }
     }
@@ -36,12 +37,11 @@ pub fn extract_java_version(content: &str) -> Option<u8> {
 
 /// Extract Node.js version from package.json engines field.
 pub fn extract_node_version(content: &str) -> Option<String> {
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(content) {
-        if let Some(engines) = json.get("engines") {
-            if let Some(node) = engines.get("node") {
-                return node.as_str().map(|s| s.to_owned());
-            }
-        }
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(content)
+        && let Some(engines) = json.get("engines")
+        && let Some(node) = engines.get("node")
+    {
+        return node.as_str().map(|s| s.to_owned());
     }
     None
 }
@@ -75,10 +75,7 @@ mod tests {
 
     #[test]
     fn test_jvm_toolchain_17() {
-        assert_eq!(
-            extract_java_version("    jvmToolchain(17)"),
-            Some(17)
-        );
+        assert_eq!(extract_java_version("    jvmToolchain(17)"), Some(17));
     }
 
     #[test]

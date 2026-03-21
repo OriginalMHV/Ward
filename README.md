@@ -10,7 +10,7 @@
 > **plan → apply → verify.** No more shell scripts. No more silent failures.  
 > No more coin-flip bulk operations.
 
-Ward is a Rust CLI that manages GitHub repositories at scale — security settings, workflow files, templates, and compliance audits — with the same rigor you'd expect from infrastructure-as-code tooling. Every change is planned before execution and verified after.
+Ward is a Rust CLI/TUI that manages GitHub repositories at scale — security settings, workflow files, rulesets, compliance audits, and interactive dashboards — with the same rigor you'd expect from infrastructure-as-code tooling. Every change is planned before execution and verified after.
 
 ---
 
@@ -37,6 +37,7 @@ Ward replaces all of that.
 | Audit trail | None | JSON lines log of every mutation |
 | Idempotency | Create duplicates | Detects existing state, skips what's done |
 | Configuration | Hardcoded in scripts | Declarative `ward.toml` manifest |
+| Exploration | Grep + curl | Interactive TUI with keyboard navigation |
 
 ---
 
@@ -70,6 +71,19 @@ ward --help
 - **GitHub CLI** (`gh`) — Ward reads your auth token from `gh auth token`
 - Alternatively, set `GH_TOKEN` or `GITHUB_TOKEN` environment variable
 
+### Shell Completions
+
+```bash
+# Bash
+ward completions bash > ~/.bash_completion.d/ward
+
+# Zsh
+ward completions zsh > ~/.zfunc/_ward
+
+# Fish
+ward completions fish > ~/.config/fish/completions/ward.fish
+```
+
 ---
 
 ## Quick Start
@@ -93,6 +107,9 @@ ward security apply --system s07411
 
 # 6. Verify it stuck
 ward security audit --system s07411
+
+# 7. Explore interactively
+ward tui
 ```
 
 ---
@@ -281,15 +298,114 @@ Ward extracts versions from build files — no regex-and-pray:
 - **Node:** Reads `engines.node` from `package.json`
 - Falls back to sensible defaults (Java 21, Node 20) with a **warning**, never silently
 
-### `ward audit` — Compliance audit
+### `ward settings` — Manage settings and rulesets
+
+Declarative management of repository rulesets and configuration files.
 
 ```bash
-# Security audit with table output
-ward security audit --system s07411
+# Plan: see what rulesets/settings would change
+ward settings plan --ruleset copilot-review --system s07411
+
+# Apply copilot code review ruleset to all repos
+ward settings apply --ruleset copilot-review --system s07411
+
+# Deploy copilot review instructions (auto-detects app vs ops repos)
+ward settings plan --copilot-instructions --system s07411
+ward settings apply --copilot-instructions --system s07411
+
+# Audit current ruleset state
+ward settings audit --system s07411
+```
+
+**Rulesets:**
+
+| Ruleset | Description |
+|---------|-------------|
+| `copilot-review` | Enables GitHub Copilot code review on push to the default branch |
+
+**Copilot Instructions:**
+
+Ward auto-detects whether a repository is an application or operations repo (based on name patterns like `-operations`, `-ops`, `-gitops`) and deploys the appropriate `.github/copilot-instructions.md` template:
+
+- **App repos** → `instructions-app.md.tera` (development-focused instructions)
+- **Ops repos** → `instructions-ops.md.tera` (infrastructure/deployment-focused instructions)
+
+### `ward audit` — Full compliance audit
+
+```bash
+# Full audit with table output
+ward audit --system s07411
 
 # JSON output for dashboards
 ward audit --system s07411 --format json
+
+# All systems
+ward audit
 ```
+
+Generates a comprehensive compliance report including:
+
+- **Project type detection** (Gradle, npm, Cargo)
+- **Version inventory** (Java, Spring Boot, Kotlin, Node across all repos)
+- **Security posture** (Dependabot, secret scanning, push protection status)
+- **Alert counts** (critical, high, medium, low per repo)
+- **Ops repo detection** (identifies which repos are operations/GitOps repos)
+
+**JSON output** is dashboard-compatible:
+
+```json
+{
+  "generated_at": "2026-03-21T15:30:00Z",
+  "organization": "my-org",
+  "repositories": [
+    {
+      "name": "my-service-api",
+      "system_id": "s07411",
+      "project_type": "gradle",
+      "is_ops_repo": false,
+      "versions": {
+        "java": "21",
+        "spring_boot": "3.4.1",
+        "kotlin": null,
+        "node": null
+      },
+      "security": {
+        "dependabot_alerts": true,
+        "alert_counts": { "critical": 0, "high": 1, "medium": 3, "low": 7 }
+      }
+    }
+  ]
+}
+```
+
+### `ward tui` — Interactive terminal UI
+
+A full-screen terminal UI for exploring repositories and security state.
+
+```bash
+ward tui
+```
+
+**Features:**
+
+- **Three tabs:** Repos browser, Security overview, Help
+- **System cycling:** Press `Tab`/`Shift+Tab` to switch between configured systems
+- **Repo filtering:** Press `/` to start filtering, type to narrow down
+- **Keyboard navigation:** Arrow keys to browse, `Enter` for details
+- **Security overview:** See security state across all repos at a glance
+
+**Keybindings:**
+
+| Key | Action |
+|-----|--------|
+| `1` / `2` / `3` | Switch tabs |
+| `↑` / `↓` | Navigate repos |
+| `Tab` / `Shift+Tab` | Cycle systems |
+| `/` | Start search/filter |
+| `Esc` | Cancel filter |
+| `l` | Load repos for selected system |
+| `s` | Load security state |
+| `q` | Quit |
 
 ### `ward init` — Initialize configuration
 
@@ -386,7 +502,9 @@ ward/
 │   │   ├── repos.rs            # ward repos {list, inspect}
 │   │   ├── security.rs         # ward security {plan, apply, audit}
 │   │   ├── commit.rs           # ward commit {plan, apply}
+│   │   ├── settings.rs         # ward settings {plan, apply, audit}
 │   │   ├── audit.rs            # ward audit
+│   │   ├── tui.rs              # ward tui (interactive mode)
 │   │   └── init.rs             # ward init
 │   │
 │   ├── config/                 # Configuration
@@ -402,7 +520,7 @@ ward/
 │   │   ├── contents.rs         # File read via Contents API
 │   │   ├── pulls.rs            # PR creation (idempotent)
 │   │   ├── rulesets.rs         # Repository rulesets (Copilot review, etc.)
-│   │   └── settings.rs         # Repository settings (reserved)
+│   │   └── settings.rs         # Repository settings API
 │   │
 │   ├── engine/                 # Core execution engine
 │   │   ├── planner.rs          # Diff current vs desired state
@@ -419,7 +537,8 @@ ward/
 ├── templates/                  # Tera templates (embedded at compile time)
 │   ├── dependabot/             # .github/dependabot.yml
 │   ├── codeql/                 # .github/workflows/codeql.yml
-│   └── dependency-submission/  # .github/workflows/dependency-submission.yml
+│   ├── dependency-submission/  # .github/workflows/dependency-submission.yml
+│   └── copilot-review/        # .github/copilot-instructions.md
 │
 └── tests/
 ```
@@ -436,17 +555,19 @@ ward/
 | **Embedded templates** | Single binary, no external file dependencies. Override with local templates |
 | **`gh auth token` for auth** | Zero-config if you already use the GitHub CLI |
 | **JSON lines audit log** | Append-only, queryable with `jq`, compliance-friendly |
+| **Interactive TUI** | Explore and manage without memorizing commands |
 
 ### Dependencies
 
 | Crate | Purpose |
 |-------|---------|
-| `clap` | CLI argument parsing (derive mode) |
+| `clap` + `clap_complete` | CLI parsing and shell completions |
 | `tokio` | Async runtime for concurrent API calls |
 | `reqwest` | HTTP client with rustls |
 | `serde` + `toml` | Configuration parsing |
 | `tera` | Jinja2-style template rendering |
 | `rust-embed` | Embed templates in binary at compile time |
+| `ratatui` + `crossterm` | Interactive terminal UI |
 | `console` | Terminal colors and styling |
 | `indicatif` | Progress bars and spinners |
 | `dialoguer` | Interactive confirmation prompts |
@@ -500,6 +621,12 @@ updates:
       - gradle-artifactory
 ```
 
+### Adding Custom Templates
+
+1. Create a `.tera` file in the `templates/` directory
+2. Add a match arm in `src/cli/commit.rs` for the new template name
+3. Rebuild — templates are embedded at compile time via `rust-embed`
+
 ---
 
 ## Recipes
@@ -535,7 +662,13 @@ ward commit apply --template codeql --system s07411 --yes
 # 4. Deploy dependency submission
 ward commit apply --template dependency-submission --system s07411 --yes
 
-# 5. Audit the result
+# 5. Set up Copilot code review rulesets
+ward settings apply --ruleset copilot-review --system s07411
+
+# 6. Deploy Copilot review instructions
+ward settings apply --copilot-instructions --system s07411
+
+# 7. Audit the result
 ward security audit --system s07411
 ```
 
@@ -550,6 +683,13 @@ ward audit --system s07411 --format json > dashboard-data.json
 ```bash
 # In a GitHub Action or scheduled job
 ward security plan --system s07411 --json | jq '.[] | select(.changes | length > 0)'
+```
+
+### Interactive exploration
+
+```bash
+# Launch TUI, browse repos, check security state
+ward tui
 ```
 
 ---
@@ -595,14 +735,13 @@ ward commit plan --template codeql --repo my-repo -v
 
 ## Roadmap
 
-- [ ] **Settings & rulesets** — Manage branch protection rules, Copilot code review rulesets, repo features declaratively
-- [ ] **TUI mode** — Interactive terminal UI for exploring repos and reviewing plans (ratatui)
-- [ ] **Full audit dashboard** — Version inventory, alert counts, compliance scoring
 - [ ] **Rollback** — Undo applied changes using the audit log
 - [ ] **Custom template directory** — Load templates from `~/.ward/templates/` alongside embedded ones
 - [ ] **GitHub App auth** — Support for GitHub App installation tokens
-- [ ] **Shell completions** — Bash, Zsh, Fish
+- [ ] **Branch protection rules** — Declarative branch protection management
 - [ ] **Homebrew formula** — `brew install ward`
+- [ ] **crates.io** — `cargo install ward`
+- [ ] **Config drift detection** — Scheduled audit + Slack/webhook notifications
 
 ---
 
@@ -612,13 +751,15 @@ Issues and PRs welcome. The codebase is structured for easy extension:
 
 - **New template**: Add a `.tera` file in `templates/` and a match arm in `cli/commit.rs`
 - **New security feature**: Add fields to `SecurityState` and `SecurityConfig`, update the planner
-- **New command**: Add a module in `cli/`, register in `cli/mod.rs`
+- **New command**: Add a module in `cli/`, register in `cli/mod.rs` and `main.rs`
+- **New ruleset**: Add a function in `github/rulesets.rs`, wire up in `cli/settings.rs`
 
 ```bash
 # Development
 cargo build
 cargo test
-cargo run -- --help
+cargo clippy
+cargo fmt
 
 # Run with trace logging
 RUST_LOG=trace cargo run -- repos list --org your-org

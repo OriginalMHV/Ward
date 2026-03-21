@@ -26,10 +26,7 @@ pub fn run() -> Result<()> {
     let path = "ward.toml";
 
     if std::path::Path::new(path).exists() {
-        println!(
-            "  {} ward.toml already exists.",
-            style("⚠️").yellow()
-        );
+        println!("  {} ward.toml already exists.", style("⚠️").yellow());
         return Ok(());
     }
 

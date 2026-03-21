@@ -37,10 +37,7 @@ impl Client {
 
         // Dependabot alerts (vulnerability-alerts)
         let resp = self
-            .get(&format!(
-                "/repos/{}/{repo}/vulnerability-alerts",
-                self.org
-            ))
+            .get(&format!("/repos/{}/{repo}/vulnerability-alerts", self.org))
             .await?;
         state.dependabot_alerts = resp.status().as_u16() == 204;
 
@@ -63,27 +60,24 @@ impl Client {
         }
 
         // Secret scanning, AI detection, push protection (from repo settings)
-        let resp = self
-            .get(&format!("/repos/{}/{repo}", self.org))
-            .await?;
+        let resp = self.get(&format!("/repos/{}/{repo}", self.org)).await?;
 
-        if resp.status().is_success() {
-            if let Ok(body) = resp.json::<RepoSecurityResponse>().await {
-                if let Some(sa) = body.security_and_analysis {
-                    state.secret_scanning = sa
-                        .secret_scanning
-                        .as_ref()
-                        .is_some_and(|f| f.status == "enabled");
-                    state.secret_scanning_ai_detection = sa
-                        .secret_scanning_ai_detection
-                        .as_ref()
-                        .is_some_and(|f| f.status == "enabled");
-                    state.push_protection = sa
-                        .secret_scanning_push_protection
-                        .as_ref()
-                        .is_some_and(|f| f.status == "enabled");
-                }
-            }
+        if resp.status().is_success()
+            && let Ok(body) = resp.json::<RepoSecurityResponse>().await
+            && let Some(sa) = body.security_and_analysis
+        {
+            state.secret_scanning = sa
+                .secret_scanning
+                .as_ref()
+                .is_some_and(|f| f.status == "enabled");
+            state.secret_scanning_ai_detection = sa
+                .secret_scanning_ai_detection
+                .as_ref()
+                .is_some_and(|f| f.status == "enabled");
+            state.push_protection = sa
+                .secret_scanning_push_protection
+                .as_ref()
+                .is_some_and(|f| f.status == "enabled");
         }
 
         Ok(state)
@@ -92,10 +86,7 @@ impl Client {
     /// Enable vulnerability alerts (Dependabot alerts) for a repo.
     pub async fn enable_dependabot_alerts(&self, repo: &str) -> Result<()> {
         let resp = self
-            .put(&format!(
-                "/repos/{}/{repo}/vulnerability-alerts",
-                self.org
-            ))
+            .put(&format!("/repos/{}/{repo}/vulnerability-alerts", self.org))
             .await?;
 
         ensure_success(resp, "enable Dependabot alerts", repo).await

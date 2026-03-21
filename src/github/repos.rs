@@ -98,8 +98,6 @@ impl Client {
             anyhow::bail!("Failed to get repo {repo_name} (HTTP {status}): {body}");
         }
 
-        resp.json()
-            .await
-            .context("Failed to parse repo response")
+        resp.json().await.context("Failed to parse repo response")
     }
 }

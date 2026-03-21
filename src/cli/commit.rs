@@ -56,9 +56,7 @@ impl CommitCommand {
         repo: Option<&str>,
     ) -> Result<()> {
         match &self.action {
-            CommitAction::Plan { template } => {
-                plan(client, manifest, system, repo, template).await
-            }
+            CommitAction::Plan { template } => plan(client, manifest, system, repo, template).await,
             CommitAction::Apply { template, yes } => {
                 apply(client, manifest, system, repo, template, *yes).await
             }
@@ -96,9 +94,7 @@ async fn detect_and_render(
         (ProjectType::Npm, "dependabot") => "dependabot/npm.yml.tera",
         (ProjectType::Gradle, "codeql") => "codeql/gradle.yml.tera",
         (ProjectType::Npm, "codeql") => "codeql/npm.yml.tera",
-        (ProjectType::Gradle, "dependency-submission") => {
-            "dependency-submission/gradle.yml.tera"
-        }
+        (ProjectType::Gradle, "dependency-submission") => "dependency-submission/gradle.yml.tera",
         (pt, cat) => {
             anyhow::bail!("No template for {cat} + {pt} in repo {repo_name}");
         }
@@ -159,25 +155,13 @@ async fn detect_project_type(client: &Client, repo: &str) -> Result<ProjectType>
     {
         return Ok(ProjectType::Gradle);
     }
-    if client
-        .get_file(repo, "build.gradle", None)
-        .await?
-        .is_some()
-    {
+    if client.get_file(repo, "build.gradle", None).await?.is_some() {
         return Ok(ProjectType::Gradle);
     }
-    if client
-        .get_file(repo, "package.json", None)
-        .await?
-        .is_some()
-    {
+    if client.get_file(repo, "package.json", None).await?.is_some() {
         return Ok(ProjectType::Npm);
     }
-    if client
-        .get_file(repo, "Cargo.toml", None)
-        .await?
-        .is_some()
-    {
+    if client.get_file(repo, "Cargo.toml", None).await?.is_some() {
         return Ok(ProjectType::Cargo);
     }
     Ok(ProjectType::Unknown)
@@ -227,8 +211,7 @@ async fn resolve_repos_with_branches(
         return Ok(vec![(r.name, r.default_branch)]);
     }
 
-    let sys = system
-        .ok_or_else(|| anyhow::anyhow!("Either --system or --repo is required"))?;
+    let sys = system.ok_or_else(|| anyhow::anyhow!("Either --system or --repo is required"))?;
     let excludes = manifest.exclude_patterns_for_system(sys);
     let repos = client.list_repos_for_system(sys, &excludes).await?;
     Ok(repos
@@ -279,7 +262,11 @@ async fn plan(
         {
             Ok(result) => {
                 if result.existing_matches {
-                    println!("  {} {}", style("✓").green(), style(&result.repo_name).dim());
+                    println!(
+                        "  {} {}",
+                        style("✓").green(),
+                        style(&result.repo_name).dim()
+                    );
                     up_to_date += 1;
                 } else if result.already_exists {
                     println!(
@@ -323,7 +310,9 @@ async fn plan(
     if to_create + to_update > 0 {
         println!(
             "\n  Run {} to apply.",
-            style(format!("ward commit apply --template {template}")).cyan().bold()
+            style(format!("ward commit apply --template {template}"))
+                .cyan()
+                .bold()
         );
     }
 
@@ -420,11 +409,7 @@ async fn apply(
     let mut failed: Vec<(String, String)> = Vec::new();
 
     for result in &pending {
-        println!(
-            "  {} {} ...",
-            style("▶").magenta(),
-            result.repo_name
-        );
+        println!("  {} {} ...", style("▶").magenta(), result.repo_name);
 
         let default_branch = repos
             .iter()
@@ -432,25 +417,21 @@ async fn apply(
             .map(|(_, b)| b.as_str())
             .unwrap_or("main");
 
-        match commit_and_pr(
+        match commit_and_pr(&CommitPrParams {
             client,
-            &result.repo_name,
+            repo: &result.repo_name,
             default_branch,
             branch_name,
-            &result.target_path,
-            &result.rendered,
+            target_path: &result.target_path,
+            content: &result.rendered,
             template,
-            &manifest.templates.reviewers,
-            &manifest.templates.commit_message_prefix,
-        )
+            reviewers: &manifest.templates.reviewers,
+            commit_prefix: &manifest.templates.commit_message_prefix,
+        })
         .await
         {
             Ok(pr_url) => {
-                println!(
-                    "    {} PR: {}",
-                    style("✅").green(),
-                    style(&pr_url).cyan()
-                );
+                println!("    {} PR: {}", style("✅").green(), style(&pr_url).cyan());
                 audit_log.log(
                     &result.repo_name,
                     &format!("commit_template_{template}"),
@@ -461,11 +442,7 @@ async fn apply(
                 succeeded += 1;
             }
             Err(e) => {
-                println!(
-                    "    {} {}",
-                    style("❌").red(),
-                    e
-                );
+                println!("    {} {}", style("❌").red(), e);
                 failed.push((result.repo_name.clone(), e.to_string()));
             }
         }
@@ -499,17 +476,31 @@ async fn apply(
     Ok(())
 }
 
-async fn commit_and_pr(
-    client: &Client,
-    repo: &str,
-    default_branch: &str,
-    branch_name: &str,
-    target_path: &str,
-    content: &str,
-    template: &str,
-    reviewers: &[String],
-    commit_prefix: &str,
-) -> Result<String> {
+struct CommitPrParams<'a> {
+    client: &'a Client,
+    repo: &'a str,
+    default_branch: &'a str,
+    branch_name: &'a str,
+    target_path: &'a str,
+    content: &'a str,
+    template: &'a str,
+    reviewers: &'a [String],
+    commit_prefix: &'a str,
+}
+
+async fn commit_and_pr(params: &CommitPrParams<'_>) -> Result<String> {
+    let CommitPrParams {
+        client,
+        repo,
+        default_branch,
+        branch_name,
+        target_path,
+        content,
+        template,
+        reviewers,
+        commit_prefix,
+    } = params;
+
     // Create branch from default branch
     client
         .create_branch(repo, branch_name, default_branch)
@@ -518,8 +509,8 @@ async fn commit_and_pr(
     // Commit the file
     let message = format!("{commit_prefix}add {template} configuration");
     let files = vec![CommitFile {
-        path: target_path.to_owned(),
-        content: content.to_owned(),
+        path: target_path.to_string(),
+        content: content.to_string(),
     }];
 
     client
@@ -538,9 +529,15 @@ async fn commit_and_pr(
     );
 
     let pr = client
-        .create_pull_request(repo, &pr_title, &pr_body, branch_name, default_branch, reviewers)
+        .create_pull_request(
+            repo,
+            &pr_title,
+            &pr_body,
+            branch_name,
+            default_branch,
+            reviewers,
+        )
         .await?;
 
     Ok(pr.html_url)
 }
-

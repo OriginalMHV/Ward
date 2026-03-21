@@ -152,10 +152,7 @@ async fn apply(
     }
 
     println!();
-    println!(
-        "  {} Applying changes...",
-        style("⚡").bold()
-    );
+    println!("  {} Applying changes...", style("⚡").bold());
 
     let audit_log = AuditLog::new()?;
     let report = executor::execute_security_plan(client, &plans, &audit_log).await?;
@@ -163,10 +160,7 @@ async fn apply(
 
     if !skip_verify && report.failed.is_empty() {
         println!();
-        println!(
-            "  {} Verifying changes...",
-            style("🔍").bold()
-        );
+        println!("  {} Verifying changes...", style("🔍").bold());
 
         let desired = manifest.security_for_system(&sys_id);
         let verify_report = verifier::verify_security(client, &plans, desired).await?;
@@ -264,36 +258,25 @@ fn print_plan_table(plans: &[planner::RepoPlan], system_id: &str) {
     println!();
     println!(
         "  {}",
-        style(format!("Security Plan — {system_id}"))
-            .bold()
-            .cyan()
+        style(format!("Security Plan — {system_id}")).bold().cyan()
     );
-    println!(
-        "  {}",
-        style("─".repeat(60)).dim()
-    );
+    println!("  {}", style("─".repeat(60)).dim());
 
     for plan in plans {
         if plan.has_changes() {
             println!("  {} {}", style("⚡").yellow(), style(&plan.repo).bold());
             for change in &plan.changes {
-                println!(
-                    "     {} → {}",
-                    format!(
-                        "{}: {}",
-                        change.feature,
-                        if change.current {
-                            style("on").green()
-                        } else {
-                            style("off").red()
-                        }
-                    ),
-                    if change.desired {
-                        style("on").green().bold()
-                    } else {
-                        style("off").red().bold()
-                    }
-                );
+                let current = if change.current {
+                    style("on").green()
+                } else {
+                    style("off").red()
+                };
+                let desired = if change.desired {
+                    style("on").green().bold()
+                } else {
+                    style("off").red().bold()
+                };
+                println!("     {}: {current} → {desired}", change.feature);
             }
         } else {
             println!("  {} {}", style("✓").green(), style(&plan.repo).dim());
