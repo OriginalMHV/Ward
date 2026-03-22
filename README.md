@@ -178,6 +178,35 @@ ward audit --system backend                     # table output
 ward audit --system backend --format json       # machine-readable JSON
 ```
 
+### `ward config`
+
+Manage ward.toml without hand-editing TOML.
+
+```bash
+ward config show                                # pretty-print current config
+ward config path                                # show config file location
+ward config edit                                # open in $EDITOR
+ward config set security.push_protection true   # set a value (preserves comments)
+ward config set branch_protection.required_approvals 2
+ward config add-system                          # interactive system wizard
+ward config remove-system s07252                # remove a system by ID
+```
+
+### `ward template`
+
+Manage workflow templates (built-in and custom).
+
+```bash
+ward template list                              # list all templates with source
+ward template show codeql/gradle.yml.tera       # view template content
+ward template export                            # export all built-ins to ~/.ward/templates/
+ward template export dependabot/gradle.yml.tera # export one for customization
+ward template create my-team/custom.yml.tera    # create a new custom template
+ward template dir                               # show/create custom templates dir
+```
+
+Custom templates in `~/.ward/templates/` override built-in templates with the same name.
+
 ### `ward repos`
 
 ```bash
