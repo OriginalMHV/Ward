@@ -1,11 +1,13 @@
 pub mod audit;
 pub mod commit;
+pub mod config_cmd;
 pub mod init;
 pub mod protection;
 pub mod repos;
 pub mod rollback;
 pub mod security;
 pub mod settings;
+pub mod template_cmd;
 pub mod tui;
 
 use clap::Parser;
@@ -78,6 +80,12 @@ pub enum Command {
 
     /// Interactive setup wizard (creates ward.toml)
     Init(init::InitCommand),
+
+    /// Manage ward.toml configuration
+    Config(config_cmd::ConfigCommand),
+
+    /// Manage workflow templates
+    Template(template_cmd::TemplateCommand),
 
     /// Generate shell completions
     #[command(hide = true)]

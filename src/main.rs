@@ -26,6 +26,14 @@ async fn main() -> Result<()> {
         return cmd.run().await;
     }
 
+    if let Command::Config(cmd) = cli.command {
+        return cmd.run(cli.config.as_deref());
+    }
+
+    if let Command::Template(cmd) = cli.command {
+        return cmd.run(cli.config.as_deref());
+    }
+
     let manifest = Manifest::load(cli.config.as_deref())?;
     let org = cli.org.as_deref().unwrap_or(&manifest.org.name);
     let client = Client::new(org, cli.parallelism).await?;
@@ -72,6 +80,8 @@ async fn main() -> Result<()> {
         Command::Audit(cmd) => cmd.run(&client, &manifest, cli.system.as_deref()).await,
         Command::Tui => ward::cli::tui::run(&client, &manifest).await,
         Command::Init(_) => unreachable!(),
+        Command::Config(_) => unreachable!(),
+        Command::Template(_) => unreachable!(),
         Command::Completions { .. } => unreachable!(),
     }
 }
