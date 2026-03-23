@@ -173,6 +173,40 @@ impl Client {
         check_rate_limit(&resp);
         Ok(resp)
     }
+
+    #[doc(hidden)]
+    pub fn new_for_test(org: &str, base_url: &str) -> Self {
+        let http = reqwest::Client::builder()
+            .default_headers({
+                let mut headers = HeaderMap::new();
+                headers.insert(
+                    header::ACCEPT,
+                    HeaderValue::from_static("application/vnd.github+json"),
+                );
+                headers.insert(
+                    "X-GitHub-Api-Version",
+                    HeaderValue::from_static("2022-11-28"),
+                );
+                headers.insert(
+                    header::AUTHORIZATION,
+                    HeaderValue::from_static("Bearer test-token"),
+                );
+                headers.insert(
+                    header::USER_AGENT,
+                    HeaderValue::from_static("ward-cli/test"),
+                );
+                headers
+            })
+            .build()
+            .unwrap();
+
+        Self {
+            http,
+            org: org.to_owned(),
+            semaphore: Arc::new(Semaphore::new(10)),
+            base_url: base_url.to_owned(),
+        }
+    }
 }
 
 fn check_rate_limit(resp: &reqwest::Response) {
