@@ -1,12 +1,15 @@
 pub mod audit;
 pub mod commit;
 pub mod config_cmd;
+pub mod drift;
 pub mod init;
 pub mod protection;
 pub mod repos;
 pub mod rollback;
+pub mod rulesets;
 pub mod security;
 pub mod settings;
+pub mod teams;
 pub mod template_cmd;
 pub mod tui;
 
@@ -68,6 +71,15 @@ pub enum Command {
 
     /// Manage branch protection rules
     Protection(protection::ProtectionCommand),
+
+    /// Detect configuration drift from desired state
+    Drift(drift::DriftCommand),
+
+    /// Manage repository rulesets
+    Rulesets(rulesets::RulesetsCommand),
+
+    /// Manage team access to repositories
+    Teams(teams::TeamsCommand),
 
     /// Rollback changes using the audit log
     Rollback(rollback::RollbackCommand),

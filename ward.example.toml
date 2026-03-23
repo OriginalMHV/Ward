@@ -31,12 +31,27 @@ required_linear_history = false
 allow_force_pushes = false
 allow_deletions = false
 
+[rulesets.branch_protection]
+enabled = true
+enforcement = "active"
+required_approvals = 1
+dismiss_stale_reviews = true
+require_code_owner_reviews = false
+required_status_checks = ["ci"]
+require_linear_history = false
+block_force_pushes = true
+block_deletions = true
+
 [[systems]]
 id = "backend"
 name = "Backend Services"
 exclude = ["operations?", "workflows", "system"]
 # Explicit repos (in addition to prefix-matched ones)
 # repos = ["standalone-service", "shared-library"]
+teams = [
+    { slug = "developers", permission = "push" },
+    { slug = "devops", permission = "admin" },
+]
 
 [[systems]]
 id = "frontend"
