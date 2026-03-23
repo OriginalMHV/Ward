@@ -39,6 +39,10 @@ async fn main() -> Result<()> {
         return cmd.run(cli.config.as_deref());
     }
 
+    if let Command::Doctor(cmd) = cli.command {
+        return cmd.run(cli.config.as_deref()).await;
+    }
+
     let manifest = Manifest::load(cli.config.as_deref())?;
     let org = cli.org.as_deref().unwrap_or(&manifest.org.name);
     let client = Client::new(org, cli.parallelism).await?;
@@ -130,6 +134,7 @@ async fn main() -> Result<()> {
         Command::Import(_) => unreachable!(),
         Command::Config(_) => unreachable!(),
         Command::Template(_) => unreachable!(),
+        Command::Doctor(_) => unreachable!(),
         Command::Completions { .. } => unreachable!(),
     }
 }
