@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 26 wiremock integration tests covering all major API flows
+- Documentation restructured into docs/ directory with 6 detailed guides
+
 ## [0.1.0] - 2025-03-22
 
 ### Added
