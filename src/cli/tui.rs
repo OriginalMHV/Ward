@@ -13,7 +13,7 @@ use ratatui::{
     prelude::CrosstermBackend,
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap},
+    widgets::{Block, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table, Tabs, Wrap},
 };
 use tokio::sync::mpsc;
 
@@ -1117,14 +1117,19 @@ fn draw_repos_tab(f: &mut Frame, area: Rect, app: &App) {
         })
         .collect();
 
+    let sys_label = app
+        .systems
+        .get(app.selected_system)
+        .map(|(_, name)| name.as_str())
+        .unwrap_or("?");
     let title = if app.loading {
-        format!(" Repos [{}] loading... ", app.spinner_char())
+        format!(" {sys_label} [{}] loading... ", app.spinner_char())
     } else if app.is_filtering {
-        format!(" Repos (filter: {}_) ", app.filter)
+        format!(" {sys_label} (filter: {}_) ", app.filter)
     } else if app.filter.is_empty() {
-        format!(" Repos ({}) ", filtered.len())
+        format!(" {sys_label} ({}) ", filtered.len())
     } else {
-        format!(" Repos ({}/{}) ", filtered.len(), app.repos.len())
+        format!(" {sys_label} ({}/{}) ", filtered.len(), app.repos.len())
     };
 
     let list = List::new(items)
@@ -1253,134 +1258,170 @@ fn draw_repos_tab(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
+    let sys_label = app
+        .systems
+        .get(app.selected_system)
+        .map(|(_, name)| name.as_str())
+        .unwrap_or("?");
+    let sys_id = app
+        .systems
+        .get(app.selected_system)
+        .map(|(id, _)| id.as_str())
+        .unwrap_or("");
+
     if app.repos.is_empty() {
         let msg = Paragraph::new("  Press Enter to load repos, then switch to this tab.").block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Security Overview "),
+                .title(format!(" Security: {sys_label} ")),
         );
         f.render_widget(msg, area);
         return;
     }
 
-    let col_repo = 37;
-    let col_feat = 8;
+    // Detect common prefix (system-id + dash) to strip from repo names
+    let prefix = format!("{sys_id}-");
+    let all_share_prefix = app.repos.iter().all(|e| e.repo.name.starts_with(&prefix));
 
-    let header_line = Line::from(vec![
-        Span::styled(
-            format!("  {:<col_repo$}", "Repository"),
-            Style::default().fg(Color::Cyan).bold(),
-        ),
-        Span::styled("| ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!("{:<col_feat$}", "Alerts"),
-            Style::default().fg(Color::Cyan).bold(),
-        ),
-        Span::styled("| ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!("{:<col_feat$}", "Secret"),
-            Style::default().fg(Color::Cyan).bold(),
-        ),
-        Span::styled("| ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!("{:<col_feat$}", "AI Det"),
-            Style::default().fg(Color::Cyan).bold(),
-        ),
-        Span::styled("| ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!("{:<col_feat$}", "Push P"),
-            Style::default().fg(Color::Cyan).bold(),
-        ),
-        Span::styled("| ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!("{:<col_feat$}", "Sec Up"),
-            Style::default().fg(Color::Cyan).bold(),
-        ),
-    ]);
+    let display_name = |name: &str| -> String {
+        if all_share_prefix {
+            name.strip_prefix(&prefix).unwrap_or(name).to_owned()
+        } else {
+            name.to_owned()
+        }
+    };
 
-    let separator = format!(
-        "  {:-<col_repo$}-+-{:-<col_feat$}-+-{:-<col_feat$}-+-{:-<col_feat$}-+-{:-<col_feat$}-+-{:-<col_feat$}",
-        "", "", "", "", "", ""
-    );
+    // Dynamic column width from longest display name, capped at 50
+    let max_name_len = app
+        .repos
+        .iter()
+        .map(|e| display_name(&e.repo.name).len())
+        .max()
+        .unwrap_or(20);
+    let col_repo: usize = max_name_len.clamp(10, 50) + 2;
 
-    let mut lines = vec![
-        header_line,
-        Line::from(Span::styled(
-            separator,
-            Style::default().fg(Color::DarkGray),
-        )),
-    ];
+    let truncate_name = |name: &str| -> String {
+        let dname = display_name(name);
+        if dname.len() > col_repo {
+            format!("{}...", &dname[..col_repo - 3])
+        } else {
+            dname
+        }
+    };
+
+    let header_cells = [
+        "Repository",
+        "Alerts",
+        "Secret",
+        "AI Det",
+        "Push P",
+        "Sec Up",
+    ]
+    .iter()
+    .map(|h| Cell::from(*h).style(Style::default().fg(Color::Cyan).bold()));
+    let header = Row::new(header_cells)
+        .style(Style::default())
+        .bottom_margin(0);
 
     let mut secured = 0;
     let mut issues = 0;
     let mut pending = 0;
 
-    for (row_idx, entry) in app.repos.iter().enumerate() {
-        let row_bg = if row_idx % 2 == 1 {
-            Color::Rgb(30, 30, 40)
-        } else {
-            Color::Reset
-        };
-        let row_style = Style::default().bg(row_bg);
-
-        if let Some(s) = entry.security.as_ref() {
-            let all_ok = s.dependabot_alerts
-                && s.secret_scanning
-                && s.secret_scanning_ai_detection
-                && s.push_protection;
-
-            if all_ok {
-                secured += 1;
+    let rows: Vec<Row> = app
+        .repos
+        .iter()
+        .enumerate()
+        .map(|(row_idx, entry)| {
+            let row_bg = if row_idx % 2 == 1 {
+                Color::Rgb(30, 30, 40)
             } else {
-                issues += 1;
-            }
-
-            let icon = |b: bool| -> (&str, Color) {
-                if b {
-                    ("[Y]", Color::Green)
-                } else {
-                    ("[N]", Color::Red)
-                }
+                Color::Reset
             };
+            let row_style = Style::default().bg(row_bg);
 
-            let features = [
-                s.dependabot_alerts,
-                s.secret_scanning,
-                s.secret_scanning_ai_detection,
-                s.push_protection,
-                s.dependabot_security_updates,
-            ];
-
-            let mut spans = vec![
-                Span::styled(format!("  {:<col_repo$}", entry.repo.name), row_style),
-                Span::styled("| ", row_style.fg(Color::DarkGray)),
-            ];
-
-            for (fi, &feat) in features.iter().enumerate() {
-                let (text, color) = icon(feat);
-                spans.push(Span::styled(format!(" {text:<6} "), row_style.fg(color)));
-                if fi < features.len() - 1 {
-                    spans.push(Span::styled("| ", row_style.fg(Color::DarkGray)));
+            if let Some(s) = entry.security.as_ref() {
+                let all_ok = s.dependabot_alerts
+                    && s.secret_scanning
+                    && s.secret_scanning_ai_detection
+                    && s.push_protection;
+                if all_ok {
+                    secured += 1;
+                } else {
+                    issues += 1;
                 }
+
+                let icon = |b: bool| -> Cell {
+                    if b {
+                        Cell::from(" [Y]").style(Style::default().fg(Color::Green).bg(row_bg))
+                    } else {
+                        Cell::from(" [N]").style(Style::default().fg(Color::Red).bg(row_bg))
+                    }
+                };
+
+                Row::new(vec![
+                    Cell::from(truncate_name(&entry.repo.name)).style(Style::default().bg(row_bg)),
+                    icon(s.dependabot_alerts),
+                    icon(s.secret_scanning),
+                    icon(s.secret_scanning_ai_detection),
+                    icon(s.push_protection),
+                    icon(s.dependabot_security_updates),
+                ])
+                .style(row_style)
+            } else {
+                pending += 1;
+                Row::new(vec![
+                    Cell::from(truncate_name(&entry.repo.name))
+                        .style(Style::default().fg(Color::DarkGray).bg(row_bg)),
+                    Cell::from(" [..]").style(Style::default().fg(Color::DarkGray).bg(row_bg)),
+                    Cell::from(" [..]").style(Style::default().fg(Color::DarkGray).bg(row_bg)),
+                    Cell::from(" [..]").style(Style::default().fg(Color::DarkGray).bg(row_bg)),
+                    Cell::from(" [..]").style(Style::default().fg(Color::DarkGray).bg(row_bg)),
+                    Cell::from(" [..]").style(Style::default().fg(Color::DarkGray).bg(row_bg)),
+                ])
+                .style(row_style)
             }
+        })
+        .collect();
 
-            lines.push(Line::from(spans));
-        } else {
-            pending += 1;
-            lines.push(Line::from(Span::styled(
-                format!("  {:<col_repo$}  ...loading", entry.repo.name),
-                row_style.fg(Color::DarkGray),
-            )));
-        }
-    }
+    let col_feat = 8;
+    let widths = [
+        Constraint::Length(col_repo as u16),
+        Constraint::Length(col_feat),
+        Constraint::Length(col_feat),
+        Constraint::Length(col_feat),
+        Constraint::Length(col_feat),
+        Constraint::Length(col_feat),
+    ];
 
-    lines.push(Line::from(""));
+    let prefix_note = if all_share_prefix {
+        format!(" (prefix {prefix} stripped)")
+    } else {
+        String::new()
+    };
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!(" Security: {sys_label}{prefix_note} ")),
+        )
+        .column_spacing(1);
+
+    // Split area: table gets main space, summary gets 1 line at bottom
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(5), Constraint::Length(1)])
+        .split(area);
+
+    f.render_widget(table, layout[0]);
+
     let summary = if pending > 0 {
         format!("  {secured} secured, {issues} issues, {pending} loading...")
     } else {
         format!("  {secured} secured, {issues} need attention")
     };
-    lines.push(Line::from(Span::styled(
+    let summary_widget = Paragraph::new(Line::from(Span::styled(
         summary,
         Style::default()
             .fg(if issues > 0 {
@@ -1390,16 +1431,7 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
             })
             .bold(),
     )));
-
-    let widget = Paragraph::new(lines)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Security Overview "),
-        )
-        .wrap(Wrap { trim: false });
-
-    f.render_widget(widget, area);
+    f.render_widget(summary_widget, layout[1]);
 }
 
 fn draw_actions_tab(f: &mut Frame, area: Rect) {
@@ -1473,129 +1505,126 @@ fn draw_help_tab(f: &mut Frame, area: Rect) {
     let dim = Style::default().fg(Color::DarkGray);
     let key = Style::default().fg(Color::Yellow);
 
-    let sep = "─".repeat(15);
+    let block = Block::default().borders(Borders::ALL).title(" Help ");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
 
-    let help = vec![
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("  Navigation", heading),
-            Span::raw("                        "),
-            Span::styled("Repo Actions", heading),
-        ]),
-        Line::from(vec![
-            Span::styled(format!("  {sep}"), dim),
-            Span::raw("                        "),
-            Span::styled("─".repeat(12), dim),
-        ]),
-        Line::from(vec![
-            Span::styled("  j/k", key),
-            Span::raw(" or arrows  Move up/down  "),
-            Span::styled("a", key),
-            Span::raw("          Apply security"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Tab/s", key),
-            Span::raw("          Next system      "),
-            Span::styled("p", key),
-            Span::raw("          Apply branch protection"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Shift+Tab", key),
-            Span::raw("      Previous system  "),
-            Span::styled("t", key),
-            Span::raw("          Deploy template (sub-menu)"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Enter/l", key),
-            Span::raw("        Load repos         "),
-            Span::styled("S", key),
-            Span::raw("          Apply settings (copilot)"),
-        ]),
-        Line::from(vec![
-            Span::styled("  /", key),
-            Span::raw("              Filter (! to exclude)"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Esc", key),
-            Span::raw("            Clear filter         "),
-            Span::styled("Bulk Actions", heading),
-        ]),
-        Line::from(vec![
-            Span::raw("                                    "),
-            Span::styled("─".repeat(12), dim),
-        ]),
-        Line::from(vec![
-            Span::styled("  General", heading),
-            Span::raw("                           "),
-            Span::styled("A", key),
-            Span::raw("   Bulk apply security"),
-        ]),
-        Line::from(vec![Span::styled(format!("  {}", "─".repeat(9)), dim)]),
-        Line::from(vec![
-            Span::styled("  q", key),
-            Span::raw("              Quit                "),
-            Span::styled("Tabs", heading),
-        ]),
-        Line::from(vec![
-            Span::styled("  r", key),
-            Span::raw("              Reload              "),
-            Span::styled("─".repeat(4), dim),
-        ]),
-        Line::from(vec![
-            Span::styled("  R", key),
-            Span::raw("              Force reload        "),
-            Span::styled("1", key),
-            Span::raw("   Repos"),
-        ]),
-        Line::from(vec![
-            Span::styled("  ?", key),
-            Span::raw("              Help                "),
-            Span::styled("2", key),
-            Span::raw("   Security"),
-        ]),
-        Line::from(vec![
-            Span::raw("                                    "),
-            Span::styled("3", key),
-            Span::raw("   Actions"),
-        ]),
-        Line::from(vec![
-            Span::raw("                                    "),
-            Span::styled("?", key),
-            Span::raw("   Help"),
-        ]),
-        Line::from(""),
-        Line::from(Span::styled("  Filter Syntax", heading)),
-        Line::from(Span::styled(format!("  {}", "─".repeat(13)), dim)),
-        Line::from(vec![
-            Span::styled("  foo", key),
-            Span::raw("             Show repos matching \"foo\""),
-        ]),
-        Line::from(vec![
-            Span::styled("  !ops", key),
-            Span::raw("            Hide repos matching \"ops\""),
-        ]),
-        Line::from(vec![
-            Span::styled("  !ops !sys", key),
-            Span::raw("       Hide \"ops\" AND \"sys\" repos"),
-        ]),
-        Line::from(vec![
-            Span::styled("  foo !ops", key),
-            Span::raw("        Show \"foo\", hide \"ops\""),
-        ]),
-        Line::from(""),
-        Line::from(Span::styled(
-            "  Stack ! terms like kanban labels to narrow your view.",
-            dim,
-        )),
-        Line::from(Span::styled(
-            "  E.g. !operation !workflow shows only app repos.",
-            dim,
-        )),
-    ];
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(inner);
 
-    let widget = Paragraph::new(help).block(Block::default().borders(Borders::ALL).title(" Help "));
+    // Helper: build a section with a heading, separator, and key/desc rows
+    fn section<'a>(
+        title: &'a str,
+        entries: &[(&'a str, &'a str)],
+        heading: Style,
+        dim: Style,
+        key_style: Style,
+    ) -> Vec<Line<'a>> {
+        let mut lines = vec![
+            Line::from(Span::styled(format!(" {title}"), heading)),
+            Line::from(Span::styled(
+                format!(" {}", "\u{2500}".repeat(title.len())),
+                dim,
+            )),
+        ];
+        for &(k, desc) in entries {
+            lines.push(Line::from(vec![
+                Span::styled(format!(" {k:<15}"), key_style),
+                Span::raw(desc),
+            ]));
+        }
+        lines.push(Line::from(""));
+        lines
+    }
 
-    f.render_widget(widget, area);
+    // Left column
+    let mut left: Vec<Line> = Vec::new();
+    left.push(Line::from(""));
+    left.extend(section(
+        "Navigation",
+        &[
+            ("j/k, arrows", "Move up/down"),
+            ("Tab/s", "Next system"),
+            ("Shift+Tab", "Previous system"),
+            ("Enter/l", "Load repos"),
+            ("/", "Filter"),
+            ("Esc", "Clear filter"),
+        ],
+        heading,
+        dim,
+        key,
+    ));
+    left.extend(section(
+        "General",
+        &[
+            ("q", "Quit"),
+            ("r", "Reload"),
+            ("R", "Force reload"),
+            ("?", "Help"),
+        ],
+        heading,
+        dim,
+        key,
+    ));
+    left.extend(section(
+        "Filter Syntax",
+        &[
+            ("foo", "Show matching"),
+            ("!ops", "Hide matching"),
+            ("!ops !sys", "Hide both"),
+            ("foo !ops", "Show foo, hide ops"),
+        ],
+        heading,
+        dim,
+        key,
+    ));
+    left.push(Line::from(Span::styled(
+        " Stack ! terms like kanban labels to narrow view.",
+        dim,
+    )));
+
+    // Right column
+    let mut right: Vec<Line> = Vec::new();
+    right.push(Line::from(""));
+    right.extend(section(
+        "Repo Actions",
+        &[
+            ("a", "Apply security"),
+            ("p", "Apply branch protection"),
+            ("t", "Deploy template (d/c/s)"),
+            ("S", "Apply settings (copilot)"),
+        ],
+        heading,
+        dim,
+        key,
+    ));
+    right.extend(section(
+        "Bulk Actions",
+        &[("A", "Apply security to all")],
+        heading,
+        dim,
+        key,
+    ));
+    right.extend(section(
+        "Tabs",
+        &[
+            ("1", "Repos"),
+            ("2", "Security"),
+            ("3", "Actions"),
+            ("?", "Help"),
+        ],
+        heading,
+        dim,
+        key,
+    ));
+
+    let left_widget = Paragraph::new(left);
+    let right_widget = Paragraph::new(right);
+
+    f.render_widget(left_widget, columns[0]);
+    f.render_widget(right_widget, columns[1]);
 }
 
 fn draw_status(f: &mut Frame, area: Rect, app: &App) {
