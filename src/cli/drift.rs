@@ -22,17 +22,17 @@ enum DriftAction {
 }
 
 #[derive(Debug, Serialize)]
-struct DriftResult {
-    repo: String,
-    security_drifts: Vec<DriftItem>,
-    protection_drifts: Vec<DriftItem>,
+pub struct DriftResult {
+    pub repo: String,
+    pub security_drifts: Vec<DriftItem>,
+    pub protection_drifts: Vec<DriftItem>,
 }
 
 #[derive(Debug, Serialize)]
-struct DriftItem {
-    field: String,
-    expected: String,
-    actual: String,
+pub struct DriftItem {
+    pub field: String,
+    pub expected: String,
+    pub actual: String,
 }
 
 impl DriftResult {
@@ -45,7 +45,7 @@ impl DriftResult {
     }
 }
 
-fn compare_security(desired: &SecurityConfig, actual: &SecurityState) -> Vec<DriftItem> {
+pub fn compare_security(desired: &SecurityConfig, actual: &SecurityState) -> Vec<DriftItem> {
     let mut drifts = Vec::new();
 
     let checks: &[(&str, bool, bool)] = &[
@@ -89,7 +89,7 @@ fn compare_security(desired: &SecurityConfig, actual: &SecurityState) -> Vec<Dri
     drifts
 }
 
-fn compare_protection(
+pub fn compare_protection(
     desired: &BranchProtectionConfig,
     actual: &BranchProtectionState,
 ) -> Vec<DriftItem> {
