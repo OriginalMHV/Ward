@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use super::Client;
@@ -7,6 +7,29 @@ use super::Client;
 pub struct Ruleset {
     pub id: u64,
     pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RulesetDetail {
+    pub id: u64,
+    pub name: String,
+    pub enforcement: String,
+    #[serde(default)]
+    pub target: String,
+    #[serde(default)]
+    pub rules: Vec<RulesetRule>,
+    #[serde(default)]
+    pub conditions: Option<serde_json::Value>,
+    #[serde(default)]
+    pub bypass_actors: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RulesetRule {
+    #[serde(rename = "type")]
+    pub rule_type: String,
+    #[serde(default)]
+    pub parameters: Option<serde_json::Value>,
 }
 
 impl Client {
@@ -21,6 +44,86 @@ impl Client {
         }
 
         Ok(resp.json().await.unwrap_or_default())
+    }
+
+    /// Get details for a specific ruleset.
+    pub async fn get_ruleset(&self, repo: &str, ruleset_id: u64) -> Result<RulesetDetail> {
+        let resp = self
+            .get(&format!("/repos/{}/{repo}/rulesets/{ruleset_id}", self.org))
+            .await?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Failed to get ruleset {ruleset_id} for {repo} (HTTP {status}): {body}");
+        }
+
+        resp.json()
+            .await
+            .context("Failed to parse ruleset detail response")
+    }
+
+    /// Create a new ruleset for a repository.
+    pub async fn create_ruleset(
+        &self,
+        repo: &str,
+        ruleset: &serde_json::Value,
+    ) -> Result<RulesetDetail> {
+        let resp = self
+            .post_json(&format!("/repos/{}/{repo}/rulesets", self.org), ruleset)
+            .await?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Failed to create ruleset for {repo} (HTTP {status}): {body}");
+        }
+
+        resp.json()
+            .await
+            .context("Failed to parse created ruleset response")
+    }
+
+    /// Update an existing ruleset.
+    pub async fn update_ruleset(
+        &self,
+        repo: &str,
+        ruleset_id: u64,
+        ruleset: &serde_json::Value,
+    ) -> Result<()> {
+        let resp = self
+            .put_json(
+                &format!("/repos/{}/{repo}/rulesets/{ruleset_id}", self.org),
+                ruleset,
+            )
+            .await?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "Failed to update ruleset {ruleset_id} for {repo} (HTTP {status}): {body}"
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Delete a ruleset from a repository.
+    pub async fn delete_ruleset(&self, repo: &str, ruleset_id: u64) -> Result<()> {
+        let resp = self
+            .delete(&format!("/repos/{}/{repo}/rulesets/{ruleset_id}", self.org))
+            .await?;
+
+        let status = resp.status();
+        if !status.is_success() && status.as_u16() != 204 {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "Failed to delete ruleset {ruleset_id} for {repo} (HTTP {status}): {body}"
+            );
+        }
+
+        Ok(())
     }
 
     /// Create a Copilot code review ruleset.

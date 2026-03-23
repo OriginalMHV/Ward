@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Deserialize)]
 pub struct Manifest {
@@ -16,6 +16,9 @@ pub struct Manifest {
 
     #[serde(default)]
     pub branch_protection: BranchProtectionConfig,
+
+    #[serde(default)]
+    pub rulesets: RulesetsConfig,
 
     #[serde(default)]
     pub systems: Vec<SystemConfig>,
@@ -102,6 +105,55 @@ fn default_one() -> u32 {
     1
 }
 
+fn default_active() -> String {
+    "active".to_string()
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
+pub struct RulesetsConfig {
+    #[serde(default)]
+    pub branch_protection: Option<RulesetBranchProtection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct RulesetBranchProtection {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    #[serde(default)]
+    pub name: Option<String>,
+
+    #[serde(default = "default_active")]
+    pub enforcement: String,
+
+    #[serde(default = "default_one")]
+    pub required_approvals: u32,
+
+    #[serde(default)]
+    pub dismiss_stale_reviews: bool,
+
+    #[serde(default)]
+    pub require_code_owner_reviews: bool,
+
+    #[serde(default)]
+    pub required_status_checks: Vec<String>,
+
+    #[serde(default)]
+    pub require_linear_history: bool,
+
+    #[serde(default)]
+    pub block_force_pushes: bool,
+
+    #[serde(default)]
+    pub block_deletions: bool,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
+pub struct TeamAccess {
+    pub slug: String,
+    pub permission: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct RegistryConfig {
     #[serde(rename = "type")]
@@ -126,6 +178,9 @@ pub struct SystemConfig {
 
     #[serde(default)]
     pub security: Option<SecurityConfig>,
+
+    #[serde(default)]
+    pub teams: Vec<TeamAccess>,
 }
 
 impl Manifest {
@@ -182,6 +237,7 @@ impl Default for Manifest {
             security: SecurityConfig::default(),
             templates: TemplateConfig::default(),
             branch_protection: BranchProtectionConfig::default(),
+            rulesets: RulesetsConfig::default(),
             systems: Vec::new(),
         }
     }
@@ -421,5 +477,121 @@ mod tests {
         assert!(sc.dependabot_alerts);
         assert!(sc.dependabot_security_updates);
         assert!(!sc.codeql_advanced_setup); // this one defaults false
+    }
+
+    #[test]
+    fn rulesets_config_defaults() {
+        let rc = RulesetsConfig::default();
+        assert!(rc.branch_protection.is_none());
+    }
+
+    #[test]
+    fn rulesets_config_serde_defaults() {
+        let rc: RulesetsConfig = toml::from_str("").unwrap();
+        assert!(rc.branch_protection.is_none());
+    }
+
+    #[test]
+    fn ruleset_branch_protection_serde_defaults() {
+        let rbp: RulesetBranchProtection = toml::from_str("").unwrap();
+        assert!(rbp.enabled);
+        assert!(rbp.name.is_none());
+        assert_eq!(rbp.enforcement, "active");
+        assert_eq!(rbp.required_approvals, 1);
+        assert!(!rbp.dismiss_stale_reviews);
+        assert!(!rbp.require_code_owner_reviews);
+        assert!(rbp.required_status_checks.is_empty());
+        assert!(!rbp.require_linear_history);
+        assert!(!rbp.block_force_pushes);
+        assert!(!rbp.block_deletions);
+    }
+
+    #[test]
+    fn ruleset_branch_protection_custom_values() {
+        let toml_str = r#"
+            enabled = true
+            name = "Custom Rules"
+            enforcement = "evaluate"
+            required_approvals = 2
+            dismiss_stale_reviews = true
+            require_code_owner_reviews = true
+            required_status_checks = ["ci", "lint"]
+            require_linear_history = true
+            block_force_pushes = true
+            block_deletions = true
+        "#;
+        let rbp: RulesetBranchProtection = toml::from_str(toml_str).unwrap();
+        assert!(rbp.enabled);
+        assert_eq!(rbp.name.as_deref(), Some("Custom Rules"));
+        assert_eq!(rbp.enforcement, "evaluate");
+        assert_eq!(rbp.required_approvals, 2);
+        assert!(rbp.dismiss_stale_reviews);
+        assert!(rbp.require_code_owner_reviews);
+        assert_eq!(rbp.required_status_checks, vec!["ci", "lint"]);
+        assert!(rbp.require_linear_history);
+        assert!(rbp.block_force_pushes);
+        assert!(rbp.block_deletions);
+    }
+
+    #[test]
+    fn team_access_empty_default() {
+        let toml_str = r#"
+            [org]
+            name = "org"
+            [[systems]]
+            id = "be"
+            name = "Backend"
+        "#;
+        let m: Manifest = toml::from_str(toml_str).unwrap();
+        assert!(m.systems[0].teams.is_empty());
+    }
+
+    #[test]
+    fn team_access_parsing() {
+        let toml_str = r#"
+            [org]
+            name = "org"
+            [[systems]]
+            id = "be"
+            name = "Backend"
+            teams = [
+                { slug = "developers", permission = "push" },
+                { slug = "devops", permission = "admin" },
+            ]
+        "#;
+        let m: Manifest = toml::from_str(toml_str).unwrap();
+        assert_eq!(m.systems[0].teams.len(), 2);
+        assert_eq!(m.systems[0].teams[0].slug, "developers");
+        assert_eq!(m.systems[0].teams[0].permission, "push");
+        assert_eq!(m.systems[0].teams[1].slug, "devops");
+        assert_eq!(m.systems[0].teams[1].permission, "admin");
+    }
+
+    #[test]
+    fn manifest_with_rulesets_and_teams() {
+        let toml_str = r#"
+            [org]
+            name = "org"
+
+            [rulesets.branch_protection]
+            enabled = true
+            enforcement = "active"
+            required_approvals = 1
+            block_force_pushes = true
+
+            [[systems]]
+            id = "be"
+            name = "Backend"
+            teams = [
+                { slug = "dev", permission = "push" },
+            ]
+        "#;
+        let m: Manifest = toml::from_str(toml_str).unwrap();
+        let bp = m.rulesets.branch_protection.as_ref().unwrap();
+        assert!(bp.enabled);
+        assert_eq!(bp.enforcement, "active");
+        assert_eq!(bp.required_approvals, 1);
+        assert!(bp.block_force_pushes);
+        assert_eq!(m.systems[0].teams.len(), 1);
     }
 }

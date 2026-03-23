@@ -163,6 +163,60 @@ ward settings apply --copilot-instructions --system backend
 ward settings audit --system backend
 ```
 
+### `ward drift`
+
+Compare actual repo state against ward.toml desired state. Designed for CI.
+
+```bash
+ward drift check --system backend               # check all repos in system
+ward drift check --repo my-service              # check single repo
+ward drift check --system backend --json        # machine-readable output
+```
+
+Exit code 0 = in sync, 1 = drift detected. Checks security settings and branch protection.
+
+### `ward rulesets`
+
+Manage GitHub repository rulesets (the successor to branch protection rules).
+
+```bash
+ward rulesets plan --system backend             # preview changes
+ward rulesets apply --system backend            # create/update rulesets
+ward rulesets audit --system backend            # show current rulesets
+```
+
+Configure in ward.toml:
+```toml
+[rulesets.branch_protection]
+enabled = true
+enforcement = "active"
+required_approvals = 1
+dismiss_stale_reviews = true
+block_force_pushes = true
+```
+
+### `ward teams`
+
+Manage team access across repositories in a system.
+
+```bash
+ward teams list --system backend                # show team access per repo
+ward teams plan --system backend                # preview access changes
+ward teams apply --system backend               # add/remove team access
+ward teams audit --system backend               # full access matrix
+```
+
+Configure per-system in ward.toml:
+```toml
+[[systems]]
+id = "backend"
+name = "Backend Services"
+teams = [
+    { slug = "developers", permission = "push" },
+    { slug = "devops", permission = "admin" },
+]
+```
+
 ### `ward rollback`
 
 ```bash
