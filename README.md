@@ -12,6 +12,7 @@
 [![Rust](https://img.shields.io/badge/Rust-CC5500?style=flat-square&logo=rust&logoColor=FFBF00&labelColor=1C1C1C)](https://rust-lang.org)
 [![License](https://img.shields.io/badge/License-MIT-6B8E23?style=flat-square&labelColor=1C1C1C)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/OriginalMHV/ward/ci.yml?style=flat-square&label=CI&labelColor=1C1C1C&color=6B8E23)](https://github.com/OriginalMHV/Ward/actions)
+[![Crates.io](https://img.shields.io/crates/v/ward-cli?style=flat-square&labelColor=1C1C1C&color=6B8E23)](https://crates.io/crates/ward-cli)
 
 [Quick Start](#-quick-start) · [Features](#-features) · [Install](#-install) · [Commands](#-commands)
 

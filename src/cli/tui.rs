@@ -1311,11 +1311,11 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
 
     let header_cells = [
         "Repository",
-        "Alerts",
-        "Secret",
-        "AI Det",
-        "Push P",
-        "Sec Up",
+        "Dependabot",
+        "Secret Scanning",
+        "AI Detection",
+        "Push Protection",
+        "Security Updates",
     ]
     .iter()
     .map(|h| Cell::from(*h).style(Style::default().fg(Color::Cyan).bold()));
@@ -1383,14 +1383,13 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
         })
         .collect();
 
-    let col_feat = 8;
     let widths = [
-        Constraint::Length(col_repo as u16),
-        Constraint::Length(col_feat),
-        Constraint::Length(col_feat),
-        Constraint::Length(col_feat),
-        Constraint::Length(col_feat),
-        Constraint::Length(col_feat),
+        Constraint::Min(col_repo as u16),
+        Constraint::Min(12),
+        Constraint::Min(17),
+        Constraint::Min(14),
+        Constraint::Min(17),
+        Constraint::Min(18),
     ];
 
     let prefix_note = if all_share_prefix {
