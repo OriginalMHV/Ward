@@ -18,7 +18,7 @@
 
 </div>
 
-────────────────────────────────────────
+---
 
 ## What is Ward?
 
@@ -95,7 +95,7 @@ Use `ward init --non-interactive` to scaffold a minimal `ward.toml` without the 
 - **Audit log** -- every mutation logged to `~/.ward/audit.log` as JSON lines. Query with `jq`.
 - **Custom templates** -- place `.tera` files in `~/.ward/templates/` to add or override built-in templates. Uses [Tera](https://keats.github.io/tera/) (Jinja2-compatible).
 
-────────────────────────────────────────
+---
 
 ## Contributing
 
