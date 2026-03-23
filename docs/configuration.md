@@ -224,6 +224,79 @@ Each team entry specifies a GitHub team slug and a permission level:
 
 ---
 
+## `[[policies]]`
+
+Policy rules define org-wide compliance requirements. Each policy is a rule that is evaluated against every repository. Violations are reported by `ward policy check`.
+
+```toml
+[[policies]]
+name = "no-public-repos"
+rule = "visibility != 'public'"
+severity = "error"
+
+[[policies]]
+name = "require-secret-scanning"
+rule = "security.secret_scanning"
+severity = "error"
+
+[[policies]]
+name = "require-push-protection"
+rule = "security.push_protection"
+severity = "error"
+
+[[policies]]
+name = "minimum-approvers"
+rule = "branch_protection.required_approvals >= 2"
+severity = "warning"
+
+[[policies]]
+name = "no-force-push"
+rule = "!branch_protection.allow_force_pushes"
+severity = "warning"
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | string | required | Human-readable policy name |
+| `rule` | string | required | Rule expression (see syntax below) |
+| `severity` | string | `"error"` | `"error"` or `"warning"` |
+
+### Policy rule syntax
+
+Rules support these patterns:
+
+| Pattern | Example | Description |
+|---------|---------|-------------|
+| `field.subfield` | `security.secret_scanning` | Boolean check (true = pass) |
+| `!field.subfield` | `!branch_protection.allow_force_pushes` | Negated boolean (false = pass) |
+| `field >= N` | `branch_protection.required_approvals >= 2` | Numeric comparison |
+| `field != 'value'` | `visibility != 'public'` | String comparison |
+| `field == 'value'` | `visibility == 'private'` | String equality |
+
+Supported comparison operators: `>=`, `<=`, `==`, `!=`, `>`, `<`.
+
+### Available fields
+
+| Field path | Type | Description |
+|------------|------|-------------|
+| `visibility` | string | Repository visibility (`public`, `private`, `internal`) |
+| `archived` | bool | Whether the repository is archived |
+| `security.secret_scanning` | bool | Secret scanning enabled |
+| `security.push_protection` | bool | Push protection enabled |
+| `security.dependabot_alerts` | bool | Dependabot alerts enabled |
+| `security.dependabot_security_updates` | bool | Dependabot security updates enabled |
+| `security.secret_scanning_ai_detection` | bool | AI secret detection enabled |
+| `branch_protection.enabled` | bool | PR reviews required |
+| `branch_protection.required_approvals` | number | Required approving review count |
+| `branch_protection.dismiss_stale_reviews` | bool | Dismiss stale reviews on push |
+| `branch_protection.require_code_owner_reviews` | bool | Code owner review required |
+| `branch_protection.require_status_checks` | bool | Status checks required |
+| `branch_protection.enforce_admins` | bool | Rules enforced for admins |
+| `branch_protection.allow_force_pushes` | bool | Force pushes allowed |
+| `branch_protection.allow_deletions` | bool | Branch deletions allowed |
+
+---
+
 ## Full annotated example
 
 See [ward.example.toml](../ward.example.toml) in the repository root for a complete working example with comments.
@@ -291,6 +364,21 @@ exclude = ["operations?", "workflows"]
 id = "platform"
 name = "Platform & Infra"
 exclude = ["operations?", "workflows"]
+
+[[policies]]
+name = "no-public-repos"
+rule = "visibility != 'public'"
+severity = "error"
+
+[[policies]]
+name = "require-secret-scanning"
+rule = "security.secret_scanning"
+severity = "error"
+
+[[policies]]
+name = "minimum-approvers"
+rule = "branch_protection.required_approvals >= 1"
+severity = "warning"
 ```
 
 ---

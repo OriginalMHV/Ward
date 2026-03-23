@@ -26,6 +26,11 @@ async fn main() -> Result<()> {
         return cmd.run().await;
     }
 
+    // Import handles its own client creation (it creates the manifest)
+    if let Command::Import(cmd) = cli.command {
+        return cmd.run().await;
+    }
+
     if let Command::Config(cmd) = cli.command {
         return cmd.run(cli.config.as_deref());
     }
@@ -106,8 +111,23 @@ async fn main() -> Result<()> {
         }
         Command::Rollback(cmd) => cmd.run(&client).await,
         Command::Audit(cmd) => cmd.run(&client, &manifest, cli.system.as_deref()).await,
+        Command::Plan(cmd) => {
+            cmd.run(&client, &manifest, cli.system.as_deref(), cli.json)
+                .await
+        }
+        Command::Policy(cmd) => {
+            cmd.run(
+                &client,
+                &manifest,
+                cli.system.as_deref(),
+                cli.repo.as_deref(),
+                cli.json,
+            )
+            .await
+        }
         Command::Tui => ward::cli::tui::run(&client, &manifest).await,
         Command::Init(_) => unreachable!(),
+        Command::Import(_) => unreachable!(),
         Command::Config(_) => unreachable!(),
         Command::Template(_) => unreachable!(),
         Command::Completions { .. } => unreachable!(),

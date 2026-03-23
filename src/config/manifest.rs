@@ -4,6 +4,8 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::cli::policy::PolicyRule;
+
 #[derive(Debug, PartialEq, Deserialize)]
 pub struct Manifest {
     pub org: OrgConfig,
@@ -22,6 +24,9 @@ pub struct Manifest {
 
     #[serde(default)]
     pub systems: Vec<SystemConfig>,
+
+    #[serde(default)]
+    pub policies: Vec<PolicyRule>,
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
@@ -239,6 +244,7 @@ impl Default for Manifest {
             branch_protection: BranchProtectionConfig::default(),
             rulesets: RulesetsConfig::default(),
             systems: Vec::new(),
+            policies: Vec::new(),
         }
     }
 }

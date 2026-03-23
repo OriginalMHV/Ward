@@ -7,10 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-23
+
 ### Added
 
+- `ward import` -- reverse-engineer an existing GitHub org into a `ward.toml` with auto-detected systems, security sampling, and team discovery
+- `ward plan` -- unified compliance plan across security, branch protection, rulesets, and teams in one command
+- `ward policy check` -- policy engine with simple rule syntax for org-wide compliance (exit code 1 on violations)
+- `ward policy list` -- display configured policy rules
+- `[[policies]]` configuration section for defining custom compliance rules
 - 26 wiremock integration tests covering all major API flows
-- Documentation restructured into docs/ directory with 6 detailed guides
+- Documentation restructured into `docs/` directory with 6 detailed guides
+
+### Changed
+
+- Upgraded ratatui 0.29 to 0.30, crossterm 0.28 to 0.29, dialoguer 0.11 to 0.12, tabled 0.17 to 0.20, console 0.15 to 0.16, clap 4 to 4.6
+- Removed unused `octocrab` and `governor` dependencies
+
+### Fixed
+
+- Removed unused `Stylize` import after ratatui 0.30 upgrade
 
 ## [0.1.0] - 2025-03-22
 
@@ -30,5 +46,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JSON lines audit trail logged to `~/.ward/audit.log`
 - Custom template support via `~/.ward/templates/` directory
 
-[Unreleased]: https://github.com/OriginalMHV/Ward/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/OriginalMHV/Ward/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/OriginalMHV/Ward/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/OriginalMHV/Ward/releases/tag/v0.1.0

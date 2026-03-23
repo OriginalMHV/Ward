@@ -1,6 +1,6 @@
 [package]
 name = "ward-cli"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 authors = ["Michael Herland Valen"]
 description = "GitHub repository management for developers. Plan, apply, verify."
@@ -22,16 +22,15 @@ path = "src/main.rs"
 
 [dependencies]
 # CLI
-clap = { version = "4", features = ["derive", "env", "color"] }
+clap = { version = "4.6", features = ["derive", "env", "color"] }
 clap_complete = { version = "4" }
-dialoguer = { version = "0.11", features = ["fuzzy-select"] }
+dialoguer = { version = "0.12", features = ["fuzzy-select"] }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
 # HTTP & GitHub API
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
-octocrab = "0.44"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -45,14 +44,14 @@ tera = "1"
 rust-embed = "8"
 
 # Output formatting
-tabled = "0.17"
-console = "0.15"
+tabled = "0.20"
+console = "0.16"
 indicatif = "0.17"
 similar = "2"
 
 # TUI
-ratatui = "0.29"
-crossterm = "0.28"
+ratatui = "0.30"
+crossterm = "0.29"
 
 # Logging & tracing
 tracing = "0.1"
@@ -61,9 +60,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # Error handling
 anyhow = "1"
 thiserror = "2"
-
-# Rate limiting
-governor = "0.8"
 
 # Regex for filtering
 regex = "1"

@@ -2,7 +2,10 @@ pub mod audit;
 pub mod commit;
 pub mod config_cmd;
 pub mod drift;
+pub mod import;
 pub mod init;
+pub mod plan;
+pub mod policy;
 pub mod protection;
 pub mod repos;
 pub mod rollback;
@@ -86,6 +89,15 @@ pub enum Command {
 
     /// Full compliance audit across repos
     Audit(audit::AuditCommand),
+
+    /// Import existing org state into ward.toml
+    Import(import::ImportCommand),
+
+    /// Unified plan across all checks
+    Plan(plan::PlanCommand),
+
+    /// Check repos against policy rules
+    Policy(policy::PolicyCommand),
 
     /// Launch interactive terminal UI
     Tui,

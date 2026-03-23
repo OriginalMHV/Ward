@@ -62,3 +62,19 @@ exclude = ["operations?", "workflows"]
 id = "platform"
 name = "Platform & Infra"
 exclude = ["operations?", "workflows"]
+
+# Policy rules (checked with `ward policy check`)
+[[policies]]
+name = "no-public-repos"
+rule = "visibility != 'public'"
+severity = "error"
+
+[[policies]]
+name = "require-secret-scanning"
+rule = "security.secret_scanning"
+severity = "error"
+
+[[policies]]
+name = "minimum-approvers"
+rule = "branch_protection.required_approvals >= 1"
+severity = "warning"

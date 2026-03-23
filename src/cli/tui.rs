@@ -11,7 +11,7 @@ use ratatui::{
     Frame, Terminal,
     layout::{Constraint, Direction, Layout, Rect},
     prelude::CrosstermBackend,
-    style::{Color, Modifier, Style, Stylize},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table, Tabs, Wrap},
 };
