@@ -8,9 +8,9 @@
 [![Crates.io](https://img.shields.io/crates/v/ward-cli?style=for-the-badge&labelColor=1C1C1C&color=6B8E23)](https://crates.io/crates/ward-cli)
 [![Downloads](https://img.shields.io/crates/d/ward-cli?style=for-the-badge&label=Downloads&labelColor=1C1C1C&color=CC5500)](https://crates.io/crates/ward-cli)
 
-[![Lines of Code](https://img.shields.io/badge/Lines_of_Code-12.7k-FFBF00?style=for-the-badge&labelColor=1C1C1C)](https://github.com/OriginalMHV/Ward)
-[![Tests](https://img.shields.io/badge/Tests-170-6B8E23?style=for-the-badge&labelColor=1C1C1C)](https://github.com/OriginalMHV/Ward/actions)
-[![Commands](https://img.shields.io/badge/Commands-17-CC5500?style=for-the-badge&labelColor=1C1C1C)](docs/commands.md)
+[![Lines of Code](https://img.shields.io/badge/Lines_of_Code-14.2k-FFBF00?style=for-the-badge&labelColor=1C1C1C)](https://github.com/OriginalMHV/Ward)
+[![Tests](https://img.shields.io/badge/Tests-178-6B8E23?style=for-the-badge&labelColor=1C1C1C)](https://github.com/OriginalMHV/Ward/actions)
+[![Commands](https://img.shields.io/badge/Commands-18-CC5500?style=for-the-badge&labelColor=1C1C1C)](docs/commands.md)
 [![GitHub Release](https://img.shields.io/github/v/release/OriginalMHV/Ward?style=for-the-badge&labelColor=1C1C1C&color=DAA520)](https://github.com/OriginalMHV/Ward/releases/latest)
 
 [Install](#install) · [Quick Start](#quick-start) · [Docs](#documentation) · [Contributing](CONTRIBUTING.md)
@@ -37,6 +37,7 @@ Ward is a Rust CLI that treats GitHub repository management as infrastructure-as
 | **Teams** | `ward teams` | Manage team access permissions across repos |
 | **Import** | `ward import` | Reverse-engineer an existing org into `ward.toml` |
 | **TUI** | `ward tui` | Interactive terminal dashboard |
+| **Doctor** | `ward doctor` | Diagnose setup: config, token, API, systems |
 | **Rollback** | `ward rollback` | Undo changes using the audit trail |
 
 ## Install

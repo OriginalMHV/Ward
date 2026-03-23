@@ -530,6 +530,54 @@ ward import --org my-org --min-group-size 3
 
 How it works:
 
+---
+
+## `ward doctor`
+
+Diagnose your Ward setup. Checks configuration, authentication, GitHub CLI availability, template directories, audit log state, and API connectivity. Useful after initial setup or when something feels off.
+
+```bash
+ward doctor
+ward doctor --config /path/to/ward.toml
+```
+
+Doctor runs **before** loading the full manifest, so it can diagnose a missing or broken config file. Checks performed:
+
+| Check | What it verifies |
+|-------|-----------------|
+| Configuration | `ward.toml` exists, is valid TOML, and parses correctly |
+| GitHub token | Found via `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token` |
+| GitHub CLI | `gh` is installed, shows version |
+| Custom templates | `~/.ward/templates/` directory exists, counts templates |
+| Audit log | `~/.ward/audit.log` exists, shows size, warns if > 10 MB |
+| Organization | Org name is configured and non-empty |
+| Systems | Lists defined systems and their IDs |
+| Policies | Counts defined policy rules |
+| API connectivity | Authenticates to GitHub, shows rate limit remaining, verifies org access |
+
+Example output:
+
+```
+Ward Doctor
+  Diagnosing your setup...
+
+  [ok] Configuration       ward.toml found and valid
+  [ok] GitHub token        gho_pb7r... via gh auth token
+  [ok] GitHub CLI          gh version 2.87.3 (2026-02-23)
+  [ok] Custom templates    0 custom templates in ~/.ward/templates
+  [ok] Audit log           not yet created (will be on first apply)
+  [ok] Organization        MyOrg
+  [ok] Systems             3 defined (backend, frontend, infra)
+  [ok] Policies            none defined (optional)
+  [ok] API connectivity    authenticated to MyOrg (rate limit: 4993 remaining)
+
+  9 passed, 0 warnings, 0 errors
+
+  Everything looks good.
+```
+
+Exit codes: `0` all passed, `1` any errors, `2` warnings only.
+
 1. Fetches all non-archived repositories in the org
 2. Groups repos by common name prefixes to auto-detect systems (e.g., `backend-api`, `backend-auth` -> system `backend`)
 3. Samples security state from up to 5 repos per system and takes the majority vote
