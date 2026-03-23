@@ -1,6 +1,7 @@
 pub mod audit;
 pub mod commit;
 pub mod config_cmd;
+pub mod doctor;
 pub mod drift;
 pub mod import;
 pub mod init;
@@ -98,6 +99,9 @@ pub enum Command {
 
     /// Check repos against policy rules
     Policy(policy::PolicyCommand),
+
+    /// Diagnose your Ward setup
+    Doctor(doctor::DoctorCommand),
 
     /// Launch interactive terminal UI
     Tui,
