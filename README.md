@@ -6,6 +6,12 @@
 [![License](https://img.shields.io/badge/License-MIT-6B8E23?style=flat-square&labelColor=1C1C1C)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/OriginalMHV/ward/ci.yml?style=flat-square&label=CI&labelColor=1C1C1C&color=6B8E23)](https://github.com/OriginalMHV/Ward/actions)
 [![Crates.io](https://img.shields.io/crates/v/ward-cli?style=flat-square&labelColor=1C1C1C&color=6B8E23)](https://crates.io/crates/ward-cli)
+[![Downloads](https://img.shields.io/crates/d/ward-cli?style=flat-square&label=Downloads&labelColor=1C1C1C&color=CC5500)](https://crates.io/crates/ward-cli)
+
+[![Lines of Code](https://img.shields.io/badge/Lines_of_Code-12.7k-FFBF00?style=flat-square&labelColor=1C1C1C)](https://github.com/OriginalMHV/Ward)
+[![Tests](https://img.shields.io/badge/Tests-170-6B8E23?style=flat-square&labelColor=1C1C1C)](https://github.com/OriginalMHV/Ward/actions)
+[![Commands](https://img.shields.io/badge/Commands-17-CC5500?style=flat-square&labelColor=1C1C1C)](docs/commands.md)
+[![GitHub Release](https://img.shields.io/github/v/release/OriginalMHV/Ward?style=flat-square&labelColor=1C1C1C&color=DAA520)](https://github.com/OriginalMHV/Ward/releases/latest)
 
 [Install](#install) · [Quick Start](#quick-start) · [Docs](#documentation) · [Contributing](CONTRIBUTING.md)
 
@@ -101,4 +107,6 @@ cargo fmt && cargo clippy --tests -- -D warnings && cargo test
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:CC5500,50:8B6914,100:556B2F&height=120&section=footer&reversal=true" width="100%" alt="" />
 
