@@ -25,144 +25,19 @@ Ward is a Rust CLI that treats GitHub repository management as infrastructure-as
 
 ### Features
 
-<details>
-<summary><b>Security management</b> -- Dependabot, secret scanning, push protection across repos in one command</summary>
-
-```bash
-ward security plan --system backend       # preview changes
-ward security apply --system backend      # apply + auto-verify
-ward security audit --system backend      # current posture
-```
-
-Manages: Dependabot alerts, Dependabot security updates, secret scanning, AI detection, push protection, CodeQL.
-
-</details>
-
-<details>
-<summary><b>Branch protection</b> -- declarative rules for PRs, approvals, status checks</summary>
-
-```bash
-ward protection plan --system backend     # diff current vs desired
-ward protection apply --system backend    # apply to default branches
-```
-
-Configure required approvals, dismiss stale reviews, code owner reviews, status checks, force-push policies, and more in `ward.toml`.
-
-</details>
-
-<details>
-<summary><b>Template commits</b> -- deploy workflow configs via the Git Trees API (no cloning)</summary>
-
-```bash
-ward commit plan --template dependabot --system backend
-ward commit apply --template codeql --system backend
-```
-
-Built-in templates: `dependabot`, `codeql`, `dependency-submission`. Auto-detects Gradle vs npm and extracts Java/Node versions. Add your own with `.tera` files in `~/.ward/templates/`.
-
-</details>
-
-<details>
-<summary><b>Drift detection</b> -- compare actual state against desired config, designed for CI</summary>
-
-```bash
-ward drift check --system backend         # exit code 1 on drift
-ward drift check --system backend --json  # machine-readable
-```
-
-Checks security settings and branch protection. Use in GitHub Actions to catch config drift before it causes incidents.
-
-</details>
-
-<details>
-<summary><b>Unified plan</b> -- full compliance posture across all features in one command</summary>
-
-```bash
-ward plan --system backend                # one system
-ward plan --all                           # every system
-ward plan --all --json                    # CI-friendly output
-```
-
-Runs security, branch protection, rulesets, and team access checks together. The "terraform plan" of Ward.
-
-</details>
-
-<details>
-<summary><b>Policy engine</b> -- define org-wide rules and fail CI on violations</summary>
-
-```bash
-ward policy list                          # show configured rules
-ward policy check --system backend        # exit code 1 on errors
-```
-
-```toml
-[[policies]]
-name = "no-public-repos"
-rule = "visibility != 'public'"
-severity = "error"
-```
-
-Supports boolean checks, negation, numeric comparisons, and string matching.
-
-</details>
-
-<details>
-<summary><b>Rulesets</b> -- manage GitHub repository rulesets (branch protection successor)</summary>
-
-```bash
-ward rulesets plan --system backend       # preview changes
-ward rulesets apply --system backend      # create or update
-ward rulesets audit --system backend      # show current state
-```
-
-</details>
-
-<details>
-<summary><b>Team access</b> -- manage team permissions across repositories</summary>
-
-```bash
-ward teams list --system backend          # current access matrix
-ward teams plan --system backend          # preview changes
-ward teams apply --system backend         # add, update, or remove
-```
-
-</details>
-
-<details>
-<summary><b>Import</b> -- reverse-engineer an existing org into ward.toml</summary>
-
-```bash
-ward import --org my-github-org           # auto-detect systems
-ward import --org my-github-org --stdout  # print without writing
-```
-
-Detects systems by repo name prefix, samples security and protection state via majority vote, discovers team access patterns.
-
-</details>
-
-<details>
-<summary><b>Interactive TUI</b> -- terminal dashboard for browsing and applying changes</summary>
-
-```bash
-ward tui
-```
-
-Browse repos, view security state, apply settings, filter by name -- all from a keyboard-driven terminal UI. Tab between systems, apply to individual repos or in bulk.
-
-</details>
-
-<details>
-<summary><b>Rollback & audit trail</b> -- every mutation logged, reversible</summary>
-
-```bash
-ward rollback --last 10 --dry-run         # preview reversal
-ward rollback --last 5 --yes              # undo last 5 changes
-ward audit --system backend --format json # compliance report
-```
-
-All mutations logged to `~/.ward/audit.log` as JSON lines. Query with `jq`.
-
-</details>
+| | Feature | What it does |
+|---|---|---|
+| **Security** | `ward security` | Dependabot, secret scanning, push protection across repos |
+| **Protection** | `ward protection` | Declarative branch protection rules and policies |
+| **Templates** | `ward commit` | Deploy workflow configs via Git Trees API -- no cloning |
+| **Drift** | `ward drift` | Detect config drift from desired state, CI-friendly exit codes |
+| **Plan** | `ward plan` | Unified compliance check across all features at once |
+| **Policy** | `ward policy` | Org-wide rules engine -- fail CI on violations |
+| **Rulesets** | `ward rulesets` | Manage GitHub rulesets (branch protection successor) |
+| **Teams** | `ward teams` | Manage team access permissions across repos |
+| **Import** | `ward import` | Reverse-engineer an existing org into `ward.toml` |
+| **TUI** | `ward tui` | Interactive terminal dashboard |
+| **Rollback** | `ward rollback` | Undo changes using the audit trail |
 
 ## Install
 
@@ -223,19 +98,9 @@ Use `ward init --non-interactive` to scaffold a minimal `ward.toml` without the 
 
 ## How it works
 
-```mermaid
-graph LR
-    A["<b>Plan</b><br/>Diff current vs desired"] --> B["<b>Apply</b><br/>Execute with audit logging"]
-    B --> C["<b>Verify</b><br/>Re-read from API, confirm match"]
-    style A fill:#556B2F,stroke:#3B4A1F,color:#FAEBD7
-    style B fill:#8B6914,stroke:#6B510F,color:#FAEBD7
-    style C fill:#CC5500,stroke:#993F00,color:#FAEBD7
-```
+Every mutating command follows the same three-phase cycle: **plan** reads the current state from the GitHub API and diffs it against your `ward.toml`, showing what would change without touching anything. **Apply** executes those changes, logging every mutation to an audit trail. **Verify** re-reads the state from the API and confirms it matches the desired config.
 
-- **No git cloning** -- file commits use the Git Trees API (blob, tree, commit, update ref). Atomic, no filesystem side effects.
-- **Idempotent** -- detects existing state and skips what's already done.
-- **Audit log** -- every mutation logged to `~/.ward/audit.log` as JSON lines. Query with `jq`.
-- **Custom templates** -- place `.tera` files in `~/.ward/templates/` to add or override built-in templates. Uses [Tera](https://keats.github.io/tera/) (Jinja2-compatible).
+File commits are made server-side through the Git Trees API -- no repos are cloned, no temp directories created. All operations are idempotent: Ward detects what's already in place and skips it.
 
 ---
 
