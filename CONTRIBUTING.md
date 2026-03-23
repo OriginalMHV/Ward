@@ -28,7 +28,9 @@ cargo test
 cargo deny check
 ```
 
-All 106+ tests must pass. `cargo deny check` validates license and advisory compliance.
+All 150+ tests must pass. `cargo deny check` validates license and advisory compliance.
+
+For a deeper understanding of how Ward is structured, see the [Architecture](docs/architecture.md) guide.
 
 ## Commit Convention
 
