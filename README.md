@@ -1,13 +1,6 @@
 <div align="center">
 
-<pre>
- _ _ _  ___  ___  ___
-| | | || . || . \| . \
-| | | ||   ||   /| | |
-|__/_/ |_|_||_\_\|___/
-</pre>
-
-**GitHub repository management as infrastructure-as-code.**
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:556B2F,50:8B6914,100:CC5500&height=200&text=WARD&fontSize=80&fontColor=FAEBD7&fontAlignY=35&desc=plan.%20apply.%20verify.&descAlignY=55&descSize=22&descAlign=50&animation=fadeIn" width="100%" alt="Ward" />
 
 [![Rust](https://img.shields.io/badge/Rust-CC5500?style=flat-square&logo=rust&logoColor=FFBF00&labelColor=1C1C1C)](https://rust-lang.org)
 [![License](https://img.shields.io/badge/License-MIT-6B8E23?style=flat-square&labelColor=1C1C1C)](LICENSE)
