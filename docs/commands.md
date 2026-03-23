@@ -511,6 +511,93 @@ The wizard walks through:
 
 ---
 
+## `ward import`
+
+Reverse-engineer an existing GitHub org's state into a `ward.toml`. The "terraform import" equivalent for onboarding an existing organization.
+
+```bash
+ward import --org my-org
+ward import --org my-org --stdout
+ward import --org my-org --min-group-size 3
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--org <ORG>` | string | required | GitHub organization to import from |
+| `--stdout` | bool | `false` | Print to stdout instead of writing ward.toml |
+| `--min-group-size <N>` | integer | `2` | Minimum repos to form a system |
+| `--parallelism <N>` | integer | `5` | Max concurrent API calls |
+
+How it works:
+
+1. Fetches all non-archived repositories in the org
+2. Groups repos by common name prefixes to auto-detect systems (e.g., `backend-api`, `backend-auth` -> system `backend`)
+3. Samples security state from up to 5 repos per system and takes the majority vote
+4. Samples branch protection from the same repos
+5. Detects team access patterns
+6. Generates a complete `ward.toml` with comments explaining what was detected
+
+Repos that do not match any system prefix are listed as comments at the bottom of the generated file.
+
+---
+
+## `ward plan`
+
+Unified compliance plan across all checks. The "terraform plan" of Ward -- shows the full posture in one command.
+
+```bash
+ward plan --system backend
+ward plan --all
+ward plan --all --json
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--all` | bool | `false` | Scan all configured systems |
+
+For each system, runs:
+
+- **Security** drift check
+- **Branch Protection** drift check
+- **Rulesets** audit (checks for expected ruleset)
+- **Teams** audit (checks for configured team access)
+
+Output shows per-system compliance counts and lists repos needing changes. The summary line reports total repos scanned and total actions needed.
+
+---
+
+## `ward policy`
+
+Policy engine for defining and enforcing org-wide rules. Think OPA-lite for GitHub.
+
+### `ward policy list`
+
+List all configured policies from `ward.toml`.
+
+```bash
+ward policy list
+ward policy list --json
+```
+
+### `ward policy check`
+
+Check all repos against configured policies.
+
+```bash
+ward policy check
+ward policy check --system backend
+ward policy check --repo my-service
+ward policy check --json
+```
+
+Exit codes:
+- `0` -- all repos comply with all policies
+- `1` -- at least one "error" severity violation found
+
+Policies are defined in `ward.toml` as `[[policies]]` entries. See [Configuration](configuration.md#policies) for the policy rule syntax.
+
+---
+
 ## `ward completions`
 
 Generate shell completion scripts.
