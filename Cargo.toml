@@ -1,6 +1,6 @@
 [package]
 name = "ward-cli"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 authors = ["Michael Herland Valen"]
 description = "GitHub repository management for developers. Plan, apply, verify."

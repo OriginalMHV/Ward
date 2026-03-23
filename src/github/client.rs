@@ -34,7 +34,7 @@ impl Client {
         );
         headers.insert(
             header::USER_AGENT,
-            HeaderValue::from_static("ward-cli/0.2.0"),
+            HeaderValue::from_static("ward-cli/0.2.1"),
         );
 
         let http = reqwest::Client::builder()

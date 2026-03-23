@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-03-23
+
+### Added
+
+- `ward doctor` -- diagnose setup: config validity, GitHub token, gh CLI, templates, audit log, org, systems, policies, and API connectivity with rate limit info
+- 8 unit tests for doctor checks (178 total)
+
+### Changed
+
+- README redesigned with capsule-render header/footer, for-the-badge badges, features table, and streamlined layout
+- Badge counts updated: 14.2k lines of code, 178 tests, 18 commands
+
 ## [0.2.0] - 2026-03-23
 
 ### Added
@@ -46,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JSON lines audit trail logged to `~/.ward/audit.log`
 - Custom template support via `~/.ward/templates/` directory
 
-[Unreleased]: https://github.com/OriginalMHV/Ward/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/OriginalMHV/Ward/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/OriginalMHV/Ward/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/OriginalMHV/Ward/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/OriginalMHV/Ward/releases/tag/v0.1.0
