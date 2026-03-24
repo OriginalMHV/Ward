@@ -15,6 +15,15 @@ pub struct Repository {
     pub visibility: String,
     #[serde(default)]
     pub language: Option<String>,
+    /// Pre-fetched security_and_analysis data from the repo listing response.
+    #[serde(default)]
+    pub security_and_analysis: Option<serde_json::Value>,
+}
+
+/// Response wrapper for the GitHub search repositories API.
+#[derive(Debug, Deserialize)]
+struct SearchResponse {
+    items: Vec<Repository>,
 }
 
 impl Client {
@@ -53,15 +62,57 @@ impl Client {
         Ok(all_repos)
     }
 
+    /// Search for repos matching a name query within the configured org.
+    /// Uses the GitHub search API which is much faster than listing all repos
+    /// and filtering client-side.
+    async fn search_repos_by_name(&self, name_query: &str) -> Result<Vec<Repository>> {
+        let mut all_repos = Vec::new();
+        let mut page = 1u32;
+        // Build query: org:<org>+<name_query>+in:name
+        // The `+` in the query string acts as a space/AND for GitHub search.
+        let query = format!("org:{}+{}+in:name", self.org, name_query);
+
+        loop {
+            let resp = self
+                .get(&format!(
+                    "/search/repositories?q={query}&per_page=100&page={page}"
+                ))
+                .await?;
+
+            let status = resp.status();
+            if !status.is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                anyhow::bail!("Failed to search repos (HTTP {status}): {body}");
+            }
+
+            let search_result: SearchResponse = resp
+                .json()
+                .await
+                .context("Failed to parse search response")?;
+
+            if search_result.items.is_empty() {
+                break;
+            }
+
+            all_repos.extend(search_result.items);
+            page += 1;
+        }
+
+        Ok(all_repos)
+    }
+
     /// List repos filtered by system ID prefix and/or explicit repo names,
     /// with exclude patterns applied to the combined result.
+    ///
+    /// Uses the GitHub search API for prefix matching, which avoids fetching
+    /// every repo in the org just to find the few that match.
     pub async fn list_repos_for_system(
         &self,
         system_id: &str,
         exclude_patterns: &[String],
         explicit_repos: &[String],
     ) -> Result<Vec<Repository>> {
-        let all = self.list_repos().await?;
+        let search_results = self.search_repos_by_name(system_id).await?;
 
         let exclude_regex = if exclude_patterns.is_empty() {
             None
@@ -70,8 +121,9 @@ impl Client {
             Some(Regex::new(&pattern).context("Invalid exclude pattern regex")?)
         };
 
-        // Start with prefix-matched repos
-        let mut matched: Vec<Repository> = all
+        // The search API matches system_id anywhere in the name, so we still
+        // need to verify the prefix to avoid false positives.
+        let mut matched: Vec<Repository> = search_results
             .into_iter()
             .filter(|r| !r.archived)
             .filter(|r| r.name.starts_with(system_id))
@@ -89,7 +141,7 @@ impl Client {
             })
             .collect();
 
-        // Add explicit repos (fetch individually, skip if already matched by prefix)
+        // Add explicit repos (fetch individually, skip if already matched by search)
         for repo_name in explicit_repos {
             if matched.iter().any(|r| r.name == *repo_name) {
                 continue;
