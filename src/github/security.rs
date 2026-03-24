@@ -30,54 +30,102 @@ struct FeatureStatus {
     status: String,
 }
 
+/// Extract secret-scanning fields from a pre-fetched `security_and_analysis` JSON value.
+fn extract_scanning_from_json(sa_value: &serde_json::Value) -> (bool, bool, bool) {
+    let enabled = |key: &str| -> bool {
+        sa_value
+            .get(key)
+            .and_then(|v| v.get("status"))
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| s == "enabled")
+    };
+
+    (
+        enabled("secret_scanning"),
+        enabled("secret_scanning_ai_detection"),
+        enabled("secret_scanning_push_protection"),
+    )
+}
+
 impl Client {
     /// Read the current security state of a repository.
+    ///
+    /// This makes 3 HTTP requests. Prefer [`get_security_state_with_repo_data`]
+    /// when you already have the repo JSON (e.g., from a repo listing) to skip
+    /// the extra GET /repos/{org}/{repo} call.
     pub async fn get_security_state(&self, repo: &str) -> Result<SecurityState> {
+        self.get_security_state_with_repo_data(repo, None).await
+    }
+
+    /// Read the current security state, optionally using pre-fetched repo data.
+    ///
+    /// When `repo_data` contains a `security_and_analysis` object, secret scanning
+    /// fields are extracted from it and the separate GET /repos/{org}/{repo} call
+    /// is skipped, reducing API calls from 3 to 2.
+    ///
+    /// The two remaining Dependabot calls are executed concurrently.
+    pub async fn get_security_state_with_repo_data(
+        &self,
+        repo: &str,
+        repo_data: Option<&serde_json::Value>,
+    ) -> Result<SecurityState> {
         let mut state = SecurityState::default();
 
-        // Dependabot alerts (vulnerability-alerts)
-        let resp = self
-            .get(&format!("/repos/{}/{repo}/vulnerability-alerts", self.org))
-            .await?;
-        state.dependabot_alerts = resp.status().as_u16() == 204;
+        // --- Dependabot calls (concurrent) ---
+        let alerts_path = format!("/repos/{}/{repo}/vulnerability-alerts", self.org);
+        let fixes_path = format!("/repos/{}/{repo}/automated-security-fixes", self.org);
+
+        let (alerts_result, fixes_result) =
+            tokio::join!(self.get(&alerts_path), self.get(&fixes_path));
+
+        // Dependabot alerts (vulnerability-alerts): 204 = enabled
+        if let Ok(resp) = alerts_result {
+            state.dependabot_alerts = resp.status().as_u16() == 204;
+        }
 
         // Dependabot security updates (automated-security-fixes)
-        let resp = self
-            .get(&format!(
-                "/repos/{}/{repo}/automated-security-fixes",
-                self.org
-            ))
-            .await?;
-
-        if resp.status().is_success() {
-            #[derive(Deserialize)]
-            struct AutoSecFixes {
-                enabled: bool,
-            }
-            if let Ok(body) = resp.json::<AutoSecFixes>().await {
-                state.dependabot_security_updates = body.enabled;
+        if let Ok(resp) = fixes_result {
+            if resp.status().is_success() {
+                #[derive(Deserialize)]
+                struct AutoSecFixes {
+                    enabled: bool,
+                }
+                if let Ok(body) = resp.json::<AutoSecFixes>().await {
+                    state.dependabot_security_updates = body.enabled;
+                }
             }
         }
 
-        // Secret scanning, AI detection, push protection (from repo settings)
-        let resp = self.get(&format!("/repos/{}/{repo}", self.org)).await?;
+        // --- Secret scanning / push protection / AI detection ---
+        // Try pre-fetched data first, fall back to a fresh API call.
+        let sa_from_prefetch = repo_data.and_then(|v| v.get("security_and_analysis"));
 
-        if resp.status().is_success()
-            && let Ok(body) = resp.json::<RepoSecurityResponse>().await
-            && let Some(sa) = body.security_and_analysis
-        {
-            state.secret_scanning = sa
-                .secret_scanning
-                .as_ref()
-                .is_some_and(|f| f.status == "enabled");
-            state.secret_scanning_ai_detection = sa
-                .secret_scanning_ai_detection
-                .as_ref()
-                .is_some_and(|f| f.status == "enabled");
-            state.push_protection = sa
-                .secret_scanning_push_protection
-                .as_ref()
-                .is_some_and(|f| f.status == "enabled");
+        if let Some(sa_value) = sa_from_prefetch {
+            let (scanning, ai, push) = extract_scanning_from_json(sa_value);
+            state.secret_scanning = scanning;
+            state.secret_scanning_ai_detection = ai;
+            state.push_protection = push;
+        } else {
+            // Fallback: fetch repo endpoint for security_and_analysis
+            let resp = self.get(&format!("/repos/{}/{repo}", self.org)).await?;
+
+            if resp.status().is_success()
+                && let Ok(body) = resp.json::<RepoSecurityResponse>().await
+                && let Some(sa) = body.security_and_analysis
+            {
+                state.secret_scanning = sa
+                    .secret_scanning
+                    .as_ref()
+                    .is_some_and(|f| f.status == "enabled");
+                state.secret_scanning_ai_detection = sa
+                    .secret_scanning_ai_detection
+                    .as_ref()
+                    .is_some_and(|f| f.status == "enabled");
+                state.push_protection = sa
+                    .secret_scanning_push_protection
+                    .as_ref()
+                    .is_some_and(|f| f.status == "enabled");
+            }
         }
 
         Ok(state)
@@ -141,5 +189,77 @@ async fn ensure_success(resp: reqwest::Response, action: &str, repo: &str) -> Re
     } else {
         let body = resp.text().await.unwrap_or_default();
         anyhow::bail!("Failed to {action} for {repo} (HTTP {status}): {body}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn extract_all_enabled() {
+        let sa = json!({
+            "secret_scanning": { "status": "enabled" },
+            "secret_scanning_ai_detection": { "status": "enabled" },
+            "secret_scanning_push_protection": { "status": "enabled" }
+        });
+
+        let (scanning, ai, push) = extract_scanning_from_json(&sa);
+        assert!(scanning);
+        assert!(ai);
+        assert!(push);
+    }
+
+    #[test]
+    fn extract_all_disabled() {
+        let sa = json!({
+            "secret_scanning": { "status": "disabled" },
+            "secret_scanning_ai_detection": { "status": "disabled" },
+            "secret_scanning_push_protection": { "status": "disabled" }
+        });
+
+        let (scanning, ai, push) = extract_scanning_from_json(&sa);
+        assert!(!scanning);
+        assert!(!ai);
+        assert!(!push);
+    }
+
+    #[test]
+    fn extract_mixed_states() {
+        let sa = json!({
+            "secret_scanning": { "status": "enabled" },
+            "secret_scanning_ai_detection": { "status": "disabled" },
+            "secret_scanning_push_protection": { "status": "enabled" }
+        });
+
+        let (scanning, ai, push) = extract_scanning_from_json(&sa);
+        assert!(scanning);
+        assert!(!ai);
+        assert!(push);
+    }
+
+    #[test]
+    fn extract_missing_fields_default_to_false() {
+        let sa = json!({});
+
+        let (scanning, ai, push) = extract_scanning_from_json(&sa);
+        assert!(!scanning);
+        assert!(!ai);
+        assert!(!push);
+    }
+
+    #[test]
+    fn extract_null_value() {
+        let sa = json!({
+            "secret_scanning": null,
+            "secret_scanning_ai_detection": { "status": "enabled" },
+            "secret_scanning_push_protection": null
+        });
+
+        let (scanning, ai, push) = extract_scanning_from_json(&sa);
+        assert!(!scanning);
+        assert!(ai);
+        assert!(!push);
     }
 }
