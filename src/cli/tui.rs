@@ -228,6 +228,11 @@ fn spawn_security_load(
         let base_url = client.base_url.clone();
         let semaphore = client.semaphore.clone();
         let repo_name = entry.repo.name.clone();
+        let repo_data = entry
+            .repo
+            .security_and_analysis
+            .as_ref()
+            .map(|sa| serde_json::json!({ "security_and_analysis": sa }));
 
         tokio::spawn(async move {
             let bg_client = Client {
@@ -237,7 +242,10 @@ fn spawn_security_load(
                 base_url,
             };
 
-            if let Ok(state) = bg_client.get_security_state(&repo_name).await {
+            let result = bg_client
+                .get_security_state_with_repo_data(&repo_name, repo_data.as_ref())
+                .await;
+            if let Ok(state) = result {
                 let _ = tx.send(BgMessage::SecurityLoaded(idx, state));
             }
         });
