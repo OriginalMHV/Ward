@@ -3265,7 +3265,7 @@ dependencies = [
 
 [[package]]
 name = "ward-cli"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
