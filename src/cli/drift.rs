@@ -365,6 +365,7 @@ mod tests {
             dependabot_security_updates: true,
             secret_scanning_ai_detection: true,
             codeql_advanced_setup: false,
+            checks: vec![],
         };
         let actual = SecurityState {
             secret_scanning: false,
@@ -425,6 +426,7 @@ mod tests {
             dependabot_security_updates: true,
             secret_scanning_ai_detection: true,
             codeql_advanced_setup: false,
+            checks: vec![],
         };
         let actual_sec = SecurityState {
             secret_scanning: true,

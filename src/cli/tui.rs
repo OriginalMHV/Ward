@@ -17,9 +17,10 @@ use ratatui::{
 };
 use tokio::sync::mpsc;
 
+use crate::cache::{self, CachedRepoEntry, DEFAULT_MAX_AGE, DiskCache};
 use crate::config::manifest::BranchProtectionConfig;
 use crate::config::templates::load_templates_with_custom_dir;
-use crate::config::{Manifest, SecurityConfig};
+use crate::config::{Manifest, SecurityCheck, SecurityConfig};
 use crate::detection::project_type::ProjectType;
 use crate::github::Client;
 use crate::github::commits::CommitFile;
@@ -42,6 +43,7 @@ enum BgMessage {
     ProtectionApplied(String, std::result::Result<(), String>),
     TemplateDeployed(String, String, std::result::Result<String, String>),
     SettingsApplied(String, std::result::Result<String, String>),
+    CustomCheckLoaded(usize, usize, bool),
     Error(String),
 }
 
@@ -69,16 +71,23 @@ struct App {
     pending_confirm: Option<PendingAction>,
     cache: std::collections::HashMap<String, Vec<RepoEntry>>,
     bulk_progress: Option<(usize, usize)>,
+    /// Custom security check definitions from ward.toml `[[security.checks]]`.
+    custom_checks: Vec<SecurityCheck>,
+    /// Optional persistent disk cache.
+    disk_cache: Option<DiskCache>,
 }
 
 #[derive(Clone)]
 struct RepoEntry {
     repo: Repository,
     security: Option<SecurityState>,
+    /// Results for custom checks (indexed same as App::custom_checks).
+    /// `None` = still loading, `Some(true)` = pass, `Some(false)` = fail.
+    custom_checks: Vec<Option<bool>>,
 }
 
 impl App {
-    fn new(systems: Vec<(String, String)>) -> Self {
+    fn new(systems: Vec<(String, String)>, custom_checks: Vec<SecurityCheck>) -> Self {
         let mut state = ListState::default();
         state.select(Some(0));
         Self {
@@ -96,6 +105,8 @@ impl App {
             pending_confirm: None,
             cache: std::collections::HashMap::new(),
             bulk_progress: None,
+            custom_checks,
+            disk_cache: DiskCache::new(),
         }
     }
 
@@ -142,7 +153,11 @@ impl App {
     }
 
     fn is_loading_security(&self) -> bool {
-        !self.repos.is_empty() && self.repos.iter().any(|r| r.security.is_none())
+        !self.repos.is_empty()
+            && self
+                .repos
+                .iter()
+                .any(|r| r.security.is_none() || r.custom_checks.iter().any(Option::is_none))
     }
 }
 
@@ -162,7 +177,7 @@ pub async fn run(client: &Client, manifest: &Manifest) -> Result<()> {
 
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
-    let mut app = App::new(systems);
+    let mut app = App::new(systems, manifest.security.checks.clone());
 
     let result = run_loop(&mut terminal, &mut app, client, manifest).await;
 
@@ -177,6 +192,7 @@ fn spawn_repo_load(
     client: &Client,
     manifest: &Manifest,
     system_id: &str,
+    num_custom_checks: usize,
 ) {
     let tx = tx.clone();
     let org = client.org.clone();
@@ -205,6 +221,7 @@ fn spawn_repo_load(
                     .map(|repo| RepoEntry {
                         repo,
                         security: None,
+                        custom_checks: vec![None; num_custom_checks],
                     })
                     .collect();
                 let _ = tx.send(BgMessage::ReposLoaded(entries));
@@ -214,6 +231,18 @@ fn spawn_repo_load(
             }
         }
     });
+}
+
+/// Convert in-memory `RepoEntry` slice to `CachedRepoEntry` and persist silently.
+fn save_to_disk_cache(disk_cache: &Option<DiskCache>, system_id: &str, repos: &[RepoEntry]) {
+    let entries: Vec<CachedRepoEntry> = repos
+        .iter()
+        .map(|re| CachedRepoEntry {
+            repo: re.repo.clone(),
+            security: re.security.clone(),
+        })
+        .collect();
+    cache::try_save(disk_cache, system_id, &entries);
 }
 
 fn spawn_security_load(
@@ -249,6 +278,40 @@ fn spawn_security_load(
                 let _ = tx.send(BgMessage::SecurityLoaded(idx, state));
             }
         });
+    }
+}
+
+fn spawn_custom_checks(
+    tx: &mpsc::UnboundedSender<BgMessage>,
+    client: &Client,
+    repos: &[RepoEntry],
+    checks: &[SecurityCheck],
+) {
+    if checks.is_empty() {
+        return;
+    }
+
+    for (repo_idx, entry) in repos.iter().enumerate() {
+        for (check_idx, check) in checks.iter().enumerate() {
+            let tx = tx.clone();
+            let repo = entry.repo.clone();
+            let check = check.clone();
+            let http = client.http.clone();
+            let org = client.org.clone();
+            let base_url = client.base_url.clone();
+            let semaphore = client.semaphore.clone();
+
+            tokio::spawn(async move {
+                let bg_client = Client {
+                    http,
+                    org,
+                    semaphore,
+                    base_url,
+                };
+                let result = bg_client.run_custom_check(&repo, &check).await;
+                let _ = tx.send(BgMessage::CustomCheckLoaded(repo_idx, check_idx, result));
+            });
+        }
     }
 }
 
@@ -645,6 +708,27 @@ fn switch_to_cached_or_prompt(app: &mut App) {
         app.repos = cached.clone();
         app.list_state.select(Some(0));
         app.status_msg = format!("{} repos for {sys_name} (cached)", app.repos.len());
+    } else if let Some(disk_hit) = app
+        .disk_cache
+        .as_ref()
+        .and_then(|dc| dc.load(sys_id, DEFAULT_MAX_AGE))
+    {
+        let age_str = cache::format_age(&disk_hit.cached_at);
+        let num_checks = app.custom_checks.len();
+        let entries: Vec<RepoEntry> = disk_hit
+            .repos
+            .into_iter()
+            .map(|ce| RepoEntry {
+                repo: ce.repo,
+                security: ce.security,
+                custom_checks: vec![None; num_checks],
+            })
+            .collect();
+        let count = entries.len();
+        app.repos = entries.clone();
+        app.cache.insert(sys_id.clone(), entries);
+        app.list_state.select(Some(0));
+        app.status_msg = format!("{count} repos for {sys_name} (cached, {age_str})");
     } else {
         app.repos.clear();
         app.list_state.select(Some(0));
@@ -680,7 +764,9 @@ async fn run_loop(
                     app.list_state.select(Some(0));
                     app.loading = false;
                     app.cache.insert(sys_id.clone(), app.repos.clone());
+                    save_to_disk_cache(&app.disk_cache, sys_id, &app.repos);
                     spawn_security_load(&tx, client, &app.repos);
+                    spawn_custom_checks(&tx, client, &app.repos, &app.custom_checks);
                 }
                 BgMessage::SecurityLoaded(idx, state) => {
                     if let Some(entry) = app.repos.get_mut(idx) {
@@ -688,13 +774,39 @@ async fn run_loop(
                     }
                     let loaded = app.repos.iter().filter(|r| r.security.is_some()).count();
                     let total = app.repos.len();
-                    if loaded == total {
+                    if loaded == total
+                        && app
+                            .repos
+                            .iter()
+                            .all(|r| r.custom_checks.iter().all(Option::is_some))
+                    {
                         let (sys_id, sys_name) = &app.systems[app.selected_system];
                         app.status_msg = format!("{total} repos loaded for {sys_name}");
                         app.cache.insert(sys_id.clone(), app.repos.clone());
+                        // Update disk cache now that security data is complete.
+                        save_to_disk_cache(&app.disk_cache, sys_id, &app.repos);
                     } else {
                         app.status_msg =
                             format!("[{}] Security: {loaded}/{total}...", app.spinner_char());
+                    }
+                }
+                BgMessage::CustomCheckLoaded(repo_idx, check_idx, result) => {
+                    if let Some(entry) = app.repos.get_mut(repo_idx) {
+                        if let Some(slot) = entry.custom_checks.get_mut(check_idx) {
+                            *slot = Some(result);
+                        }
+                    }
+                    // Refresh cache & status when everything is done
+                    let all_security = app.repos.iter().all(|r| r.security.is_some());
+                    let all_custom = app
+                        .repos
+                        .iter()
+                        .all(|r| r.custom_checks.iter().all(Option::is_some));
+                    if all_security && all_custom {
+                        let total = app.repos.len();
+                        let (sys_id, sys_name) = &app.systems[app.selected_system];
+                        app.status_msg = format!("{total} repos loaded for {sys_name}");
+                        app.cache.insert(sys_id.clone(), app.repos.clone());
                     }
                 }
                 BgMessage::SecurityApplied(repo, result) => {
@@ -983,20 +1095,21 @@ async fn run_loop(
                             app.spinner_char(),
                             app.systems[app.selected_system].1
                         );
-                        spawn_repo_load(&tx, client, manifest, sys_id);
+                        spawn_repo_load(&tx, client, manifest, sys_id, app.custom_checks.len());
                     }
                 }
                 KeyCode::Char('R') => {
                     if !app.loading {
                         let sys_id = app.systems[app.selected_system].0.clone();
                         app.cache.remove(&sys_id);
+                        cache::try_invalidate(&app.disk_cache, &sys_id);
                         app.loading = true;
                         app.status_msg = format!(
                             "[{}] Force loading {}...",
                             app.spinner_char(),
                             app.systems[app.selected_system].1
                         );
-                        spawn_repo_load(&tx, client, manifest, &sys_id);
+                        spawn_repo_load(&tx, client, manifest, &sys_id, app.custom_checks.len());
                     }
                 }
                 KeyCode::Char('l') | KeyCode::Enter => {
@@ -1008,7 +1121,7 @@ async fn run_loop(
                             app.spinner_char(),
                             app.systems[app.selected_system].1
                         );
-                        spawn_repo_load(&tx, client, manifest, sys_id);
+                        spawn_repo_load(&tx, client, manifest, sys_id, app.custom_checks.len());
                     }
                 }
                 KeyCode::Tab | KeyCode::Char('s') => {
@@ -1317,16 +1430,25 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
         }
     };
 
-    let header_cells = [
+    // Build header: built-in columns + custom check columns
+    let builtin_headers = [
         "Repository",
         "Dependabot",
         "Secret Scanning",
         "AI Detection",
         "Push Protection",
         "Security Updates",
-    ]
-    .iter()
-    .map(|h| Cell::from(*h).style(Style::default().fg(Color::Cyan).bold()));
+    ];
+    let header_style = Style::default().fg(Color::Cyan).bold();
+
+    let mut header_cells: Vec<Cell> = builtin_headers
+        .iter()
+        .map(|h| Cell::from(*h).style(header_style))
+        .collect();
+    for check in &app.custom_checks {
+        header_cells.push(Cell::from(check.name()).style(header_style));
+    }
+
     let header = Row::new(header_cells)
         .style(Style::default())
         .bottom_margin(0);
@@ -1347,6 +1469,17 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
             };
             let row_style = Style::default().bg(row_bg);
 
+            let icon = |b: bool| -> Cell {
+                if b {
+                    Cell::from(" [Y]").style(Style::default().fg(Color::Green).bg(row_bg))
+                } else {
+                    Cell::from(" [N]").style(Style::default().fg(Color::Red).bg(row_bg))
+                }
+            };
+
+            let loading_cell =
+                Cell::from(" [..]").style(Style::default().fg(Color::DarkGray).bg(row_bg));
+
             if let Some(s) = entry.security.as_ref() {
                 let all_ok = s.dependabot_alerts
                     && s.secret_scanning
@@ -1358,40 +1491,43 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
                     issues += 1;
                 }
 
-                let icon = |b: bool| -> Cell {
-                    if b {
-                        Cell::from(" [Y]").style(Style::default().fg(Color::Green).bg(row_bg))
-                    } else {
-                        Cell::from(" [N]").style(Style::default().fg(Color::Red).bg(row_bg))
-                    }
-                };
-
-                Row::new(vec![
+                let mut cells = vec![
                     Cell::from(truncate_name(&entry.repo.name)).style(Style::default().bg(row_bg)),
                     icon(s.dependabot_alerts),
                     icon(s.secret_scanning),
                     icon(s.secret_scanning_ai_detection),
                     icon(s.push_protection),
                     icon(s.dependabot_security_updates),
-                ])
-                .style(row_style)
+                ];
+
+                // Append custom check cells
+                for result in &entry.custom_checks {
+                    cells.push(match result {
+                        Some(val) => icon(*val),
+                        None => loading_cell.clone(),
+                    });
+                }
+
+                Row::new(cells).style(row_style)
             } else {
                 pending += 1;
-                Row::new(vec![
+                let builtin_count = 6; // repo name + 5 built-in checks
+                let total_cols = builtin_count + app.custom_checks.len();
+                let mut cells = Vec::with_capacity(total_cols);
+                cells.push(
                     Cell::from(truncate_name(&entry.repo.name))
                         .style(Style::default().fg(Color::DarkGray).bg(row_bg)),
-                    Cell::from(" [..]").style(Style::default().fg(Color::DarkGray).bg(row_bg)),
-                    Cell::from(" [..]").style(Style::default().fg(Color::DarkGray).bg(row_bg)),
-                    Cell::from(" [..]").style(Style::default().fg(Color::DarkGray).bg(row_bg)),
-                    Cell::from(" [..]").style(Style::default().fg(Color::DarkGray).bg(row_bg)),
-                    Cell::from(" [..]").style(Style::default().fg(Color::DarkGray).bg(row_bg)),
-                ])
-                .style(row_style)
+                );
+                for _ in 1..total_cols {
+                    cells.push(loading_cell.clone());
+                }
+                Row::new(cells).style(row_style)
             }
         })
         .collect();
 
-    let widths = [
+    // Build column widths: built-in + custom
+    let mut widths = vec![
         Constraint::Min(col_repo as u16),
         Constraint::Min(12),
         Constraint::Min(17),
@@ -1399,6 +1535,11 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
         Constraint::Min(17),
         Constraint::Min(18),
     ];
+    for check in &app.custom_checks {
+        // Width based on check name length, with a minimum of 10
+        let w = check.name().len().max(10) + 2;
+        widths.push(Constraint::Min(w as u16));
+    }
 
     let prefix_note = if all_share_prefix {
         format!(" (prefix {prefix} stripped)")

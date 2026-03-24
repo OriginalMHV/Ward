@@ -8,6 +8,33 @@ push_protection = true
 dependabot_alerts = true
 dependabot_security_updates = true
 
+# Custom checks shown as extra columns in the TUI security tab.
+# Each check adds a [Y]/[N] column next to the built-in ones.
+
+# [[security.checks]]
+# name = "Dependabot Config"
+# type = "file_exists"
+# path = ".github/dependabot.yml"
+
+# [[security.checks]]
+# name = "CI Pipeline"
+# type = "workflow_exists"
+# path = ".github/workflows/ci.yml"
+
+# [[security.checks]]
+# name = "Managed"
+# type = "topic_contains"
+# topic = "ward-managed"
+
+# [[security.checks]]
+# name = "Branch Protected"
+# type = "branch_protection"
+
+# [[security.checks]]
+# name = "Main Branch"
+# type = "default_branch"
+# expected = "main"
+
 [templates]
 branch = "chore/ward-setup"
 reviewers = ["alice", "bob"]

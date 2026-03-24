@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use regex::Regex;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::Client;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Repository {
     pub name: String,
     pub full_name: String,
@@ -18,6 +18,9 @@ pub struct Repository {
     /// Pre-fetched security_and_analysis data from the repo listing response.
     #[serde(default)]
     pub security_and_analysis: Option<serde_json::Value>,
+    /// Repository topics (tags) from GitHub.
+    #[serde(default)]
+    pub topics: Vec<String>,
 }
 
 /// Response wrapper for the GitHub search repositories API.

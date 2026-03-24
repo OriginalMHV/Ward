@@ -53,6 +53,34 @@ pub struct SecurityConfig {
 
     #[serde(default)]
     pub codeql_advanced_setup: bool,
+
+    /// Custom security checks shown as extra columns in the TUI security tab.
+    #[serde(default)]
+    pub checks: Vec<SecurityCheck>,
+}
+
+/// A user-defined check rendered as an extra column in the TUI security tab.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SecurityCheck {
+    FileExists { name: String, path: String },
+    WorkflowExists { name: String, path: String },
+    TopicContains { name: String, topic: String },
+    BranchProtection { name: String },
+    DefaultBranch { name: String, expected: String },
+}
+
+impl SecurityCheck {
+    /// Display name used as the column header in the TUI.
+    pub fn name(&self) -> &str {
+        match self {
+            Self::FileExists { name, .. }
+            | Self::WorkflowExists { name, .. }
+            | Self::TopicContains { name, .. }
+            | Self::BranchProtection { name }
+            | Self::DefaultBranch { name, .. } => name,
+        }
+    }
 }
 
 #[derive(Debug, Default, PartialEq, Deserialize)]
@@ -599,5 +627,145 @@ mod tests {
         assert_eq!(bp.required_approvals, 1);
         assert!(bp.block_force_pushes);
         assert_eq!(m.systems[0].teams.len(), 1);
+    }
+
+    #[test]
+    fn security_checks_empty_by_default() {
+        let sc: SecurityConfig = toml::from_str("").unwrap();
+        assert!(sc.checks.is_empty());
+    }
+
+    #[test]
+    fn security_checks_file_exists() {
+        let toml_str = r#"
+            [[checks]]
+            name = "Dependabot Config"
+            type = "file_exists"
+            path = ".github/dependabot.yml"
+        "#;
+        let sc: SecurityConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(sc.checks.len(), 1);
+        assert_eq!(sc.checks[0].name(), "Dependabot Config");
+        assert_eq!(
+            sc.checks[0],
+            SecurityCheck::FileExists {
+                name: "Dependabot Config".into(),
+                path: ".github/dependabot.yml".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn security_checks_workflow_exists() {
+        let toml_str = r#"
+            [[checks]]
+            name = "CI Pipeline"
+            type = "workflow_exists"
+            path = ".github/workflows/ci.yml"
+        "#;
+        let sc: SecurityConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(sc.checks.len(), 1);
+        assert_eq!(sc.checks[0].name(), "CI Pipeline");
+        assert!(matches!(
+            &sc.checks[0],
+            SecurityCheck::WorkflowExists { path, .. } if path == ".github/workflows/ci.yml"
+        ));
+    }
+
+    #[test]
+    fn security_checks_topic_contains() {
+        let toml_str = r#"
+            [[checks]]
+            name = "Managed"
+            type = "topic_contains"
+            topic = "ward-managed"
+        "#;
+        let sc: SecurityConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(sc.checks.len(), 1);
+        assert_eq!(sc.checks[0].name(), "Managed");
+        assert!(matches!(
+            &sc.checks[0],
+            SecurityCheck::TopicContains { topic, .. } if topic == "ward-managed"
+        ));
+    }
+
+    #[test]
+    fn security_checks_branch_protection() {
+        let toml_str = r#"
+            [[checks]]
+            name = "Branch Protected"
+            type = "branch_protection"
+        "#;
+        let sc: SecurityConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(sc.checks.len(), 1);
+        assert_eq!(sc.checks[0].name(), "Branch Protected");
+        assert!(matches!(
+            &sc.checks[0],
+            SecurityCheck::BranchProtection { .. }
+        ));
+    }
+
+    #[test]
+    fn security_checks_default_branch() {
+        let toml_str = r#"
+            [[checks]]
+            name = "Main Branch"
+            type = "default_branch"
+            expected = "main"
+        "#;
+        let sc: SecurityConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(sc.checks.len(), 1);
+        assert_eq!(sc.checks[0].name(), "Main Branch");
+        assert!(matches!(
+            &sc.checks[0],
+            SecurityCheck::DefaultBranch { expected, .. } if expected == "main"
+        ));
+    }
+
+    #[test]
+    fn security_checks_multiple() {
+        let toml_str = r#"
+            [[checks]]
+            name = "Has CI"
+            type = "workflow_exists"
+            path = ".github/workflows/ci.yml"
+
+            [[checks]]
+            name = "Main Branch"
+            type = "default_branch"
+            expected = "main"
+
+            [[checks]]
+            name = "Tagged"
+            type = "topic_contains"
+            topic = "managed"
+        "#;
+        let sc: SecurityConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(sc.checks.len(), 3);
+        assert_eq!(sc.checks[0].name(), "Has CI");
+        assert_eq!(sc.checks[1].name(), "Main Branch");
+        assert_eq!(sc.checks[2].name(), "Tagged");
+    }
+
+    #[test]
+    fn manifest_with_security_checks() {
+        let toml_str = r#"
+            [org]
+            name = "org"
+
+            [[security.checks]]
+            name = "Dependabot Config"
+            type = "file_exists"
+            path = ".github/dependabot.yml"
+
+            [[security.checks]]
+            name = "Main Branch"
+            type = "default_branch"
+            expected = "main"
+        "#;
+        let m: Manifest = toml::from_str(toml_str).unwrap();
+        assert_eq!(m.security.checks.len(), 2);
+        assert_eq!(m.security.checks[0].name(), "Dependabot Config");
+        assert_eq!(m.security.checks[1].name(), "Main Branch");
     }
 }
