@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-24
+
+### Added
+
+- Persistent disk cache for TUI: repos and security state cached to `~/.cache/ward/` with 5-minute TTL
+- Configurable security checks via `[[security.checks]]` in ward.toml (file_exists, workflow_exists, topic_contains, branch_protection, default_branch)
+- Custom check columns in TUI security tab with [Y]/[N] indicators
+
+### Changed
+
+- Repo listing uses GitHub search API instead of paginating all org repos (major performance improvement)
+- Security state fetching reduced from 3 sequential to 2 concurrent API calls per repo
+- TUI shows "(cached, Xm ago)" when loading from disk cache
+
 ## [0.2.1] - 2026-03-23
 
 ### Added
@@ -58,7 +72,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JSON lines audit trail logged to `~/.ward/audit.log`
 - Custom template support via `~/.ward/templates/` directory
 
-[Unreleased]: https://github.com/OriginalMHV/Ward/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/OriginalMHV/Ward/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/OriginalMHV/Ward/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/OriginalMHV/Ward/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/OriginalMHV/Ward/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/OriginalMHV/Ward/releases/tag/v0.1.0
