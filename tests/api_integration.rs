@@ -138,22 +138,29 @@ async fn test_list_repos_includes_archived() {
 async fn test_list_repos_for_system_with_prefix() {
     let server = MockServer::start().await;
 
+    // list_repos_for_system now uses the search API instead of listing all repos
     Mock::given(method("GET"))
-        .and(path("/orgs/test-org/repos"))
+        .and(path("/search/repositories"))
         .and(query_param("page", "1"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            make_repo_json("s07252-foo", false),
-            make_repo_json("s07252-bar", false),
-            make_repo_json("s07313-baz", false),
-            make_repo_json("s07252-archived", true),
-        ])))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "total_count": 4,
+            "items": [
+                make_repo_json("s07252-foo", false),
+                make_repo_json("s07252-bar", false),
+                make_repo_json("s07313-baz", false),
+                make_repo_json("s07252-archived", true),
+            ]
+        })))
         .mount(&server)
         .await;
 
     Mock::given(method("GET"))
-        .and(path("/orgs/test-org/repos"))
+        .and(path("/search/repositories"))
         .and(query_param("page", "2"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "total_count": 4,
+            "items": []
+        })))
         .mount(&server)
         .await;
 
