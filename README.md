@@ -5,8 +5,6 @@
 [![Rust](https://img.shields.io/badge/Rust-CC5500?style=for-the-badge&logo=rust&logoColor=FFBF00&labelColor=1C1C1C)](https://rust-lang.org)
 [![License](https://img.shields.io/badge/License-MIT-6B8E23?style=for-the-badge&labelColor=1C1C1C)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/OriginalMHV/ward/ci.yml?style=for-the-badge&label=CI&labelColor=1C1C1C&color=6B8E23)](https://github.com/OriginalMHV/Ward/actions)
-[![Crates.io](https://img.shields.io/crates/v/ward-cli?style=for-the-badge&labelColor=1C1C1C&color=6B8E23)](https://crates.io/crates/ward-cli)
-[![Downloads](https://img.shields.io/crates/d/ward-cli?style=for-the-badge&label=Downloads&labelColor=1C1C1C&color=CC5500)](https://crates.io/crates/ward-cli)
 
 [![Lines of Code](https://img.shields.io/badge/Lines_of_Code-14.2k-FFBF00?style=for-the-badge&labelColor=1C1C1C)](https://github.com/OriginalMHV/Ward)
 [![Tests](https://img.shields.io/badge/Tests-204-6B8E23?style=for-the-badge&labelColor=1C1C1C)](https://github.com/OriginalMHV/Ward/actions)
