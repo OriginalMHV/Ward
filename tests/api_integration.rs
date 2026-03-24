@@ -611,6 +611,7 @@ async fn test_drift_check_detects_security_drift() {
         dependabot_alerts: true,
         dependabot_security_updates: true,
         codeql_advanced_setup: false,
+        checks: vec![],
     };
     let actual = SecurityState {
         secret_scanning: true,
@@ -637,6 +638,7 @@ async fn test_drift_check_no_drift() {
         dependabot_alerts: true,
         dependabot_security_updates: true,
         codeql_advanced_setup: false,
+        checks: vec![],
     };
     let actual_sec = SecurityState {
         secret_scanning: true,

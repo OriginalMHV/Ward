@@ -1,10 +1,13 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::config::manifest::SecurityCheck;
+
 use super::Client;
+use super::repos::Repository;
 
 /// Current security state of a repository.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SecurityState {
     pub dependabot_alerts: bool,
     pub dependabot_security_updates: bool,
@@ -180,6 +183,27 @@ impl Client {
 
         ensure_success(resp, "set security features", repo).await
     }
+
+    /// Run a single custom security check against a repository.
+    ///
+    /// Returns `true` when the check passes. Network or API errors are treated
+    /// as `false` (check failed) so the TUI always gets a definitive answer.
+    pub async fn run_custom_check(&self, repo: &Repository, check: &SecurityCheck) -> bool {
+        match check {
+            SecurityCheck::FileExists { path, .. } | SecurityCheck::WorkflowExists { path, .. } => {
+                matches!(self.get_file(&repo.name, path, None).await, Ok(Some(_)))
+            }
+            SecurityCheck::TopicContains { topic, .. } => repo.topics.iter().any(|t| t == topic),
+            SecurityCheck::BranchProtection { .. } => {
+                matches!(
+                    self.get_branch_protection(&repo.name, &repo.default_branch)
+                        .await,
+                    Ok(Some(_))
+                )
+            }
+            SecurityCheck::DefaultBranch { expected, .. } => repo.default_branch == *expected,
+        }
+    }
 }
 
 async fn ensure_success(resp: reqwest::Response, action: &str, repo: &str) -> Result<()> {
@@ -261,5 +285,75 @@ mod tests {
         assert!(!scanning);
         assert!(ai);
         assert!(!push);
+    }
+
+    /// Helper to build a minimal `Repository` for testing.
+    fn make_repo(name: &str, default_branch: &str, topics: Vec<&str>) -> Repository {
+        Repository {
+            name: name.to_owned(),
+            full_name: format!("org/{name}"),
+            archived: false,
+            default_branch: default_branch.to_owned(),
+            description: None,
+            visibility: "private".to_owned(),
+            language: None,
+            security_and_analysis: None,
+            topics: topics.into_iter().map(String::from).collect(),
+        }
+    }
+
+    #[tokio::test]
+    async fn custom_check_default_branch_match() {
+        let client = Client::new_for_test("org", "http://unused");
+        let repo = make_repo("my-repo", "main", vec![]);
+        let check = SecurityCheck::DefaultBranch {
+            name: "Main Branch".into(),
+            expected: "main".into(),
+        };
+        assert!(client.run_custom_check(&repo, &check).await);
+    }
+
+    #[tokio::test]
+    async fn custom_check_default_branch_mismatch() {
+        let client = Client::new_for_test("org", "http://unused");
+        let repo = make_repo("my-repo", "master", vec![]);
+        let check = SecurityCheck::DefaultBranch {
+            name: "Main Branch".into(),
+            expected: "main".into(),
+        };
+        assert!(!client.run_custom_check(&repo, &check).await);
+    }
+
+    #[tokio::test]
+    async fn custom_check_topic_contains_found() {
+        let client = Client::new_for_test("org", "http://unused");
+        let repo = make_repo("my-repo", "main", vec!["ward-managed", "backend"]);
+        let check = SecurityCheck::TopicContains {
+            name: "Managed".into(),
+            topic: "ward-managed".into(),
+        };
+        assert!(client.run_custom_check(&repo, &check).await);
+    }
+
+    #[tokio::test]
+    async fn custom_check_topic_contains_not_found() {
+        let client = Client::new_for_test("org", "http://unused");
+        let repo = make_repo("my-repo", "main", vec!["backend"]);
+        let check = SecurityCheck::TopicContains {
+            name: "Managed".into(),
+            topic: "ward-managed".into(),
+        };
+        assert!(!client.run_custom_check(&repo, &check).await);
+    }
+
+    #[tokio::test]
+    async fn custom_check_topic_contains_empty_topics() {
+        let client = Client::new_for_test("org", "http://unused");
+        let repo = make_repo("my-repo", "main", vec![]);
+        let check = SecurityCheck::TopicContains {
+            name: "Managed".into(),
+            topic: "ward-managed".into(),
+        };
+        assert!(!client.run_custom_check(&repo, &check).await);
     }
 }

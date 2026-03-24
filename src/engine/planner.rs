@@ -94,6 +94,7 @@ mod tests {
             secret_scanning_ai_detection: ai,
             push_protection: pp,
             codeql_advanced_setup: false,
+            checks: vec![],
         }
     }
 

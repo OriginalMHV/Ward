@@ -67,6 +67,9 @@ regex = "1"
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 
+# Cache directory resolution
+dirs = "6"
+
 # Base64 for Git blob API
 base64 = "0.22"
 toml_edit = "0.25.5"
