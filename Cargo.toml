@@ -46,7 +46,7 @@ rust-embed = "8"
 # Output formatting
 tabled = "0.20"
 console = "0.16"
-indicatif = "0.17"
+indicatif = "0.18"
 # TUI
 ratatui = "0.30"
 crossterm = "0.29"
