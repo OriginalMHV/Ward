@@ -614,27 +614,27 @@ mod tests {
     #[test]
     fn discover_prefixes_groups_by_first_segment() {
         let repos = vec![
-            make_repo("sys-core-foo", false),
-            make_repo("sys-core-bar", false),
-            make_repo("sys-core-baz", false),
-            make_repo("sys-auth-one", false),
-            make_repo("sys-auth-two", false),
+            make_repo("backend-foo", false),
+            make_repo("backend-bar", false),
+            make_repo("backend-baz", false),
+            make_repo("frontend-one", false),
+            make_repo("frontend-two", false),
         ];
 
         let prefixes = discover_prefixes(&repos);
         assert_eq!(prefixes.len(), 2);
-        assert_eq!(prefixes[0].prefix, "sys-core");
+        assert_eq!(prefixes[0].prefix, "backend");
         assert_eq!(prefixes[0].count, 3);
-        assert_eq!(prefixes[1].prefix, "sys-auth");
+        assert_eq!(prefixes[1].prefix, "frontend");
         assert_eq!(prefixes[1].count, 2);
     }
 
     #[test]
     fn discover_prefixes_ignores_archived() {
         let repos = vec![
-            make_repo("sys-core-foo", false),
-            make_repo("sys-core-bar", true),
-            make_repo("sys-core-baz", true),
+            make_repo("backend-foo", false),
+            make_repo("backend-bar", true),
+            make_repo("backend-baz", true),
         ];
 
         let prefixes = discover_prefixes(&repos);
@@ -644,14 +644,14 @@ mod tests {
     #[test]
     fn discover_prefixes_filters_singletons() {
         let repos = vec![
-            make_repo("sys-core-foo", false),
-            make_repo("sys-auth-one", false),
-            make_repo("sys-auth-two", false),
+            make_repo("backend-foo", false),
+            make_repo("frontend-one", false),
+            make_repo("frontend-two", false),
         ];
 
         let prefixes = discover_prefixes(&repos);
         assert_eq!(prefixes.len(), 1);
-        assert_eq!(prefixes[0].prefix, "sys-auth");
+        assert_eq!(prefixes[0].prefix, "frontend");
     }
 
     #[test]

@@ -30,7 +30,7 @@ templates/       # Embedded Tera templates (dependabot, codeql, etc.)
 - **Semaphore concurrency**: all API calls go through `client.semaphore.acquire().await`
 - **Audit logging**: every mutation logs to `~/.ward/audit.log` as JSON lines
 - **Template override**: embedded templates at compile time, custom from `~/.ward/templates/`
-- **System filtering**: repos grouped by name prefix (e.g., system `sys-core` matches `sys-core-*`)
+- **System filtering**: repos grouped by name prefix (e.g., system `backend` matches `backend-*`)
 
 ## Style Rules
 

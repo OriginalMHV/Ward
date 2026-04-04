@@ -1234,7 +1234,7 @@ mod tests {
             bypass_teams = [{ slug = "ops-admins", bypass_mode = "always" }]
 
             [[systems]]
-            id = "sys-registry"
+            id = "acme"
             name = "Party Registry"
 
             [systems.rulesets.branch_protection]
@@ -1245,7 +1245,7 @@ mod tests {
             bypass_teams = [{ slug = "party-owners", bypass_mode = "always" }]
         "#;
         let m: Manifest = toml::from_str(toml_str).unwrap();
-        let config = m.rulesets_branch_protection_for_system("sys-registry").unwrap();
+        let config = m.rulesets_branch_protection_for_system("acme").unwrap();
 
         // system override replaces bypass_teams
         assert_eq!(config.bypass_teams.len(), 1);
@@ -1257,13 +1257,13 @@ mod tests {
         assert_eq!(config.overrides[0].repo_patterns, vec!["*-operations"]);
 
         // for_repo on operations repo uses system-level override
-        let ops_config = config.for_repo("sys-registry-operations");
+        let ops_config = config.for_repo("acme-operations");
         assert_eq!(ops_config.bypass_teams.len(), 1);
         assert_eq!(ops_config.bypass_teams[0].slug(), "party-owners");
         assert_eq!(ops_config.bypass_teams[0].bypass_mode(), "always");
 
         // for_repo on non-operations repo uses base system config
-        let app_config = config.for_repo("sys-registry-api");
+        let app_config = config.for_repo("acme-api");
         assert_eq!(app_config.bypass_teams.len(), 1);
         assert_eq!(app_config.bypass_teams[0].slug(), "party-owners");
         assert_eq!(app_config.bypass_teams[0].bypass_mode(), "pull_request");

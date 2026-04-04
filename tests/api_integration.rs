@@ -145,10 +145,10 @@ async fn test_list_repos_for_system_with_prefix() {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "total_count": 4,
             "items": [
-                make_repo_json("sys-auth-foo", false),
-                make_repo_json("sys-auth-bar", false),
-                make_repo_json("sys-billing-baz", false),
-                make_repo_json("sys-auth-archived", true),
+                make_repo_json("frontend-foo", false),
+                make_repo_json("frontend-bar", false),
+                make_repo_json("webapp-baz", false),
+                make_repo_json("frontend-archived", true),
             ]
         })))
         .mount(&server)
@@ -166,12 +166,12 @@ async fn test_list_repos_for_system_with_prefix() {
 
     let client = Client::new_for_test("test-org", &server.uri());
     let repos = client
-        .list_repos_for_system("sys-auth", &[], &[])
+        .list_repos_for_system("frontend", &[], &[])
         .await
         .unwrap();
 
     assert_eq!(repos.len(), 2);
-    assert!(repos.iter().all(|r| r.name.starts_with("sys-auth")));
+    assert!(repos.iter().all(|r| r.name.starts_with("frontend")));
     assert!(repos.iter().all(|r| !r.archived));
 }
 

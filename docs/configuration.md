@@ -182,7 +182,7 @@ Per-system overrides can also define their own repo pattern overrides:
 
 ```toml
 [[systems]]
-id = "sys-registry"
+id = "acme"
 name = "Party Registry"
 
 [systems.rulesets.branch_protection]
