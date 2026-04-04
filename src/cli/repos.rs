@@ -144,9 +144,9 @@ async fn inspect_repo(client: &Client, name: &str) -> Result<()> {
 
 fn print_feature(name: &str, enabled: bool) {
     let icon = if enabled {
-        style("✅").green()
+        style("[ok]").green()
     } else {
-        style("❌").red()
+        style("[!!]").red()
     };
     println!(
         "{name}: {icon} {}",

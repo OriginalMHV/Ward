@@ -106,6 +106,7 @@ required_status_checks = ["ci"]
 require_linear_history = false
 block_force_pushes = true
 block_deletions = true
+bypass_teams = ["global-admins"]
 ```
 
 | Field | Type | Default | Description |
@@ -120,6 +121,77 @@ block_deletions = true
 | `require_linear_history` | bool | `false` | Require linear history |
 | `block_force_pushes` | bool | `false` | Block force pushes |
 | `block_deletions` | bool | `false` | Block branch deletion |
+| `bypass_teams` | list | `[]` | Teams that can bypass the ruleset (see below) |
+| `overrides` | list | `[]` | Per-repo pattern overrides (see below) |
+
+### Bypass teams
+
+The `bypass_teams` field specifies GitHub teams that can bypass the ruleset. It supports two forms:
+
+**Simple form** (defaults to `bypass_mode = "always"`):
+```toml
+bypass_teams = ["my-team", "release-managers"]
+```
+
+**Detailed form** with explicit `bypass_mode`:
+```toml
+bypass_teams = [
+    { slug = "my-team", bypass_mode = "pull_request" },
+    { slug = "release-managers", bypass_mode = "always" },
+]
+```
+
+**Mixed form** (both simple and detailed in the same list):
+```toml
+bypass_teams = [
+    "read-only-team",
+    { slug = "owners", bypass_mode = "pull_request" },
+]
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `slug` | string | required | GitHub team slug |
+| `bypass_mode` | string | `"always"` | `"always"` to always bypass, `"pull_request"` to bypass only via PR |
+
+### Per-repo pattern overrides
+
+Use `[[overrides]]` to give repos matching certain glob patterns different ruleset settings within the same system. This is useful when operations repos need more liberal bypass rules than application repos.
+
+```toml
+[rulesets.branch_protection]
+enabled = true
+required_approvals = 2
+block_force_pushes = true
+bypass_teams = [{ slug = "default-admins", bypass_mode = "always" }]
+
+[[rulesets.branch_protection.overrides]]
+repo_patterns = ["*-operations", "*-operation", "*-system"]
+block_force_pushes = false
+bypass_teams = [{ slug = "ops-admins", bypass_mode = "always" }]
+```
+
+The `repo_patterns` field accepts glob patterns matched against repository names. The first matching override wins. Override fields take precedence over the base config; unset fields fall back to the base.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `repo_patterns` | list | yes | Glob patterns to match repo names |
+| *(any ruleset field)* | -- | no | Override value for matching repos |
+
+Per-system overrides can also define their own repo pattern overrides:
+
+```toml
+[[systems]]
+id = "s07439"
+name = "Party Registry"
+
+[systems.rulesets.branch_protection]
+bypass_teams = [{ slug = "party-owners", bypass_mode = "pull_request" }]
+
+[[systems.rulesets.branch_protection.overrides]]
+repo_patterns = ["*-operations", "*-system"]
+bypass_teams = [{ slug = "party-owners", bypass_mode = "always" }]
+```
 
 ---
 
@@ -344,6 +416,13 @@ required_status_checks = ["ci"]
 require_linear_history = false
 block_force_pushes = true
 block_deletions = true
+bypass_teams = [{ slug = "global-admins", bypass_mode = "always" }]
+
+# Operations repos get different bypass rules
+[[rulesets.branch_protection.overrides]]
+repo_patterns = ["*-operations", "*-operation", "*-system"]
+block_force_pushes = false
+bypass_teams = [{ slug = "global-admins", bypass_mode = "always" }]
 
 [[systems]]
 id = "backend"
@@ -354,6 +433,13 @@ teams = [
     { slug = "developers", permission = "push" },
     { slug = "devops", permission = "admin" },
 ]
+
+[systems.rulesets.branch_protection]
+bypass_teams = [{ slug = "backend-owners", bypass_mode = "pull_request" }]
+
+[[systems.rulesets.branch_protection.overrides]]
+repo_patterns = ["*-operations"]
+bypass_teams = [{ slug = "backend-owners", bypass_mode = "always" }]
 
 [[systems]]
 id = "frontend"
