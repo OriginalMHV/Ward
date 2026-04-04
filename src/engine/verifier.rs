@@ -54,18 +54,18 @@ impl VerificationReport {
         if self.mismatches.is_empty() {
             println!(
                 "  {} Verification passed: all {} repos match desired state.",
-                style("✅").green(),
+                style("[ok]").green(),
                 self.verified
             );
         } else {
             println!(
                 "  {} Verification: {} passed, {} mismatches:",
-                style("⚠️").yellow(),
+                style("[warn]").yellow(),
                 self.verified,
                 self.mismatches.len()
             );
             for m in &self.mismatches {
-                println!("    {} {}:", style("❌").red(), m.repo);
+                println!("    {} {}:", style("[!!]").red(), m.repo);
                 for change in &m.remaining_changes {
                     println!("      - {change}");
                 }

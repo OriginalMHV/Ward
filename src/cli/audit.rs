@@ -89,7 +89,7 @@ impl AuditCommand {
         println!();
         println!(
             "  {} Full audit: {} repos in system {}",
-            style("🔍").bold(),
+            style("[..]").bold(),
             repos.len(),
             style(sys).cyan()
         );
@@ -321,9 +321,9 @@ fn print_table(audits: &[RepoAudit]) {
 
         let icon = |b: bool| {
             if b {
-                format!("{}", style("✅").green())
+                format!("{}", style("[ok]").green())
             } else {
-                format!("{}", style("❌").red())
+                format!("{}", style("[!!]").red())
             }
         };
 

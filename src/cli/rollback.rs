@@ -31,7 +31,7 @@ impl RollbackCommand {
         if !log_path.exists() {
             println!(
                 "\n  {} No audit log found at {}",
-                style("⚠️").yellow(),
+                style("[warn]").yellow(),
                 log_path.display()
             );
             return Ok(());
@@ -50,7 +50,7 @@ impl RollbackCommand {
         if to_process.is_empty() {
             println!(
                 "\n  {} No matching audit entries found.",
-                style("ℹ️").blue()
+                style("[info]").blue()
             );
             return Ok(());
         }
@@ -58,7 +58,7 @@ impl RollbackCommand {
         println!();
         println!(
             "  {} Rollback candidates ({} entries):",
-            style("🔄").bold(),
+            style("[..]").bold(),
             to_process.len()
         );
         println!();
@@ -71,7 +71,7 @@ impl RollbackCommand {
                 RollbackAction::Reverse(desc) => {
                     println!(
                         "  {} {} / {} / {}",
-                        style("⚡").yellow(),
+                        style("[>>]").yellow(),
                         entry.repo,
                         entry.action,
                         desc
@@ -81,7 +81,7 @@ impl RollbackCommand {
                 RollbackAction::Skip(reason) => {
                     println!(
                         "  {} {} / {} / {}",
-                        style("⏭").dim(),
+                        style("--").dim(),
                         style(&entry.repo).dim(),
                         style(&entry.action).dim(),
                         style(&reason).dim()
@@ -99,12 +99,15 @@ impl RollbackCommand {
         );
 
         if reversible.is_empty() {
-            println!("\n  {} Nothing to rollback.", style("ℹ️").blue());
+            println!("\n  {} Nothing to rollback.", style("[info]").blue());
             return Ok(());
         }
 
         if self.dry_run {
-            println!("\n  {} Dry run - no changes applied.", style("ℹ️").blue());
+            println!(
+                "\n  {} Dry run - no changes applied.",
+                style("[info]").blue()
+            );
             return Ok(());
         }
 
@@ -121,7 +124,7 @@ impl RollbackCommand {
         }
 
         println!();
-        println!("  {} Rolling back...", style("⚡").bold());
+        println!("  {} Rolling back...", style("[>>]").bold());
 
         let mut succeeded = 0usize;
         let mut failed: Vec<(String, String)> = Vec::new();
@@ -130,8 +133,8 @@ impl RollbackCommand {
             match execute_rollback(client, entry).await {
                 Ok(()) => {
                     println!(
-                        "  {} {}/{}: ✅ rolled back",
-                        style("▶").magenta(),
+                        "  {} {}/{}: rolled back",
+                        style(">>").magenta(),
                         entry.repo,
                         entry.action
                     );
@@ -139,8 +142,8 @@ impl RollbackCommand {
                 }
                 Err(e) => {
                     println!(
-                        "  {} {}/{}: ❌ {e}",
-                        style("▶").magenta(),
+                        "  {} {}/{}: error: {e}",
+                        style(">>").magenta(),
                         entry.repo,
                         entry.action
                     );
@@ -153,18 +156,18 @@ impl RollbackCommand {
         if failed.is_empty() {
             println!(
                 "  {} All {} entries rolled back successfully.",
-                style("✅").green(),
+                style("[ok]").green(),
                 succeeded
             );
         } else {
             println!(
                 "  {} {} succeeded, {} failed:",
-                style("⚠️").yellow(),
+                style("[warn]").yellow(),
                 succeeded,
                 failed.len()
             );
             for (repo, err) in &failed {
-                println!("    {} {}: {}", style("❌").red(), repo, err);
+                println!("    {} {}: {}", style("[!!]").red(), repo, err);
             }
         }
 

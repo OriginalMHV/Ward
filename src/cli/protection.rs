@@ -180,7 +180,7 @@ async fn build_diffs(
     println!();
     println!(
         "  {} Scanning {} repositories...",
-        style("🔍").bold(),
+        style("[..]").bold(),
         repos.len()
     );
 
@@ -231,7 +231,7 @@ async fn apply(
     if needs_changes == 0 {
         println!(
             "\n  {} All repositories are up to date.",
-            style("✅").green()
+            style("[ok]").green()
         );
         return Ok(());
     }
@@ -253,7 +253,7 @@ async fn apply(
     }
 
     println!();
-    println!("  {} Applying changes...", style("⚡").bold());
+    println!("  {} Applying changes...", style("[>>]").bold());
 
     let audit_log = AuditLog::new()?;
     let config = &manifest.branch_protection;
@@ -267,8 +267,8 @@ async fn apply(
         {
             Ok(()) => {
                 println!(
-                    "  {} {}/{}: ✅ done",
-                    style("▶").magenta(),
+                    "  {} {}/{}: done",
+                    style(">>").magenta(),
                     diff.repo,
                     diff.branch
                 );
@@ -283,8 +283,8 @@ async fn apply(
             }
             Err(e) => {
                 println!(
-                    "  {} {}/{}: ❌ {e}",
-                    style("▶").magenta(),
+                    "  {} {}/{}: error: {e}",
+                    style(">>").magenta(),
                     diff.repo,
                     diff.branch
                 );
@@ -297,24 +297,24 @@ async fn apply(
     if failed.is_empty() {
         println!(
             "  {} All {} repositories updated successfully.",
-            style("✅").green(),
+            style("[ok]").green(),
             succeeded
         );
     } else {
         println!(
             "  {} {} succeeded, {} failed:",
-            style("⚠️").yellow(),
+            style("[warn]").yellow(),
             succeeded,
             failed.len()
         );
         for (repo, err) in &failed {
-            println!("    {} {}: {}", style("❌").red(), repo, err);
+            println!("    {} {}: {}", style("[!!]").red(), repo, err);
         }
     }
 
     println!(
         "\n  {} Audit log: {}",
-        style("📋").bold(),
+        style("[..]").bold(),
         audit_log.path().display()
     );
 
@@ -332,7 +332,7 @@ async fn audit(
     println!();
     println!(
         "  {} Auditing branch protection for {} repositories...",
-        style("🔍").bold(),
+        style("[..]").bold(),
         repos.len()
     );
 
@@ -367,9 +367,9 @@ async fn audit(
 
         let icon = |v: bool| {
             if v {
-                format!("{}", style("✅").green())
+                format!("{}", style("[ok]").green())
             } else {
-                format!("{}", style("❌").red())
+                format!("{}", style("[!!]").red())
             }
         };
 
@@ -409,20 +409,20 @@ fn print_diff_table(diffs: &[ProtectionDiff]) {
         if diff.has_changes() {
             println!(
                 "  {} {} ({})",
-                style("⚡").yellow(),
+                style("[>>]").yellow(),
                 style(&diff.repo).bold(),
                 diff.branch
             );
             for change in &diff.changes {
                 println!(
-                    "     {}: {} → {}",
+                    "     {}: {} -> {}",
                     change.field,
                     style(&change.current).red(),
                     style(&change.desired).green().bold()
                 );
             }
         } else {
-            println!("  {} {}", style("✓").green(), style(&diff.repo).dim());
+            println!("  {} {}", style("[ok]").green(), style(&diff.repo).dim());
         }
     }
 

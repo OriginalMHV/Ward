@@ -86,7 +86,7 @@ async fn build_plans(
     println!();
     println!(
         "  {} Scanning {} repositories...",
-        style("🔍").bold(),
+        style("[..]").bold(),
         repo_names.len()
     );
 
@@ -135,7 +135,7 @@ async fn apply(
     if needs_changes == 0 {
         println!(
             "\n  {} All repositories are up to date.",
-            style("✅").green()
+            style("[ok]").green()
         );
         return Ok(());
     }
@@ -155,7 +155,7 @@ async fn apply(
     }
 
     println!();
-    println!("  {} Applying changes...", style("⚡").bold());
+    println!("  {} Applying changes...", style("[>>]").bold());
 
     let audit_log = AuditLog::new()?;
     let report = executor::execute_security_plan(client, &plans, &audit_log).await?;
@@ -163,7 +163,7 @@ async fn apply(
 
     if !skip_verify && report.failed.is_empty() {
         println!();
-        println!("  {} Verifying changes...", style("🔍").bold());
+        println!("  {} Verifying changes...", style("[..]").bold());
 
         let desired = manifest.security_for_system(&sys_id);
         let verify_report = verifier::verify_security(client, &plans, desired).await?;
@@ -172,7 +172,7 @@ async fn apply(
 
     println!(
         "\n  {} Audit log: {}",
-        style("📋").bold(),
+        style("[..]").bold(),
         audit_log.path().display()
     );
 
@@ -190,7 +190,7 @@ async fn audit(
     println!();
     println!(
         "  {} Auditing {} repositories...",
-        style("🔍").bold(),
+        style("[..]").bold(),
         repo_names.len()
     );
 
@@ -230,9 +230,9 @@ async fn audit(
             .iter()
             .map(|&f| {
                 if f {
-                    format!("{}", style("✅").green())
+                    format!("{}", style("[ok]").green())
                 } else {
-                    format!("{}", style("❌").red())
+                    format!("{}", style("[!!]").red())
                 }
             })
             .collect();
@@ -267,7 +267,7 @@ fn print_plan_table(plans: &[planner::RepoPlan], system_id: &str) {
 
     for plan in plans {
         if plan.has_changes() {
-            println!("  {} {}", style("⚡").yellow(), style(&plan.repo).bold());
+            println!("  {} {}", style("[>>]").yellow(), style(&plan.repo).bold());
             for change in &plan.changes {
                 let current = if change.current {
                     style("on").green()
@@ -279,10 +279,10 @@ fn print_plan_table(plans: &[planner::RepoPlan], system_id: &str) {
                 } else {
                     style("off").red().bold()
                 };
-                println!("     {}: {current} → {desired}", change.feature);
+                println!("     {}: {current} -> {desired}", change.feature);
             }
         } else {
-            println!("  {} {}", style("✓").green(), style(&plan.repo).dim());
+            println!("  {} {}", style("[ok]").green(), style(&plan.repo).dim());
         }
     }
 

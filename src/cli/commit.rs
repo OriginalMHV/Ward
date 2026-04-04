@@ -241,14 +241,14 @@ async fn plan(
 
     println!();
     println!(
-        "  {} Commit plan: {} → {}",
-        style("📋").bold(),
+        "  {} Commit plan: {} -> {}",
+        style("[..]").bold(),
         style(template).cyan().bold(),
         style(target_path).dim()
     );
     println!(
         "  {} Scanning {} repositories...",
-        style("🔍").bold(),
+        style("[..]").bold(),
         repos.len()
     );
     println!();
@@ -273,14 +273,14 @@ async fn plan(
                 if result.existing_matches {
                     println!(
                         "  {} {}",
-                        style("✓").green(),
+                        style("[ok]").green(),
                         style(&result.repo_name).dim()
                     );
                     up_to_date += 1;
                 } else if result.already_exists {
                     println!(
                         "  {} {} (update {})",
-                        style("⚡").yellow(),
+                        style("[>>]").yellow(),
                         style(&result.repo_name).bold(),
                         target_path
                     );
@@ -288,7 +288,7 @@ async fn plan(
                 } else {
                     println!(
                         "  {} {} (create {})",
-                        style("⚡").yellow(),
+                        style("[>>]").yellow(),
                         style(&result.repo_name).bold(),
                         target_path
                     );
@@ -298,7 +298,7 @@ async fn plan(
             Err(e) => {
                 println!(
                     "  {} {}: {}",
-                    style("⏭").dim(),
+                    style("--").dim(),
                     style(&repo_name).dim(),
                     style(e).dim()
                 );
@@ -342,8 +342,8 @@ async fn apply(
 
     println!();
     println!(
-        "  {} Preparing commits: {} → {}",
-        style("📋").bold(),
+        "  {} Preparing commits: {} -> {}",
+        style("[..]").bold(),
         style(template).cyan().bold(),
         style(target_path).dim()
     );
@@ -376,7 +376,7 @@ async fn apply(
     if pending.is_empty() {
         println!(
             "\n  {} All repositories already up to date.",
-            style("✅").green()
+            style("[ok]").green()
         );
         return Ok(());
     }
@@ -390,8 +390,8 @@ async fn apply(
     for r in &pending {
         let action = if r.already_exists { "update" } else { "create" };
         println!(
-            "  {} {} → {action} {}",
-            style("⚡").yellow(),
+            "  {} {} -> {action} {}",
+            style("[>>]").yellow(),
             r.repo_name,
             r.target_path
         );
@@ -418,7 +418,7 @@ async fn apply(
     let mut failed: Vec<(String, String)> = Vec::new();
 
     for result in &pending {
-        println!("  {} {} ...", style("▶").magenta(), result.repo_name);
+        println!("  {} {} ...", style(">>").magenta(), result.repo_name);
 
         let default_branch = repos
             .iter()
@@ -440,7 +440,11 @@ async fn apply(
         .await
         {
             Ok(pr_url) => {
-                println!("    {} PR: {}", style("✅").green(), style(&pr_url).cyan());
+                println!(
+                    "    {} PR: {}",
+                    style("[ok]").green(),
+                    style(&pr_url).cyan()
+                );
                 audit_log.log(
                     &result.repo_name,
                     &format!("commit_template_{template}"),
@@ -451,7 +455,7 @@ async fn apply(
                 succeeded += 1;
             }
             Err(e) => {
-                println!("    {} {}", style("❌").red(), e);
+                println!("    {} {}", style("[!!]").red(), e);
                 failed.push((result.repo_name.clone(), e.to_string()));
             }
         }
@@ -461,24 +465,24 @@ async fn apply(
     if failed.is_empty() {
         println!(
             "  {} All {} repos committed and PRs created.",
-            style("✅").green(),
+            style("[ok]").green(),
             succeeded
         );
     } else {
         println!(
             "  {} {} succeeded, {} failed:",
-            style("⚠️").yellow(),
+            style("[warn]").yellow(),
             succeeded,
             failed.len()
         );
         for (repo, err) in &failed {
-            println!("    {} {}: {}", style("❌").red(), repo, err);
+            println!("    {} {}: {}", style("[!!]").red(), repo, err);
         }
     }
 
     println!(
         "\n  {} Audit log: {}",
-        style("📋").bold(),
+        style("[..]").bold(),
         audit_log.path().display()
     );
 

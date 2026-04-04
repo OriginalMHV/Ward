@@ -247,7 +247,7 @@ ward rulesets plan --repo my-service
 
 ### `ward rulesets apply`
 
-Create or update rulesets on repositories.
+Create or update rulesets on repositories. When repo pattern overrides are configured, each repository gets its resolved config (matching override fields take precedence over the base config). Team ID lookups are cached to avoid redundant API calls.
 
 ```bash
 ward rulesets apply --system backend
@@ -268,7 +268,7 @@ ward rulesets audit --system backend
 ward rulesets audit --repo my-service
 ```
 
-Configure rulesets in `ward.toml` under `[rulesets.branch_protection]`. See [Configuration](configuration.md) for all fields.
+Configure rulesets in `ward.toml` under `[rulesets.branch_protection]`. Supports `bypass_teams` with configurable `bypass_mode` (`"always"` or `"pull_request"`), and per-repo pattern overrides via `[[rulesets.branch_protection.overrides]]`. See [Configuration](configuration.md) for all fields.
 
 ---
 

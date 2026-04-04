@@ -462,6 +462,7 @@ mod tests {
                 repos: vec![],
                 security: None,
                 teams: vec![],
+                rulesets: None,
             });
         let check = check_systems(&manifest);
         assert!(matches!(check.status, CheckStatus::Pass));

@@ -1,11 +1,14 @@
+use std::collections::HashMap;
+
 use anyhow::Result;
 use clap::Args;
 use console::style;
 use dialoguer::Confirm;
 
 use crate::config::Manifest;
-use crate::config::manifest::RulesetBranchProtection;
+use crate::config::manifest::{BypassTeam, RulesetBranchProtection};
 use crate::github::Client;
+use crate::github::rulesets::RulesetDetail;
 
 #[derive(Args)]
 pub struct RulesetsCommand {
@@ -68,7 +71,10 @@ async fn resolve_repos(
 }
 
 /// Build the GitHub API JSON body for a branch protection ruleset.
-pub fn build_ruleset_json(config: &RulesetBranchProtection) -> serde_json::Value {
+pub fn build_ruleset_json(
+    config: &RulesetBranchProtection,
+    bypass_actors: &[serde_json::Value],
+) -> serde_json::Value {
     let name = config.name.as_deref().unwrap_or("Branch Protection");
 
     let mut rules = vec![serde_json::json!({
@@ -120,7 +126,7 @@ pub fn build_ruleset_json(config: &RulesetBranchProtection) -> serde_json::Value
             }
         },
         "rules": rules,
-        "bypass_actors": []
+        "bypass_actors": bypass_actors
     })
 }
 
@@ -141,8 +147,13 @@ async fn build_plans(
     system: Option<&str>,
     repo: Option<&str>,
 ) -> Result<(Vec<RulesetPlan>, RulesetBranchProtection)> {
-    let config = match &manifest.rulesets.branch_protection {
-        Some(c) if c.enabled => c.clone(),
+    let config = match system {
+        Some(sys) => manifest.rulesets_branch_protection_for_system(sys),
+        None => manifest.rulesets.branch_protection.clone(),
+    };
+
+    let config = match config {
+        Some(c) if c.enabled => c,
         _ => {
             anyhow::bail!("No rulesets.branch_protection configured or not enabled in ward.toml");
         }
@@ -159,6 +170,7 @@ async fn build_plans(
     );
 
     let mut plans = Vec::new();
+    let mut team_id_cache: HashMap<String, u64> = HashMap::new();
 
     for repo_name in &repos {
         let rulesets = client.list_rulesets(repo_name).await?;
@@ -169,9 +181,15 @@ async fn build_plans(
                 name: expected_name.to_string(),
             },
             Some(r) => {
+                let repo_config = config.for_repo(repo_name);
+                let bypass_actors =
+                    resolve_bypass_actors(client, &repo_config.bypass_teams, &mut team_id_cache)
+                        .await?;
+                let expected_body = build_ruleset_json(&repo_config, &bypass_actors);
+
                 let detail = client.get_ruleset(repo_name, r.id).await;
                 match detail {
-                    Ok(d) if d.enforcement == config.enforcement => RulesetPlanAction::InSync {
+                    Ok(d) if ruleset_matches(&d, &expected_body) => RulesetPlanAction::InSync {
                         name: expected_name.to_string(),
                     },
                     _ => RulesetPlanAction::Update {
@@ -257,7 +275,7 @@ async fn apply(
     println!();
     println!("  {} Applying rulesets...", style("[..]").dim());
 
-    let body = build_ruleset_json(&config);
+    let mut team_id_cache: HashMap<String, u64> = HashMap::new();
     let mut succeeded = 0usize;
     let mut failed: Vec<(String, String)> = Vec::new();
 
@@ -265,6 +283,11 @@ async fn apply(
         match &plan.action {
             RulesetPlanAction::InSync { .. } => {}
             RulesetPlanAction::Create { name } => {
+                let repo_config = config.for_repo(&plan.repo);
+                let bypass_actors =
+                    resolve_bypass_actors(client, &repo_config.bypass_teams, &mut team_id_cache)
+                        .await?;
+                let body = build_ruleset_json(&repo_config, &bypass_actors);
                 match client.create_ruleset(&plan.repo, &body).await {
                     Ok(_) => {
                         println!(
@@ -282,6 +305,11 @@ async fn apply(
                 }
             }
             RulesetPlanAction::Update { id, name } => {
+                let repo_config = config.for_repo(&plan.repo);
+                let bypass_actors =
+                    resolve_bypass_actors(client, &repo_config.bypass_teams, &mut team_id_cache)
+                        .await?;
+                let body = build_ruleset_json(&repo_config, &bypass_actors);
                 match client.update_ruleset(&plan.repo, *id, &body).await {
                     Ok(()) => {
                         println!(
@@ -371,6 +399,90 @@ async fn audit(
     Ok(())
 }
 
+/// Compare a deployed ruleset against the expected JSON body.
+/// Checks enforcement, rule types + parameters, and bypass actors.
+fn ruleset_matches(deployed: &RulesetDetail, expected: &serde_json::Value) -> bool {
+    if deployed.enforcement != expected["enforcement"].as_str().unwrap_or("active") {
+        return false;
+    }
+
+    // Compare rules (types + parameters)
+    let expected_rules = match expected["rules"].as_array() {
+        Some(r) => r,
+        None => return false,
+    };
+    if deployed.rules.len() != expected_rules.len() {
+        return false;
+    }
+
+    for expected_rule in expected_rules {
+        let rule_type = match expected_rule["type"].as_str() {
+            Some(t) => t,
+            None => return false,
+        };
+        let deployed_rule = match deployed.rules.iter().find(|r| r.rule_type == rule_type) {
+            Some(r) => r,
+            None => return false,
+        };
+        // Compare parameters if present
+        if let Some(expected_params) = expected_rule.get("parameters") {
+            match &deployed_rule.parameters {
+                Some(deployed_params) if deployed_params == expected_params => {}
+                _ => return false,
+            }
+        }
+    }
+
+    // Compare bypass actors
+    let expected_actors = match expected["bypass_actors"].as_array() {
+        Some(a) => a,
+        None => return deployed.bypass_actors.is_empty(),
+    };
+    if deployed.bypass_actors.len() != expected_actors.len() {
+        return false;
+    }
+
+    for expected_actor in expected_actors {
+        let found = deployed.bypass_actors.iter().any(|da| {
+            da["actor_id"] == expected_actor["actor_id"]
+                && da["actor_type"] == expected_actor["actor_type"]
+                && da["bypass_mode"] == expected_actor["bypass_mode"]
+        });
+        if !found {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Resolve bypass teams to GitHub API bypass actor objects.
+/// Uses a cache to avoid redundant API calls for the same team slug.
+async fn resolve_bypass_actors(
+    client: &Client,
+    bypass_teams: &[BypassTeam],
+    cache: &mut HashMap<String, u64>,
+) -> Result<Vec<serde_json::Value>> {
+    let mut actors = Vec::new();
+    for team in bypass_teams {
+        let slug = team.slug();
+        let id = match cache.get(slug) {
+            Some(&id) => id,
+            None => {
+                let id = client.get_team_id(slug).await?;
+                cache.insert(slug.to_owned(), id);
+                id
+            }
+        };
+        actors.push(serde_json::json!({
+            "actor_id": id,
+            "actor_type": "Team",
+            "bypass_mode": team.bypass_mode()
+        }));
+    }
+    Ok(actors)
+}
+
 fn print_plan_table(plans: &[RulesetPlan]) {
     println!();
     println!("  {}", style("Rulesets Plan").bold().cyan());
@@ -440,9 +552,11 @@ mod tests {
             require_linear_history: false,
             block_force_pushes: true,
             block_deletions: true,
+            bypass_teams: vec![],
+            overrides: vec![],
         };
 
-        let json = build_ruleset_json(&config);
+        let json = build_ruleset_json(&config, &[]);
         assert_eq!(json["name"], "Branch Protection");
         assert_eq!(json["target"], "branch");
         assert_eq!(json["enforcement"], "active");
@@ -478,9 +592,11 @@ mod tests {
             require_linear_history: false,
             block_force_pushes: false,
             block_deletions: false,
+            bypass_teams: vec![],
+            overrides: vec![],
         };
 
-        let json = build_ruleset_json(&config);
+        let json = build_ruleset_json(&config, &[]);
         assert_eq!(json["name"], "Custom");
         assert_eq!(json["enforcement"], "evaluate");
 
@@ -503,12 +619,67 @@ mod tests {
             require_linear_history: true,
             block_force_pushes: false,
             block_deletions: false,
+            bypass_teams: vec![],
+            overrides: vec![],
         };
 
-        let json = build_ruleset_json(&config);
+        let json = build_ruleset_json(&config, &[]);
         let rules = json["rules"].as_array().unwrap();
         let rule_types: Vec<&str> = rules.iter().map(|r| r["type"].as_str().unwrap()).collect();
         assert!(rule_types.contains(&"required_linear_history"));
         assert_eq!(rules[0]["parameters"]["require_code_owner_review"], true);
+    }
+
+    #[test]
+    fn test_build_ruleset_json_with_bypass_actors() {
+        let config = RulesetBranchProtection {
+            enabled: true,
+            name: None,
+            enforcement: "active".to_string(),
+            required_approvals: 1,
+            dismiss_stale_reviews: false,
+            require_code_owner_reviews: false,
+            required_status_checks: vec![],
+            require_linear_history: false,
+            block_force_pushes: false,
+            block_deletions: false,
+            bypass_teams: vec![BypassTeam::Simple("team-owners".to_string())],
+            overrides: vec![],
+        };
+
+        let bypass_actors = vec![serde_json::json!({
+            "actor_id": 12345,
+            "actor_type": "Team",
+            "bypass_mode": "always"
+        })];
+
+        let json = build_ruleset_json(&config, &bypass_actors);
+        let actors = json["bypass_actors"].as_array().unwrap();
+        assert_eq!(actors.len(), 1);
+        assert_eq!(actors[0]["actor_id"], 12345);
+        assert_eq!(actors[0]["actor_type"], "Team");
+        assert_eq!(actors[0]["bypass_mode"], "always");
+    }
+
+    #[test]
+    fn test_build_ruleset_json_empty_bypass_actors() {
+        let config = RulesetBranchProtection {
+            enabled: true,
+            name: None,
+            enforcement: "active".to_string(),
+            required_approvals: 1,
+            dismiss_stale_reviews: false,
+            require_code_owner_reviews: false,
+            required_status_checks: vec![],
+            require_linear_history: false,
+            block_force_pushes: false,
+            block_deletions: false,
+            bypass_teams: vec![],
+            overrides: vec![],
+        };
+
+        let json = build_ruleset_json(&config, &[]);
+        let actors = json["bypass_actors"].as_array().unwrap();
+        assert!(actors.is_empty());
     }
 }
