@@ -156,7 +156,7 @@ async fn plan(
     println!();
     println!(
         "  {} Settings plan: scanning {} repos...",
-        style("🔍").bold(),
+        style("[..]").bold(),
         repos.len()
     );
     println!();
@@ -184,10 +184,10 @@ async fn plan(
         }
 
         if changes.is_empty() {
-            println!("  {} {}", style("✓").green(), style(repo_name).dim());
+            println!("  {} {}", style("[ok]").green(), style(repo_name).dim());
             up_to_date += 1;
         } else {
-            println!("  {} {}", style("⚡").yellow(), style(repo_name).bold());
+            println!("  {} {}", style("[>>]").yellow(), style(repo_name).bold());
             for change in &changes {
                 println!("     {change}");
             }
@@ -227,7 +227,11 @@ async fn apply(
     let branch_name = &manifest.templates.branch;
 
     println!();
-    println!("  {} Scanning {} repos...", style("🔍").bold(), repos.len());
+    println!(
+        "  {} Scanning {} repos...",
+        style("[..]").bold(),
+        repos.len()
+    );
 
     // Scan all repos
     let mut work: Vec<(RepoRulesetState, String)> = Vec::new();
@@ -242,7 +246,7 @@ async fn apply(
     }
 
     if work.is_empty() {
-        println!("\n  {} All repos up to date.", style("✅").green());
+        println!("\n  {} All repos up to date.", style("[ok]").green());
         return Ok(());
     }
 
@@ -264,7 +268,7 @@ async fn apply(
         }
         println!(
             "  {} {} - {}",
-            style("⚡").yellow(),
+            style("[>>]").yellow(),
             state.repo,
             actions.join(", ")
         );
@@ -294,13 +298,16 @@ async fn apply(
     let mut failed: Vec<(String, String)> = Vec::new();
 
     for (state, default_branch) in &work {
-        println!("  {} {} ...", style("▶").magenta(), state.repo);
+        println!("  {} {} ...", style(">>").magenta(), state.repo);
 
         // Create ruleset
         if do_ruleset && !state.has_copilot_review {
             match client.create_copilot_review_ruleset(&state.repo).await {
                 Ok(()) => {
-                    println!("    {} Copilot review ruleset created", style("✅").green());
+                    println!(
+                        "    {} Copilot review ruleset created",
+                        style("[ok]").green()
+                    );
                     audit_log.log(
                         &state.repo,
                         "create_copilot_review_ruleset",
@@ -310,7 +317,7 @@ async fn apply(
                     )?;
                 }
                 Err(e) => {
-                    println!("    {} Ruleset: {e}", style("❌").red());
+                    println!("    {} Ruleset: {e}", style("[!!]").red());
                     failed.push((state.repo.clone(), format!("ruleset: {e}")));
                     continue;
                 }
@@ -342,7 +349,7 @@ async fn apply(
                         Ok(pr_url) => {
                             println!(
                                 "    {} Instructions PR: {}",
-                                style("✅").green(),
+                                style("[ok]").green(),
                                 style(&pr_url).cyan()
                             );
                             audit_log.log(
@@ -354,14 +361,14 @@ async fn apply(
                             )?;
                         }
                         Err(e) => {
-                            println!("    {} Instructions: {e}", style("❌").red());
+                            println!("    {} Instructions: {e}", style("[!!]").red());
                             failed.push((state.repo.clone(), format!("instructions: {e}")));
                             continue;
                         }
                     }
                 }
                 Err(e) => {
-                    println!("    {} Template render: {e}", style("❌").red());
+                    println!("    {} Template render: {e}", style("[!!]").red());
                     failed.push((state.repo.clone(), format!("template: {e}")));
                     continue;
                 }
@@ -373,22 +380,26 @@ async fn apply(
 
     println!();
     if failed.is_empty() {
-        println!("  {} All {} repos updated.", style("✅").green(), succeeded);
+        println!(
+            "  {} All {} repos updated.",
+            style("[ok]").green(),
+            succeeded
+        );
     } else {
         println!(
             "  {} {} succeeded, {} failed:",
-            style("⚠️").yellow(),
+            style("[warn]").yellow(),
             succeeded,
             failed.len()
         );
         for (repo, err) in &failed {
-            println!("    {} {}: {}", style("❌").red(), repo, err);
+            println!("    {} {}: {}", style("[!!]").red(), repo, err);
         }
     }
 
     println!(
         "\n  {} Audit log: {}",
-        style("📋").bold(),
+        style("[..]").bold(),
         audit_log.path().display()
     );
 
@@ -450,7 +461,7 @@ async fn audit(
     println!();
     println!(
         "  {} Settings audit: {} repos",
-        style("🔍").bold(),
+        style("[..]").bold(),
         repos.len()
     );
     println!();
@@ -469,14 +480,14 @@ async fn audit(
         let state = scan_repo(client, repo_name).await?;
 
         let ruleset_icon = if state.has_copilot_review {
-            format!("{}", style("✅").green())
+            format!("{}", style("[ok]").green())
         } else {
-            format!("{}", style("❌").red())
+            format!("{}", style("[!!]").red())
         };
         let instr_icon = if state.has_instructions {
-            format!("{}", style("✅").green())
+            format!("{}", style("[ok]").green())
         } else {
-            format!("{}", style("❌").red())
+            format!("{}", style("[!!]").red())
         };
         let repo_type = if state.is_ops { "ops" } else { "app" };
 

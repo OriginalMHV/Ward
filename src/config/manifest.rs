@@ -179,6 +179,156 @@ pub struct RulesetBranchProtection {
 
     #[serde(default)]
     pub block_deletions: bool,
+
+    #[serde(default)]
+    pub bypass_teams: Vec<BypassTeam>,
+
+    #[serde(default)]
+    pub overrides: Vec<RepoOverride>,
+}
+
+/// A bypass team entry that supports both simple string and detailed forms.
+///
+/// Simple form (defaults to bypass_mode = "always"):
+/// ```toml
+/// bypass_teams = ["my-team"]
+/// ```
+///
+/// Detailed form with explicit bypass_mode:
+/// ```toml
+/// bypass_teams = [{ slug = "my-team", bypass_mode = "pull_request" }]
+/// ```
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum BypassTeam {
+    /// Simple form: just a team slug string (defaults to bypass_mode = "always")
+    Simple(String),
+    /// Detailed form: team slug with explicit bypass_mode
+    Detailed {
+        slug: String,
+        #[serde(default = "default_bypass_mode")]
+        bypass_mode: String,
+    },
+}
+
+fn default_bypass_mode() -> String {
+    "always".to_string()
+}
+
+impl BypassTeam {
+    pub fn slug(&self) -> &str {
+        match self {
+            BypassTeam::Simple(s) => s,
+            BypassTeam::Detailed { slug, .. } => slug,
+        }
+    }
+
+    pub fn bypass_mode(&self) -> &str {
+        match self {
+            BypassTeam::Simple(_) => "always",
+            BypassTeam::Detailed { bypass_mode, .. } => bypass_mode,
+        }
+    }
+}
+
+/// Per-repo overrides within a system or global config.
+/// Repos matching any of the glob patterns get different ruleset settings.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct RepoOverride {
+    /// Glob patterns matching repo names (e.g., ["*-operations", "*-system"])
+    pub repo_patterns: Vec<String>,
+
+    /// Override fields for matching repos
+    #[serde(flatten)]
+    pub overrides: RulesetBranchProtectionOverride,
+}
+
+/// Per-system override for ruleset branch protection.
+/// All fields are optional; only explicitly set fields override the global config.
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
+pub struct RulesetBranchProtectionOverride {
+    pub enabled: Option<bool>,
+    pub name: Option<String>,
+    pub enforcement: Option<String>,
+    pub required_approvals: Option<u32>,
+    pub dismiss_stale_reviews: Option<bool>,
+    pub require_code_owner_reviews: Option<bool>,
+    pub required_status_checks: Option<Vec<String>>,
+    pub require_linear_history: Option<bool>,
+    pub block_force_pushes: Option<bool>,
+    pub block_deletions: Option<bool>,
+    pub bypass_teams: Option<Vec<BypassTeam>>,
+    pub overrides: Option<Vec<RepoOverride>>,
+}
+
+/// Per-system rulesets override container.
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
+pub struct RulesetsOverrideConfig {
+    #[serde(default)]
+    pub branch_protection: Option<RulesetBranchProtectionOverride>,
+}
+
+impl RulesetBranchProtection {
+    /// Merge this config with a per-system override.
+    /// Override fields take precedence; unset fields fall back to self.
+    pub fn merge_with(&self, over: &RulesetBranchProtectionOverride) -> Self {
+        Self {
+            enabled: over.enabled.unwrap_or(self.enabled),
+            name: over.name.clone().or_else(|| self.name.clone()),
+            enforcement: over
+                .enforcement
+                .clone()
+                .unwrap_or_else(|| self.enforcement.clone()),
+            required_approvals: over.required_approvals.unwrap_or(self.required_approvals),
+            dismiss_stale_reviews: over
+                .dismiss_stale_reviews
+                .unwrap_or(self.dismiss_stale_reviews),
+            require_code_owner_reviews: over
+                .require_code_owner_reviews
+                .unwrap_or(self.require_code_owner_reviews),
+            required_status_checks: over
+                .required_status_checks
+                .clone()
+                .unwrap_or_else(|| self.required_status_checks.clone()),
+            require_linear_history: over
+                .require_linear_history
+                .unwrap_or(self.require_linear_history),
+            block_force_pushes: over.block_force_pushes.unwrap_or(self.block_force_pushes),
+            block_deletions: over.block_deletions.unwrap_or(self.block_deletions),
+            bypass_teams: over
+                .bypass_teams
+                .clone()
+                .unwrap_or_else(|| self.bypass_teams.clone()),
+            overrides: over
+                .overrides
+                .clone()
+                .unwrap_or_else(|| self.overrides.clone()),
+        }
+    }
+
+    /// Returns the final config for a specific repo, applying any matching repo pattern overrides.
+    /// The first matching override wins. The returned config has an empty overrides vec
+    /// to prevent recursive override application.
+    pub fn for_repo(&self, repo_name: &str) -> Self {
+        let matching_override = self.overrides.iter().find(|o| {
+            o.repo_patterns
+                .iter()
+                .any(|pattern| glob_match::glob_match(pattern, repo_name))
+        });
+
+        match matching_override {
+            Some(o) => {
+                let mut resolved = self.merge_with(&o.overrides);
+                resolved.overrides = Vec::new();
+                resolved
+            }
+            None => {
+                let mut base = self.clone();
+                base.overrides = Vec::new();
+                base
+            }
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
@@ -214,6 +364,9 @@ pub struct SystemConfig {
 
     #[serde(default)]
     pub teams: Vec<TeamAccess>,
+
+    #[serde(default)]
+    pub rulesets: Option<RulesetsOverrideConfig>,
 }
 
 impl Manifest {
@@ -242,6 +395,27 @@ impl Manifest {
             .find(|s| s.id == system_id)
             .and_then(|s| s.security.as_ref())
             .unwrap_or(&self.security)
+    }
+
+    /// Returns the merged rulesets branch protection config for a system.
+    /// Per-system override fields take precedence; unset fields fall back to global.
+    pub fn rulesets_branch_protection_for_system(
+        &self,
+        system_id: &str,
+    ) -> Option<RulesetBranchProtection> {
+        let global = self.rulesets.branch_protection.as_ref()?;
+
+        let system_override = self
+            .systems
+            .iter()
+            .find(|s| s.id == system_id)
+            .and_then(|s| s.rulesets.as_ref())
+            .and_then(|r| r.branch_protection.as_ref());
+
+        match system_override {
+            Some(over) => Some(global.merge_with(over)),
+            None => Some(global.clone()),
+        }
     }
 
     pub fn exclude_patterns_for_system(&self, system_id: &str) -> Vec<String> {
@@ -538,6 +712,7 @@ mod tests {
         assert!(!rbp.require_linear_history);
         assert!(!rbp.block_force_pushes);
         assert!(!rbp.block_deletions);
+        assert!(rbp.bypass_teams.is_empty());
     }
 
     #[test]
@@ -767,5 +942,330 @@ mod tests {
         assert_eq!(m.security.checks.len(), 2);
         assert_eq!(m.security.checks[0].name(), "Dependabot Config");
         assert_eq!(m.security.checks[1].name(), "Main Branch");
+    }
+
+    #[test]
+    fn ruleset_bypass_teams_parsing() {
+        let toml_str = r#"
+            enabled = true
+            bypass_teams = ["team-owners", "release-managers"]
+        "#;
+        let rbp: RulesetBranchProtection = toml::from_str(toml_str).unwrap();
+        assert_eq!(rbp.bypass_teams.len(), 2);
+        assert_eq!(rbp.bypass_teams[0].slug(), "team-owners");
+        assert_eq!(rbp.bypass_teams[0].bypass_mode(), "always");
+        assert_eq!(rbp.bypass_teams[1].slug(), "release-managers");
+        assert_eq!(rbp.bypass_teams[1].bypass_mode(), "always");
+    }
+
+    #[test]
+    fn ruleset_bypass_teams_detailed_parsing() {
+        let toml_str = r#"
+            enabled = true
+            bypass_teams = [{ slug = "team-owners", bypass_mode = "pull_request" }]
+        "#;
+        let rbp: RulesetBranchProtection = toml::from_str(toml_str).unwrap();
+        assert_eq!(rbp.bypass_teams.len(), 1);
+        assert_eq!(rbp.bypass_teams[0].slug(), "team-owners");
+        assert_eq!(rbp.bypass_teams[0].bypass_mode(), "pull_request");
+    }
+
+    #[test]
+    fn ruleset_bypass_teams_detailed_default_mode() {
+        let toml_str = r#"
+            enabled = true
+            bypass_teams = [{ slug = "team-owners" }]
+        "#;
+        let rbp: RulesetBranchProtection = toml::from_str(toml_str).unwrap();
+        assert_eq!(rbp.bypass_teams.len(), 1);
+        assert_eq!(rbp.bypass_teams[0].slug(), "team-owners");
+        assert_eq!(rbp.bypass_teams[0].bypass_mode(), "always");
+    }
+
+    #[test]
+    fn ruleset_bypass_teams_mixed_simple_and_detailed() {
+        let toml_str = r#"
+            enabled = true
+            bypass_teams = ["simple-team", { slug = "detailed-team", bypass_mode = "pull_request" }]
+        "#;
+        let rbp: RulesetBranchProtection = toml::from_str(toml_str).unwrap();
+        assert_eq!(rbp.bypass_teams.len(), 2);
+        assert_eq!(rbp.bypass_teams[0].slug(), "simple-team");
+        assert_eq!(rbp.bypass_teams[0].bypass_mode(), "always");
+        assert_eq!(rbp.bypass_teams[1].slug(), "detailed-team");
+        assert_eq!(rbp.bypass_teams[1].bypass_mode(), "pull_request");
+    }
+
+    #[test]
+    fn manifest_with_bypass_teams() {
+        let toml_str = r#"
+            [org]
+            name = "org"
+
+            [rulesets.branch_protection]
+            enabled = true
+            required_approvals = 1
+            bypass_teams = ["global-owners"]
+        "#;
+        let m: Manifest = toml::from_str(toml_str).unwrap();
+        let bp = m.rulesets.branch_protection.as_ref().unwrap();
+        assert_eq!(bp.bypass_teams.len(), 1);
+        assert_eq!(bp.bypass_teams[0].slug(), "global-owners");
+    }
+
+    #[test]
+    fn per_system_rulesets_override_bypass_teams() {
+        let toml_str = r#"
+            [org]
+            name = "org"
+
+            [rulesets.branch_protection]
+            enabled = true
+            required_approvals = 2
+            dismiss_stale_reviews = true
+            bypass_teams = ["global-owners"]
+
+            [[systems]]
+            id = "be"
+            name = "Backend"
+
+            [systems.rulesets.branch_protection]
+            bypass_teams = ["backend-owners"]
+        "#;
+        let m: Manifest = toml::from_str(toml_str).unwrap();
+        let merged = m.rulesets_branch_protection_for_system("be").unwrap();
+        // bypass_teams overridden by system
+        assert_eq!(merged.bypass_teams.len(), 1);
+        assert_eq!(merged.bypass_teams[0].slug(), "backend-owners");
+        // other fields fall back to global
+        assert_eq!(merged.required_approvals, 2);
+        assert!(merged.dismiss_stale_reviews);
+        assert!(merged.enabled);
+    }
+
+    #[test]
+    fn per_system_rulesets_override_multiple_fields() {
+        let toml_str = r#"
+            [org]
+            name = "org"
+
+            [rulesets.branch_protection]
+            enabled = true
+            required_approvals = 1
+            block_force_pushes = true
+
+            [[systems]]
+            id = "fe"
+            name = "Frontend"
+
+            [systems.rulesets.branch_protection]
+            required_approvals = 3
+            bypass_teams = ["fe-owners"]
+        "#;
+        let m: Manifest = toml::from_str(toml_str).unwrap();
+        let merged = m.rulesets_branch_protection_for_system("fe").unwrap();
+        assert_eq!(merged.required_approvals, 3);
+        assert_eq!(merged.bypass_teams.len(), 1);
+        assert_eq!(merged.bypass_teams[0].slug(), "fe-owners");
+        // falls back to global
+        assert!(merged.block_force_pushes);
+    }
+
+    #[test]
+    fn per_system_rulesets_falls_back_to_global_when_no_override() {
+        let toml_str = r#"
+            [org]
+            name = "org"
+
+            [rulesets.branch_protection]
+            enabled = true
+            required_approvals = 2
+            bypass_teams = ["global-owners"]
+
+            [[systems]]
+            id = "be"
+            name = "Backend"
+        "#;
+        let m: Manifest = toml::from_str(toml_str).unwrap();
+        let config = m.rulesets_branch_protection_for_system("be").unwrap();
+        assert_eq!(config.required_approvals, 2);
+        assert_eq!(config.bypass_teams.len(), 1);
+        assert_eq!(config.bypass_teams[0].slug(), "global-owners");
+    }
+
+    #[test]
+    fn per_system_rulesets_none_when_no_global() {
+        let toml_str = r#"
+            [org]
+            name = "org"
+
+            [[systems]]
+            id = "be"
+            name = "Backend"
+
+            [systems.rulesets.branch_protection]
+            bypass_teams = ["be-owners"]
+        "#;
+        let m: Manifest = toml::from_str(toml_str).unwrap();
+        // No global rulesets.branch_protection, so returns None
+        assert!(m.rulesets_branch_protection_for_system("be").is_none());
+    }
+
+    #[test]
+    fn merge_with_all_none_returns_base() {
+        let base = RulesetBranchProtection {
+            enabled: true,
+            name: Some("Base".to_string()),
+            enforcement: "active".to_string(),
+            required_approvals: 2,
+            dismiss_stale_reviews: true,
+            require_code_owner_reviews: true,
+            required_status_checks: vec!["ci".to_string()],
+            require_linear_history: true,
+            block_force_pushes: true,
+            block_deletions: true,
+            bypass_teams: vec![BypassTeam::Simple("global".to_string())],
+            overrides: vec![],
+        };
+        let over = RulesetBranchProtectionOverride::default();
+        let merged = base.merge_with(&over);
+        assert_eq!(merged, base);
+    }
+
+    #[test]
+    fn repo_override_pattern_matching() {
+        let toml_str = r#"
+            enabled = true
+            required_approvals = 2
+            block_force_pushes = true
+            bypass_teams = ["default-admins"]
+
+            [[overrides]]
+            repo_patterns = ["*-operations", "*-system"]
+            block_force_pushes = false
+            bypass_teams = [{ slug = "ops-admins", bypass_mode = "always" }]
+        "#;
+        let rbp: RulesetBranchProtection = toml::from_str(toml_str).unwrap();
+        assert_eq!(rbp.overrides.len(), 1);
+        assert_eq!(
+            rbp.overrides[0].repo_patterns,
+            vec!["*-operations", "*-system"]
+        );
+    }
+
+    #[test]
+    fn for_repo_returns_override_for_matching_repo() {
+        let toml_str = r#"
+            enabled = true
+            required_approvals = 2
+            block_force_pushes = true
+            bypass_teams = ["default-admins"]
+
+            [[overrides]]
+            repo_patterns = ["*-operations", "*-system"]
+            block_force_pushes = false
+            bypass_teams = [{ slug = "ops-admins", bypass_mode = "always" }]
+        "#;
+        let rbp: RulesetBranchProtection = toml::from_str(toml_str).unwrap();
+        let resolved = rbp.for_repo("my-service-operations");
+        assert!(!resolved.block_force_pushes);
+        assert_eq!(resolved.bypass_teams.len(), 1);
+        assert_eq!(resolved.bypass_teams[0].slug(), "ops-admins");
+        assert_eq!(resolved.required_approvals, 2); // falls back to base
+        assert!(resolved.overrides.is_empty()); // overrides not carried over
+    }
+
+    #[test]
+    fn for_repo_returns_base_for_non_matching_repo() {
+        let toml_str = r#"
+            enabled = true
+            required_approvals = 2
+            block_force_pushes = true
+            bypass_teams = ["default-admins"]
+
+            [[overrides]]
+            repo_patterns = ["*-operations", "*-system"]
+            block_force_pushes = false
+        "#;
+        let rbp: RulesetBranchProtection = toml::from_str(toml_str).unwrap();
+        let resolved = rbp.for_repo("my-service-api");
+        assert!(resolved.block_force_pushes);
+        assert_eq!(resolved.bypass_teams.len(), 1);
+        assert_eq!(resolved.bypass_teams[0].slug(), "default-admins");
+        assert!(resolved.overrides.is_empty());
+    }
+
+    #[test]
+    fn for_repo_first_override_wins() {
+        let toml_str = r#"
+            enabled = true
+            required_approvals = 1
+
+            [[overrides]]
+            repo_patterns = ["*-operations"]
+            required_approvals = 3
+
+            [[overrides]]
+            repo_patterns = ["*-operations", "*-system"]
+            required_approvals = 5
+        "#;
+        let rbp: RulesetBranchProtection = toml::from_str(toml_str).unwrap();
+        let resolved = rbp.for_repo("my-service-operations");
+        // First override matches, so required_approvals = 3
+        assert_eq!(resolved.required_approvals, 3);
+    }
+
+    #[test]
+    fn full_manifest_with_repo_overrides() {
+        let toml_str = r#"
+            [org]
+            name = "org"
+
+            [rulesets.branch_protection]
+            enabled = true
+            required_approvals = 1
+            dismiss_stale_reviews = true
+            block_force_pushes = true
+            bypass_teams = [{ slug = "default-admins", bypass_mode = "always" }]
+
+            [[rulesets.branch_protection.overrides]]
+            repo_patterns = ["*-operations", "*-system"]
+            block_force_pushes = false
+            bypass_teams = [{ slug = "ops-admins", bypass_mode = "always" }]
+
+            [[systems]]
+            id = "s07439"
+            name = "Party Registry"
+
+            [systems.rulesets.branch_protection]
+            bypass_teams = [{ slug = "party-owners", bypass_mode = "pull_request" }]
+
+            [[systems.rulesets.branch_protection.overrides]]
+            repo_patterns = ["*-operations"]
+            bypass_teams = [{ slug = "party-owners", bypass_mode = "always" }]
+        "#;
+        let m: Manifest = toml::from_str(toml_str).unwrap();
+        let config = m.rulesets_branch_protection_for_system("s07439").unwrap();
+
+        // system override replaces bypass_teams
+        assert_eq!(config.bypass_teams.len(), 1);
+        assert_eq!(config.bypass_teams[0].slug(), "party-owners");
+        assert_eq!(config.bypass_teams[0].bypass_mode(), "pull_request");
+
+        // system override replaces overrides too
+        assert_eq!(config.overrides.len(), 1);
+        assert_eq!(config.overrides[0].repo_patterns, vec!["*-operations"]);
+
+        // for_repo on operations repo uses system-level override
+        let ops_config = config.for_repo("s07439-operations");
+        assert_eq!(ops_config.bypass_teams.len(), 1);
+        assert_eq!(ops_config.bypass_teams[0].slug(), "party-owners");
+        assert_eq!(ops_config.bypass_teams[0].bypass_mode(), "always");
+
+        // for_repo on non-operations repo uses base system config
+        let app_config = config.for_repo("s07439-api");
+        assert_eq!(app_config.bypass_teams.len(), 1);
+        assert_eq!(app_config.bypass_teams[0].slug(), "party-owners");
+        assert_eq!(app_config.bypass_teams[0].bypass_mode(), "pull_request");
     }
 }

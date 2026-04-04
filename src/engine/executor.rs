@@ -28,11 +28,11 @@ pub async fn execute_security_plan(
 
         match apply_repo_security(client, plan, audit_log).await {
             Ok(()) => {
-                pb.finish_with_message(format!("{}: ✅ done", plan.repo));
+                pb.finish_with_message(format!("{}: done", plan.repo));
                 report.succeeded += 1;
             }
             Err(e) => {
-                pb.finish_with_message(format!("{}: ❌ {e}", plan.repo));
+                pb.finish_with_message(format!("{}: error: {e}", plan.repo));
                 report.failed.push((plan.repo.clone(), e.to_string()));
             }
         }
@@ -134,13 +134,13 @@ impl ExecutionReport {
         if self.failed.is_empty() {
             println!(
                 "  {} All {} repositories updated successfully.",
-                style("✅").green(),
+                style("[ok]").green(),
                 self.succeeded
             );
         } else {
             println!(
                 "  {} {} succeeded, {} {} failed:",
-                style("⚠️").yellow(),
+                style("[warn]").yellow(),
                 self.succeeded,
                 self.failed.len(),
                 if self.failed.len() == 1 {
@@ -150,7 +150,7 @@ impl ExecutionReport {
                 }
             );
             for (repo, err) in &self.failed {
-                println!("    {} {}: {}", style("❌").red(), repo, err);
+                println!("    {} {}: {}", style("[!!]").red(), repo, err);
             }
         }
     }

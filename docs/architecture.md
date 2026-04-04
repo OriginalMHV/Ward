@@ -22,25 +22,25 @@ Ward commits files to repositories without cloning. Instead, it uses the Git Tre
 
 ```
 1. Get reference       GET /repos/{owner}/{repo}/git/ref/heads/{branch}
-                       → returns current SHA
+                       -> returns current SHA
 
 2. Get base tree       GET /repos/{owner}/{repo}/git/commits/{sha}
-                       → returns tree SHA
+                       -> returns tree SHA
 
 3. Create blobs        POST /repos/{owner}/{repo}/git/blobs
-                       → one per file, UTF-8 encoded
-                       → returns blob SHAs
+                       -> one per file, UTF-8 encoded
+                       -> returns blob SHAs
 
 4. Create tree         POST /repos/{owner}/{repo}/git/trees
-                       → references base_tree + new blob SHAs
-                       → returns new tree SHA
+                       -> references base_tree + new blob SHAs
+                       -> returns new tree SHA
 
 5. Create commit       POST /repos/{owner}/{repo}/git/commits
-                       → references tree SHA + parent commit SHA
-                       → returns commit SHA
+                       -> references tree SHA + parent commit SHA
+                       -> returns commit SHA
 
 6. Update reference    PATCH /repos/{owner}/{repo}/git/ref/heads/{branch}
-                       → points branch to new commit SHA
+                       -> points branch to new commit SHA
 ```
 
 This approach has several advantages over cloning:

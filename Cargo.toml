@@ -1,6 +1,6 @@
 [package]
 name = "ward-cli"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 authors = ["Michael Herland Valen"]
 description = "GitHub repository management for developers. Plan, apply, verify."
@@ -66,6 +66,9 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # Cache directory resolution
 dirs = "6"
+
+# Glob pattern matching for repo overrides
+glob-match = "0.2"
 
 # Base64 for Git blob API
 base64 = "0.22"

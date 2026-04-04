@@ -126,6 +126,25 @@ impl Client {
         Ok(())
     }
 
+    /// Get a team's numeric ID by its slug.
+    pub async fn get_team_id(&self, team_slug: &str) -> Result<u64> {
+        let resp = self
+            .get(&format!("/orgs/{}/teams/{team_slug}", self.org))
+            .await?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Failed to get team '{team_slug}' (HTTP {status}): {body}");
+        }
+
+        let json: serde_json::Value = resp.json().await.context("Failed to parse team response")?;
+
+        json["id"]
+            .as_u64()
+            .ok_or_else(|| anyhow::anyhow!("Team '{team_slug}' response missing 'id' field"))
+    }
+
     /// Create a Copilot code review ruleset.
     pub async fn create_copilot_review_ruleset(&self, repo: &str) -> Result<()> {
         let existing = self.list_rulesets(repo).await?;
