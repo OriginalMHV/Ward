@@ -72,7 +72,7 @@ glob-match = "0.2"
 
 # Base64 for Git blob API
 base64 = "0.22"
-toml_edit = "0.25.10"
+toml_edit = "0.25.11"
 
 [dev-dependencies]
 assert_cmd = "2"
