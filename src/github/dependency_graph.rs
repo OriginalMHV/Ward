@@ -2,19 +2,14 @@ use serde::{Deserialize, Serialize};
 
 use super::Client;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum DependencyGraphStatus {
     Available,
     Empty,
     Unavailable,
+    #[default]
     Unknown,
-}
-
-impl Default for DependencyGraphStatus {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
