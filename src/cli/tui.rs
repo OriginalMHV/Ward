@@ -1146,59 +1146,49 @@ async fn run_loop(
                             format!("Apply security to all {count} filtered repos? (y/n)");
                     }
                 }
-                KeyCode::Char('r') => {
-                    if !app.loading {
-                        app.loading = true;
-                        let sys_id = &app.systems[app.selected_system].0;
-                        app.status_msg = format!(
-                            "[{}] Loading {}...",
-                            app.spinner_char(),
-                            app.systems[app.selected_system].1
-                        );
-                        spawn_repo_load(&tx, client, manifest, sys_id, app.custom_checks.len());
-                    }
+                KeyCode::Char('r') if !app.loading => {
+                    app.loading = true;
+                    let sys_id = &app.systems[app.selected_system].0;
+                    app.status_msg = format!(
+                        "[{}] Loading {}...",
+                        app.spinner_char(),
+                        app.systems[app.selected_system].1
+                    );
+                    spawn_repo_load(&tx, client, manifest, sys_id, app.custom_checks.len());
                 }
-                KeyCode::Char('R') => {
-                    if !app.loading {
-                        let sys_id = app.systems[app.selected_system].0.clone();
-                        app.cache.remove(&sys_id);
-                        cache::try_invalidate(&app.disk_cache, &sys_id);
-                        app.loading = true;
-                        app.status_msg = format!(
-                            "[{}] Force loading {}...",
-                            app.spinner_char(),
-                            app.systems[app.selected_system].1
-                        );
-                        spawn_repo_load(&tx, client, manifest, &sys_id, app.custom_checks.len());
-                    }
+                KeyCode::Char('R') if !app.loading => {
+                    let sys_id = app.systems[app.selected_system].0.clone();
+                    app.cache.remove(&sys_id);
+                    cache::try_invalidate(&app.disk_cache, &sys_id);
+                    app.loading = true;
+                    app.status_msg = format!(
+                        "[{}] Force loading {}...",
+                        app.spinner_char(),
+                        app.systems[app.selected_system].1
+                    );
+                    spawn_repo_load(&tx, client, manifest, &sys_id, app.custom_checks.len());
                 }
-                KeyCode::Char('l') | KeyCode::Enter => {
-                    if !app.loading {
-                        app.loading = true;
-                        let sys_id = &app.systems[app.selected_system].0;
-                        app.status_msg = format!(
-                            "[{}] Loading {}...",
-                            app.spinner_char(),
-                            app.systems[app.selected_system].1
-                        );
-                        spawn_repo_load(&tx, client, manifest, sys_id, app.custom_checks.len());
-                    }
+                KeyCode::Char('l') | KeyCode::Enter if !app.loading => {
+                    app.loading = true;
+                    let sys_id = &app.systems[app.selected_system].0;
+                    app.status_msg = format!(
+                        "[{}] Loading {}...",
+                        app.spinner_char(),
+                        app.systems[app.selected_system].1
+                    );
+                    spawn_repo_load(&tx, client, manifest, sys_id, app.custom_checks.len());
                 }
-                KeyCode::Tab | KeyCode::Char('s') => {
-                    if !app.systems.is_empty() {
-                        app.selected_system = (app.selected_system + 1) % app.systems.len();
-                        switch_to_cached_or_prompt(app, &tx, client);
-                    }
+                KeyCode::Tab | KeyCode::Char('s') if !app.systems.is_empty() => {
+                    app.selected_system = (app.selected_system + 1) % app.systems.len();
+                    switch_to_cached_or_prompt(app, &tx, client);
                 }
-                KeyCode::BackTab => {
-                    if !app.systems.is_empty() {
-                        app.selected_system = if app.selected_system == 0 {
-                            app.systems.len() - 1
-                        } else {
-                            app.selected_system - 1
-                        };
-                        switch_to_cached_or_prompt(app, &tx, client);
-                    }
+                KeyCode::BackTab if !app.systems.is_empty() => {
+                    app.selected_system = if app.selected_system == 0 {
+                        app.systems.len() - 1
+                    } else {
+                        app.selected_system - 1
+                    };
+                    switch_to_cached_or_prompt(app, &tx, client);
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     let len = app.filtered_repos().len();
