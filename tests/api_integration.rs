@@ -7,6 +7,7 @@ use ward::config::manifest::{BranchProtectionConfig, SecurityConfig};
 use ward::github::Client;
 use ward::github::branch_protection::BranchProtectionState;
 use ward::github::commits::CommitFile;
+use ward::github::dependency_graph::DependencyGraphStatus;
 use ward::github::security::SecurityState;
 
 // ---------------------------------------------------------------------------
@@ -297,6 +298,63 @@ async fn test_set_security_features() {
         .set_security_features("my-repo", true, true, true)
         .await
         .unwrap();
+}
+
+// ===========================================================================
+// B2. Dependency graph / SBOM audit
+// ===========================================================================
+
+#[tokio::test]
+async fn test_audit_dependency_graph_available() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/my-repo/dependency-graph/sbom"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "sbom": {
+                "creationInfo": { "created": "2026-04-19T10:00:00Z" },
+                "packages": [
+                    { "SPDXID": "SPDXRef-Repository" },
+                    { "SPDXID": "SPDXRef-Package-1" },
+                    { "SPDXID": "SPDXRef-Package-2" }
+                ]
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let audit = client.audit_dependency_graph("my-repo").await;
+
+    assert_eq!(audit.status, DependencyGraphStatus::Available);
+    assert_eq!(audit.package_count, Some(3));
+    assert_eq!(audit.dependency_count, Some(2));
+    assert_eq!(
+        audit.sbom_generated_at.as_deref(),
+        Some("2026-04-19T10:00:00Z")
+    );
+}
+
+#[tokio::test]
+async fn test_audit_dependency_graph_unavailable() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/my-repo/dependency-graph/sbom"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+            "message": "Not Found"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let audit = client.audit_dependency_graph("my-repo").await;
+
+    assert_eq!(audit.status, DependencyGraphStatus::Unavailable);
+    assert_eq!(
+        audit.reason,
+        "GitHub could not export an SBOM for this repository"
+    );
 }
 
 // ===========================================================================

@@ -29,12 +29,13 @@ Ward is a Rust CLI that treats GitHub repository management as infrastructure-as
 | **Protection** | `ward protection` | Declarative branch protection rules and policies |
 | **Templates** | `ward commit` | Deploy workflow configs via Git Trees API -- no cloning |
 | **Drift** | `ward drift` | Detect config drift from desired state, CI-friendly exit codes |
+| **Audit** | `ward audit` | Inventory repos, alerts, and dependency graph / SBOM availability |
 | **Plan** | `ward plan` | Unified compliance check across all features at once |
 | **Policy** | `ward policy` | Org-wide rules engine -- fail CI on violations |
 | **Rulesets** | `ward rulesets` | Manage GitHub rulesets (branch protection successor) |
 | **Teams** | `ward teams` | Manage team access permissions across repos |
 | **Import** | `ward import` | Reverse-engineer an existing org into `ward.toml` |
-| **TUI** | `ward tui` | Interactive terminal dashboard with persistent cache |
+| **TUI** | `ward tui` | Interactive dashboard with cached security and SBOM visibility |
 | **Doctor** | `ward doctor` | Diagnose setup: config, token, API, systems |
 | **Rollback** | `ward rollback` | Undo changes using the audit trail |
 
@@ -116,4 +117,3 @@ cargo fmt && cargo clippy --tests -- -D warnings && cargo test
 MIT. See [LICENSE](LICENSE).
 
 <img src="https://capsule-render.vercel.app/api?type=waving&color=0:CC5500,50:8B6914,100:556B2F&height=120&section=footer&reversal=true" width="100%" alt="" />
-

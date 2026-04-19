@@ -367,7 +367,7 @@ fn discover_prefixes(repos: &[MinimalRepo]) -> Vec<DiscoveredPrefix> {
         .map(|(prefix, count)| DiscoveredPrefix { prefix, count })
         .collect();
 
-    prefixes.sort_by(|a, b| b.count.cmp(&a.count));
+    prefixes.sort_by_key(|prefix| std::cmp::Reverse(prefix.count));
     prefixes
 }
 

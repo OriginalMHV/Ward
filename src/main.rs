@@ -114,7 +114,15 @@ async fn main() -> Result<()> {
             .await
         }
         Command::Rollback(cmd) => cmd.run(&client).await,
-        Command::Audit(cmd) => cmd.run(&client, &manifest, cli.system.as_deref()).await,
+        Command::Audit(cmd) => {
+            cmd.run(
+                &client,
+                &manifest,
+                cli.system.as_deref(),
+                cli.repo.as_deref(),
+            )
+            .await
+        }
         Command::Plan(cmd) => {
             cmd.run(&client, &manifest, cli.system.as_deref(), cli.json)
                 .await
