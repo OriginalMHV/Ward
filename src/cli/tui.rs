@@ -1456,14 +1456,6 @@ fn draw_repos_tab(f: &mut Frame, area: Rect, app: &App) {
                     ),
                 ]));
             }
-            if let Some(ref diagnostic) = dep.dependency_submission
-                && let Some(ref note) = diagnostic.note
-            {
-                lines.push(Line::from(vec![
-                    Span::raw("      "),
-                    Span::styled(note.clone(), Style::default().fg(Color::DarkGray)),
-                ]));
-            }
         } else {
             lines.push(Line::from(Span::styled(
                 "  [..] Loading...",
@@ -1954,7 +1946,6 @@ mod tests {
             sbom_generated_at: None,
             package_count: None,
             dependency_count: None,
-            dependency_submission: None,
         }
     }
 

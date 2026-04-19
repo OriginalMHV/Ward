@@ -333,11 +333,10 @@ async fn test_audit_dependency_graph_available() {
         audit.sbom_generated_at.as_deref(),
         Some("2026-04-19T10:00:00Z")
     );
-    assert!(audit.dependency_submission.is_none());
 }
 
 #[tokio::test]
-async fn test_audit_dependency_graph_unavailable_with_dependency_submission_diagnostics() {
+async fn test_audit_dependency_graph_unavailable() {
     let server = MockServer::start().await;
 
     Mock::given(method("GET"))
@@ -348,88 +347,13 @@ async fn test_audit_dependency_graph_unavailable_with_dependency_submission_diag
         .mount(&server)
         .await;
 
-    Mock::given(method("GET"))
-        .and(path(
-            "/repos/test-org/my-repo/contents/.github/workflows/dependency-submission.yml",
-        ))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "name": "dependency-submission.yml",
-            "path": ".github/workflows/dependency-submission.yml",
-            "sha": "workflow-sha-123",
-            "content": "",
-            "encoding": "base64"
-        })))
-        .mount(&server)
-        .await;
-
-    Mock::given(method("GET"))
-        .and(path(
-            "/repos/test-org/my-repo/actions/workflows/dependency-submission.yml/runs",
-        ))
-        .and(query_param("status", "success"))
-        .and(query_param("per_page", "1"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "workflow_runs": [{
-                "run_started_at": "2026-04-18T09:15:00Z",
-                "html_url": "https://github.com/test-org/my-repo/actions/runs/42"
-            }]
-        })))
-        .mount(&server)
-        .await;
-
     let client = Client::new_for_test("test-org", &server.uri());
     let audit = client.audit_dependency_graph("my-repo").await;
 
     assert_eq!(audit.status, DependencyGraphStatus::Unavailable);
-    let diagnostic = audit
-        .dependency_submission
-        .expect("expected dependency-submission diagnostic");
-    assert!(diagnostic.workflow_present);
     assert_eq!(
-        diagnostic.latest_successful_run_at.as_deref(),
-        Some("2026-04-18T09:15:00Z")
-    );
-    assert_eq!(
-        diagnostic.latest_successful_run_url.as_deref(),
-        Some("https://github.com/test-org/my-repo/actions/runs/42")
-    );
-}
-
-#[tokio::test]
-async fn test_audit_dependency_graph_unavailable_without_dependency_submission_workflow() {
-    let server = MockServer::start().await;
-
-    Mock::given(method("GET"))
-        .and(path("/repos/test-org/my-repo/dependency-graph/sbom"))
-        .respond_with(ResponseTemplate::new(404).set_body_json(json!({
-            "message": "Not Found"
-        })))
-        .mount(&server)
-        .await;
-
-    Mock::given(method("GET"))
-        .and(path(
-            "/repos/test-org/my-repo/contents/.github/workflows/dependency-submission.yml",
-        ))
-        .respond_with(ResponseTemplate::new(404).set_body_json(json!({
-            "message": "Not Found"
-        })))
-        .mount(&server)
-        .await;
-
-    let client = Client::new_for_test("test-org", &server.uri());
-    let audit = client.audit_dependency_graph("my-repo").await;
-
-    assert_eq!(audit.status, DependencyGraphStatus::Unavailable);
-    let diagnostic = audit
-        .dependency_submission
-        .expect("expected dependency-submission diagnostic");
-    assert!(!diagnostic.workflow_present);
-    assert_eq!(
-        diagnostic.note.as_deref(),
-        Some(
-            "No dedicated dependency-submission workflow found; GitHub may still derive dependency data from supported manifests or another submission mechanism"
-        )
+        audit.reason,
+        "GitHub could not export an SBOM for this repository"
     );
 }
 

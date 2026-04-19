@@ -67,7 +67,6 @@ struct SecurityAudit {
     push_protection: bool,
     has_dependabot_config: bool,
     has_codeql: bool,
-    has_dependency_submission: bool,
     alert_counts: AlertCounts,
 }
 
@@ -166,10 +165,6 @@ async fn audit_repo(
         .get_file(repo, ".github/workflows/codeql.yml", None)
         .await?
         .is_some();
-    let has_dependency_submission = client
-        .get_file(repo, ".github/workflows/dependency-submission.yml", None)
-        .await?
-        .is_some();
 
     let rulesets = client.list_rulesets(repo).await.unwrap_or_default();
     let has_copilot_review = rulesets.iter().any(|r| r.name == "Copilot Code Review");
@@ -197,7 +192,6 @@ async fn audit_repo(
             push_protection: security_state.push_protection,
             has_dependabot_config,
             has_codeql,
-            has_dependency_submission,
             alert_counts,
         },
         dependency_graph,

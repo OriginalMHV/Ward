@@ -2,8 +2,6 @@ use serde::{Deserialize, Serialize};
 
 use super::Client;
 
-const DEPENDENCY_SUBMISSION_WORKFLOW: &str = ".github/workflows/dependency-submission.yml";
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DependencyGraphStatus {
@@ -19,17 +17,6 @@ impl Default for DependencyGraphStatus {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct DependencySubmissionDiagnostic {
-    pub workflow_present: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub latest_successful_run_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub latest_successful_run_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DependencyGraphAudit {
     pub status: DependencyGraphStatus,
@@ -40,8 +27,6 @@ pub struct DependencyGraphAudit {
     pub package_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dependency_count: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dependency_submission: Option<DependencySubmissionDiagnostic>,
 }
 
 impl DependencyGraphAudit {
@@ -63,7 +48,6 @@ impl DependencyGraphAudit {
                 sbom_generated_at: created_at,
                 package_count: Some(package_count),
                 dependency_count: Some(dependency_count),
-                dependency_submission: None,
             }
         } else {
             Self {
@@ -72,7 +56,6 @@ impl DependencyGraphAudit {
                 sbom_generated_at: created_at,
                 package_count: Some(package_count),
                 dependency_count: Some(0),
-                dependency_submission: None,
             }
         }
     }
@@ -84,7 +67,6 @@ impl DependencyGraphAudit {
             sbom_generated_at: None,
             package_count: None,
             dependency_count: None,
-            dependency_submission: None,
         }
     }
 
@@ -95,7 +77,6 @@ impl DependencyGraphAudit {
             sbom_generated_at: None,
             package_count: None,
             dependency_count: None,
-            dependency_submission: None,
         }
     }
 }
@@ -126,30 +107,10 @@ struct SbomPackage {
     spdx_id: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct WorkflowRunsResponse {
-    #[serde(default)]
-    workflow_runs: Vec<WorkflowRun>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WorkflowRun {
-    #[serde(default)]
-    html_url: Option<String>,
-    #[serde(default)]
-    run_started_at: Option<String>,
-    #[serde(default)]
-    created_at: Option<String>,
-}
-
 impl Client {
     /// Audit whether GitHub can currently export dependency graph data as an SBOM.
-    ///
-    /// This is the primary signal for whether GitHub has usable dependency data
-    /// for a repository. Dependency-submission workflow inspection is used only
-    /// as optional diagnosis when the SBOM export is unavailable or uncertain.
     pub async fn audit_dependency_graph(&self, repo: &str) -> DependencyGraphAudit {
-        let mut audit = match self
+        match self
             .get(&format!("/repos/{}/{repo}/dependency-graph/sbom", self.org))
             .await
         {
@@ -177,115 +138,7 @@ impl Client {
             Err(err) => DependencyGraphAudit::unknown(format!(
                 "Ward could not call GitHub's SBOM export endpoint: {err}"
             )),
-        };
-
-        if !matches!(
-            audit.status,
-            DependencyGraphStatus::Available | DependencyGraphStatus::Empty
-        ) {
-            audit.dependency_submission = Some(self.inspect_dependency_submission(repo).await);
         }
-
-        audit
-    }
-
-    async fn inspect_dependency_submission(&self, repo: &str) -> DependencySubmissionDiagnostic {
-        match self
-            .get_file(repo, DEPENDENCY_SUBMISSION_WORKFLOW, None)
-            .await
-        {
-            Ok(Some(_)) => {}
-            Ok(None) => {
-                return DependencySubmissionDiagnostic {
-                    workflow_present: false,
-                    latest_successful_run_at: None,
-                    latest_successful_run_url: None,
-                    note: Some(
-                        "No dedicated dependency-submission workflow found; GitHub may still derive dependency data from supported manifests or another submission mechanism"
-                            .to_owned(),
-                    ),
-                };
-            }
-            Err(err) => {
-                return DependencySubmissionDiagnostic {
-                    workflow_present: false,
-                    latest_successful_run_at: None,
-                    latest_successful_run_url: None,
-                    note: Some(format!(
-                        "Ward could not inspect dependency-submission workflow file: {err}"
-                    )),
-                };
-            }
-        }
-
-        let mut diagnostic = DependencySubmissionDiagnostic {
-            workflow_present: true,
-            latest_successful_run_at: None,
-            latest_successful_run_url: None,
-            note: None,
-        };
-
-        match self
-            .get(&format!(
-                "/repos/{}/{repo}/actions/workflows/dependency-submission.yml/runs?status=success&per_page=1",
-                self.org
-            ))
-            .await
-        {
-            Ok(resp) => match resp.status().as_u16() {
-                200 => match resp.json::<WorkflowRunsResponse>().await {
-                    Ok(body) => {
-                        if let Some(run) = body.workflow_runs.into_iter().next() {
-                            diagnostic.latest_successful_run_at =
-                                run.run_started_at.or(run.created_at);
-                            diagnostic.latest_successful_run_url = run.html_url;
-                            diagnostic.note = Some(
-                                "A dedicated dependency-submission workflow exists and has a successful run"
-                                    .to_owned(),
-                            );
-                        } else {
-                            diagnostic.note = Some(
-                                "A dedicated dependency-submission workflow exists but no successful runs were found"
-                                    .to_owned(),
-                            );
-                        }
-                    }
-                    Err(err) => {
-                        diagnostic.note = Some(format!(
-                            "Ward could not parse dependency-submission workflow runs: {err}"
-                        ));
-                    }
-                },
-                404 => {
-                    diagnostic.note = Some(
-                        "A dependency-submission workflow file exists, but GitHub Actions did not resolve workflow runs for it"
-                            .to_owned(),
-                    );
-                }
-                403 => {
-                    diagnostic.note = Some(
-                        "Ward could not inspect dependency-submission workflow runs because GitHub denied Actions access"
-                            .to_owned(),
-                    );
-                }
-                status => {
-                    let body = resp.text().await.unwrap_or_default();
-                    tracing::warn!(
-                        "Dependency-submission workflow runs for {repo} returned HTTP {status}: {body}"
-                    );
-                    diagnostic.note = Some(format!(
-                        "GitHub returned HTTP {status} when Ward tried to inspect dependency-submission workflow runs"
-                    ));
-                }
-            },
-            Err(err) => {
-                diagnostic.note = Some(format!(
-                    "Ward could not inspect dependency-submission workflow runs: {err}"
-                ));
-            }
-        }
-
-        diagnostic
     }
 }
 

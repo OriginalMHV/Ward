@@ -362,13 +362,12 @@ ward audit --system backend --format table
 
 Use the global `--system <ID>` or `--repo <NAME>` scope flags to choose the repositories to audit.
 
-Per-repo data: repository name, system ID when auditing a system, project type, language, detected runtime/framework metadata across supported ecosystems (for example Java, Node, .NET, Go, Rust, Spring Boot, or Next.js when Ward can infer them), security feature state, config files present (dependabot.yml, codeql.yml, dependency-submission.yml), rulesets, copilot instructions, alert counts by severity (critical, high, medium, low), and a `dependency_graph` section with:
+Per-repo data: repository name, system ID when auditing a system, project type, language, detected runtime/framework metadata across supported ecosystems (for example Java, Node, .NET, Go, Rust, Spring Boot, or Next.js when Ward can infer them), security feature state, key config files present (such as dependabot and codeql), rulesets, copilot instructions, alert counts by severity (critical, high, medium, low), and a `dependency_graph` section with:
 
 - status: `available`, `empty`, `unavailable`, or `unknown`
 - reason: human-readable explanation of the SBOM export result
 - package and dependency counts when SBOM export succeeds
 - SBOM generation timestamp when GitHub returns it
-- optional dependency-submission workflow diagnostics when SBOM export is unavailable or uncertain
 
 ---
 

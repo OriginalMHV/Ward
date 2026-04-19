@@ -162,7 +162,6 @@ mod tests {
                 sbom_generated_at: Some("2026-04-19T10:00:00Z".to_owned()),
                 package_count: Some(3),
                 dependency_count: Some(2),
-                dependency_submission: None,
             }),
         }
     }
