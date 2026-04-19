@@ -5,46 +5,37 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
+use crate::github::dependency_graph::DependencyGraphAudit;
 use crate::github::repos::Repository;
 use crate::github::security::SecurityState;
 
-/// Default cache expiry: 5 minutes.
 pub const DEFAULT_MAX_AGE: Duration = Duration::from_secs(300);
 
-/// A timestamped snapshot of repos (+ optional security state) for one system.
 #[derive(Serialize, Deserialize)]
 pub struct CachedSystem {
     pub cached_at: String,
     pub repos: Vec<CachedRepoEntry>,
 }
 
-/// Minimal repo data that gets persisted to disk.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct CachedRepoEntry {
     pub repo: Repository,
+    #[serde(default)]
     pub security: Option<SecurityState>,
+    #[serde(default)]
+    pub dependency_graph: Option<DependencyGraphAudit>,
 }
 
-/// Persistent on-disk cache stored under the OS cache directory.
-///
-/// Layout:
-/// ```text
-/// <cache_dir>/ward/systems/{system_id}.json
-/// ```
 pub struct DiskCache {
     cache_dir: PathBuf,
 }
 
 impl DiskCache {
-    /// Create a new `DiskCache`. Returns `None` when the OS cache directory
-    /// cannot be determined (e.g. missing `$HOME`).
     pub fn new() -> Option<Self> {
         let cache_dir = dirs::cache_dir()?.join("ward").join("systems");
         Some(Self { cache_dir })
     }
 
-    /// Try to load a cached system that is younger than `max_age`.
-    /// Returns `None` on any failure (missing file, parse error, stale cache).
     pub fn load(&self, system_id: &str, max_age: Duration) -> Option<CachedSystem> {
         let path = self.cache_dir.join(format!("{system_id}.json"));
         let content = std::fs::read_to_string(&path).ok()?;
@@ -53,7 +44,6 @@ impl DiskCache {
         let cached_time = chrono::DateTime::parse_from_rfc3339(&cached.cached_at).ok()?;
         let age = chrono::Utc::now().signed_duration_since(cached_time);
         if age.num_seconds() < 0 {
-            // Clock skew -- treat as fresh.
             return Some(cached);
         }
         let age_millis = age.num_milliseconds().max(0) as u64;
@@ -64,7 +54,6 @@ impl DiskCache {
         Some(cached)
     }
 
-    /// Persist a system's repos to the cache directory.
     pub fn save(&self, system_id: &str, entries: &[CachedRepoEntry]) -> Result<()> {
         std::fs::create_dir_all(&self.cache_dir)?;
         let cached = CachedSystem {
@@ -77,7 +66,6 @@ impl DiskCache {
         Ok(())
     }
 
-    /// Remove the cache file for a single system.
     pub fn invalidate(&self, system_id: &str) -> Result<()> {
         let path = self.cache_dir.join(format!("{system_id}.json"));
         if path.exists() {
@@ -86,7 +74,6 @@ impl DiskCache {
         Ok(())
     }
 
-    /// Remove all cached system files.
     pub fn invalidate_all(&self) -> Result<()> {
         if self.cache_dir.exists() {
             std::fs::remove_dir_all(&self.cache_dir)?;
@@ -94,7 +81,6 @@ impl DiskCache {
         Ok(())
     }
 
-    /// Convenience: save a slice of `(Repository, Option<SecurityState>)` tuples.
     pub fn save_from_tuples(
         &self,
         system_id: &str,
@@ -105,13 +91,13 @@ impl DiskCache {
             .map(|(repo, sec)| CachedRepoEntry {
                 repo: repo.clone(),
                 security: sec.clone(),
+                dependency_graph: None,
             })
             .collect();
         self.save(system_id, &cached)
     }
 }
 
-/// Format a cache age as a human-friendly string like "2m ago" or "45s ago".
 pub fn format_age(cached_at: &str) -> String {
     let Ok(ts) = chrono::DateTime::parse_from_rfc3339(cached_at) else {
         return String::new();
@@ -148,6 +134,7 @@ pub fn try_invalidate(disk_cache: &Option<DiskCache>, system_id: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::github::dependency_graph::DependencyGraphStatus;
 
     fn make_entry(name: &str) -> CachedRepoEntry {
         CachedRepoEntry {
@@ -169,6 +156,13 @@ mod tests {
                 secret_scanning_ai_detection: false,
                 push_protection: true,
             }),
+            dependency_graph: Some(DependencyGraphAudit {
+                status: DependencyGraphStatus::Available,
+                reason: "SBOM export succeeded with 2 dependency package(s)".to_owned(),
+                sbom_generated_at: Some("2026-04-19T10:00:00Z".to_owned()),
+                package_count: Some(3),
+                dependency_count: Some(2),
+            }),
         }
     }
 
@@ -186,6 +180,7 @@ mod tests {
         assert_eq!(loaded.repos.len(), 2);
         assert_eq!(loaded.repos[0].repo.name, "repo-a");
         assert!(loaded.repos[0].security.is_some());
+        assert!(loaded.repos[0].dependency_graph.is_some());
     }
 
     #[test]
@@ -198,9 +193,51 @@ mod tests {
         let entries = vec![make_entry("repo-x")];
         dc.save("sys02", &entries).unwrap();
 
-        // Ask for max-age of 0 seconds -- always stale.
         let result = dc.load("sys02", Duration::from_secs(0));
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn load_legacy_cache_without_dependency_graph() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dc = DiskCache {
+            cache_dir: tmp.path().to_path_buf(),
+        };
+
+        let legacy = serde_json::json!({
+            "cached_at": chrono::Utc::now().to_rfc3339(),
+            "repos": [{
+                "repo": {
+                    "name": "repo-legacy",
+                    "full_name": "test-org/repo-legacy",
+                    "archived": false,
+                    "default_branch": "main",
+                    "description": null,
+                    "language": "Rust",
+                    "visibility": "private",
+                    "security_and_analysis": null,
+                    "topics": []
+                },
+                "security": {
+                    "dependabot_alerts": true,
+                    "dependabot_security_updates": false,
+                    "secret_scanning": true,
+                    "secret_scanning_ai_detection": false,
+                    "push_protection": true
+                }
+            }]
+        });
+
+        std::fs::write(
+            tmp.path().join("legacy.json"),
+            serde_json::to_string_pretty(&legacy).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = dc.load("legacy", DEFAULT_MAX_AGE).unwrap();
+        assert_eq!(loaded.repos.len(), 1);
+        assert!(loaded.repos[0].security.is_some());
+        assert!(loaded.repos[0].dependency_graph.is_none());
     }
 
     #[test]
@@ -263,7 +300,6 @@ mod tests {
         let dc = DiskCache {
             cache_dir: tmp.path().to_path_buf(),
         };
-        // Should not error when file doesn't exist.
         dc.invalidate("nope").unwrap();
     }
 }

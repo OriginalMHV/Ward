@@ -107,9 +107,10 @@ ward security plan --system backend --json | jq '.[] | select(.changes | length 
 
 ```bash
 ward audit --system backend --format json
+ward audit --repo my-service --format json
 ```
 
-Returns per-repo: project type, language, versions, security features, config files, alert counts by severity.
+Returns per-repo: project type, language, versions, security features, config files, alert counts by severity, and dependency graph / SBOM audit data. The `dependency_graph` block is the primary signal for whether GitHub currently has usable dependency data for a repository.
 
 ---
 

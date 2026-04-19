@@ -2,6 +2,7 @@ pub mod branch_protection;
 pub mod client;
 pub mod commits;
 pub mod contents;
+pub mod dependency_graph;
 pub mod pulls;
 pub mod repos;
 pub mod rulesets;

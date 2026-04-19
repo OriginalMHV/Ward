@@ -2,11 +2,6 @@
 # https://embarkstudios.github.io/cargo-deny/
 
 [advisories]
-# Transitive deps we can't control - suppress until upstream fixes
-ignore = [
-    "RUSTSEC-2024-0436", # paste (via ratatui) - use pastey when ratatui migrates
-    "RUSTSEC-2025-0119", # number_prefix (via indicatif) - awaiting upstream update
-]
 
 [licenses]
 # Ward is MIT licensed. Allow permissive licenses only.
