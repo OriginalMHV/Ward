@@ -25,11 +25,11 @@ The TUI has four tabs, switched with number keys:
 
 The left panel shows a scrollable list of repositories with status indicators:
 
-- `[ok]` (green) -- Dependabot alerts, secret scanning, and push protection all enabled
-- `[!!]` (yellow) -- one or more security features missing
+- `[ok]` (green) -- core security features are enabled and dependency graph / SBOM data is available
+- `[!!]` (yellow) -- one or more security features are missing, or dependency graph / SBOM data needs attention
 - `[..]` (gray) -- still loading
 
-The right panel shows detail for the selected repo: name, description, language, default branch, visibility, and a breakdown of each security feature (`[Y]` / `[N]`).
+The right panel shows detail for the selected repo: name, description, language, default branch, visibility, a breakdown of each security feature (`[Y]` / `[N]`), and dependency graph / SBOM status with the current reason from GitHub.
 
 Archived repos are marked with `[ARCHIVED]`.
 
@@ -47,10 +47,11 @@ A table showing security feature status across all repos in the current system:
 | AI Detection | AI-powered detection enabled |
 | Push Protection | Push protection enabled |
 | Security Updates | Dependabot security updates enabled |
+| SBOM | Dependency graph / SBOM audit result (`[Y]` available, `[-]` empty, `[N]` unavailable, `[?]` unknown) |
 
-Each cell shows `[Y]` or `[N]`.
+Each cell shows `[Y]`, `[N]`, `[-]`, or `[?]` depending on the audit result.
 
-A summary line at the bottom shows how many repos are fully secured and how many need attention.
+A summary line at the bottom shows how many repos are healthy and how many need attention.
 
 ### Prefix stripping
 

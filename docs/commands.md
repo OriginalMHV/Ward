@@ -347,10 +347,11 @@ Not reversible (skipped): `enable_dependabot_alerts`, `enable_dependabot_securit
 
 ## `ward audit`
 
-Full compliance audit with version inventory, alert counts, and security posture.
+Full compliance audit with version inventory, alert counts, security posture, and dependency graph / SBOM availability.
 
 ```bash
 ward audit --system backend
+ward audit --repo my-service
 ward audit --system backend --format json
 ward audit --system backend --format table
 ```
@@ -359,7 +360,15 @@ ward audit --system backend --format table
 |------|------|---------|-------------|
 | `--format` | string | `"table"` | Output format: `table` or `json` |
 
-Per-repo data: repository name, system ID, project type, language, detected versions (Java, Node, Spring Boot, Kotlin), security feature state, config files present (dependabot.yml, codeql.yml, dependency-submission.yml), rulesets, copilot instructions, alert counts by severity (critical, high, medium, low).
+Use the global `--system <ID>` or `--repo <NAME>` scope flags to choose the repositories to audit.
+
+Per-repo data: repository name, system ID when auditing a system, project type, language, detected runtime/framework metadata across supported ecosystems (for example Java, Node, .NET, Go, Rust, Spring Boot, or Next.js when Ward can infer them), security feature state, config files present (dependabot.yml, codeql.yml, dependency-submission.yml), rulesets, copilot instructions, alert counts by severity (critical, high, medium, low), and a `dependency_graph` section with:
+
+- status: `available`, `empty`, `unavailable`, or `unknown`
+- reason: human-readable explanation of the SBOM export result
+- package and dependency counts when SBOM export succeeds
+- SBOM generation timestamp when GitHub returns it
+- optional dependency-submission workflow diagnostics when SBOM export is unavailable or uncertain
 
 ---
 

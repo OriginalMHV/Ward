@@ -24,6 +24,7 @@ use crate::config::{Manifest, SecurityCheck, SecurityConfig};
 use crate::detection::project_type::ProjectType;
 use crate::github::Client;
 use crate::github::commits::CommitFile;
+use crate::github::dependency_graph::{DependencyGraphAudit, DependencyGraphStatus};
 use crate::github::repos::Repository;
 use crate::github::security::SecurityState;
 
@@ -38,7 +39,7 @@ enum Tab {
 
 enum BgMessage {
     ReposLoaded(Vec<RepoEntry>),
-    SecurityLoaded(usize, SecurityState),
+    SecurityLoaded(usize, SecurityState, DependencyGraphAudit),
     SecurityApplied(String, std::result::Result<(), String>),
     ProtectionApplied(String, std::result::Result<(), String>),
     TemplateDeployed(String, String, std::result::Result<String, String>),
@@ -71,9 +72,7 @@ struct App {
     pending_confirm: Option<PendingAction>,
     cache: std::collections::HashMap<String, Vec<RepoEntry>>,
     bulk_progress: Option<(usize, usize)>,
-    /// Custom security check definitions from ward.toml `[[security.checks]]`.
     custom_checks: Vec<SecurityCheck>,
-    /// Optional persistent disk cache.
     disk_cache: Option<DiskCache>,
 }
 
@@ -81,9 +80,38 @@ struct App {
 struct RepoEntry {
     repo: Repository,
     security: Option<SecurityState>,
-    /// Results for custom checks (indexed same as App::custom_checks).
-    /// `None` = still loading, `Some(true)` = pass, `Some(false)` = fail.
+    dependency_graph: Option<DependencyGraphAudit>,
     custom_checks: Vec<Option<bool>>,
+}
+
+fn has_loaded_repo_data(entry: &RepoEntry) -> bool {
+    entry.security.is_some() && entry.dependency_graph.is_some()
+}
+
+fn dependency_graph_is_ok(status: &DependencyGraphStatus) -> bool {
+    matches!(
+        status,
+        DependencyGraphStatus::Available | DependencyGraphStatus::Empty
+    )
+}
+
+fn repo_is_healthy(security: &SecurityState, dependency_graph: &DependencyGraphAudit) -> bool {
+    security.dependabot_alerts
+        && security.secret_scanning
+        && security.secret_scanning_ai_detection
+        && security.push_protection
+        && dependency_graph_is_ok(&dependency_graph.status)
+}
+
+fn dependency_graph_indicator(
+    status: &DependencyGraphStatus,
+) -> (&'static str, Color, &'static str) {
+    match status {
+        DependencyGraphStatus::Available => ("[Y]", Color::Green, "SBOM available"),
+        DependencyGraphStatus::Empty => ("[-]", Color::Yellow, "SBOM empty"),
+        DependencyGraphStatus::Unavailable => ("[N]", Color::Red, "SBOM unavailable"),
+        DependencyGraphStatus::Unknown => ("[?]", Color::Yellow, "SBOM unknown"),
+    }
 }
 
 impl App {
@@ -157,7 +185,7 @@ impl App {
             && self
                 .repos
                 .iter()
-                .any(|r| r.security.is_none() || r.custom_checks.iter().any(Option::is_none))
+                .any(|r| !has_loaded_repo_data(r) || r.custom_checks.iter().any(Option::is_none))
     }
 }
 
@@ -221,6 +249,7 @@ fn spawn_repo_load(
                     .map(|repo| RepoEntry {
                         repo,
                         security: None,
+                        dependency_graph: None,
                         custom_checks: vec![None; num_custom_checks],
                     })
                     .collect();
@@ -233,13 +262,13 @@ fn spawn_repo_load(
     });
 }
 
-/// Convert in-memory `RepoEntry` slice to `CachedRepoEntry` and persist silently.
 fn save_to_disk_cache(disk_cache: &Option<DiskCache>, system_id: &str, repos: &[RepoEntry]) {
     let entries: Vec<CachedRepoEntry> = repos
         .iter()
         .map(|re| CachedRepoEntry {
             repo: re.repo.clone(),
             security: re.security.clone(),
+            dependency_graph: re.dependency_graph.clone(),
         })
         .collect();
     cache::try_save(disk_cache, system_id, &entries);
@@ -274,8 +303,9 @@ fn spawn_security_load(
             let result = bg_client
                 .get_security_state_with_repo_data(&repo_name, repo_data.as_ref())
                 .await;
+            let dependency_graph = bg_client.audit_dependency_graph(&repo_name).await;
             if let Ok(state) = result {
-                let _ = tx.send(BgMessage::SecurityLoaded(idx, state));
+                let _ = tx.send(BgMessage::SecurityLoaded(idx, state, dependency_graph));
             }
         });
     }
@@ -441,7 +471,6 @@ fn spawn_template_deploy(
                 _ => return Err(format!("Unknown template: {template}")),
             };
 
-            // Detect project type
             let project_type = detect_project_type_bg(&bg_client, &repo)
                 .await
                 .map_err(|e| format!("Detection failed: {e}"))?;
@@ -491,7 +520,6 @@ fn spawn_template_deploy(
                 .render(tera_template_name, &ctx)
                 .map_err(|e| format!("Render error: {e}"))?;
 
-            // Check if file already exists and matches
             if let Ok(Some(existing)) = bg_client.get_file(&repo, target_path, None).await
                 && let Ok(decoded) = Client::decode_content(&existing)
                 && decoded.trim() == rendered.trim()
@@ -575,7 +603,6 @@ fn spawn_settings_apply(
         let result = async {
             let mut actions: Vec<String> = Vec::new();
 
-            // Check and create copilot review ruleset
             let rulesets = bg_client
                 .list_rulesets(&repo)
                 .await
@@ -589,7 +616,6 @@ fn spawn_settings_apply(
                 actions.push("ruleset created".to_owned());
             }
 
-            // Check and deploy copilot instructions
             let has_instructions = bg_client
                 .get_file(&repo, ".github/copilot-instructions.md", None)
                 .await
@@ -702,16 +728,51 @@ async fn detect_node_version_bg(client: &Client, repo: &str) -> Result<String> {
     Ok("20".to_owned())
 }
 
-fn switch_to_cached_or_prompt(app: &mut App) {
-    let (sys_id, sys_name) = &app.systems[app.selected_system];
-    if let Some(cached) = app.cache.get(sys_id) {
+fn refresh_cached_repo_data_if_needed(
+    app: &mut App,
+    tx: &mpsc::UnboundedSender<BgMessage>,
+    client: &Client,
+    sys_name: &str,
+) {
+    let needs_repo_data = app.repos.iter().any(|entry| !has_loaded_repo_data(entry));
+    let needs_custom_checks = !app.custom_checks.is_empty()
+        && app
+            .repos
+            .iter()
+            .any(|entry| entry.custom_checks.iter().any(Option::is_none));
+
+    if !needs_repo_data && !needs_custom_checks {
+        return;
+    }
+
+    app.status_msg = format!(
+        "{} repos for {sys_name} (cached, refreshing live data)",
+        app.repos.len()
+    );
+
+    if needs_repo_data {
+        spawn_security_load(tx, client, &app.repos);
+    }
+    if needs_custom_checks {
+        spawn_custom_checks(tx, client, &app.repos, &app.custom_checks);
+    }
+}
+
+fn switch_to_cached_or_prompt(
+    app: &mut App,
+    tx: &mpsc::UnboundedSender<BgMessage>,
+    client: &Client,
+) {
+    let (sys_id, sys_name) = app.systems[app.selected_system].clone();
+    if let Some(cached) = app.cache.get(&sys_id) {
         app.repos = cached.clone();
         app.list_state.select(Some(0));
         app.status_msg = format!("{} repos for {sys_name} (cached)", app.repos.len());
+        refresh_cached_repo_data_if_needed(app, tx, client, &sys_name);
     } else if let Some(disk_hit) = app
         .disk_cache
         .as_ref()
-        .and_then(|dc| dc.load(sys_id, DEFAULT_MAX_AGE))
+        .and_then(|dc| dc.load(&sys_id, DEFAULT_MAX_AGE))
     {
         let age_str = cache::format_age(&disk_hit.cached_at);
         let num_checks = app.custom_checks.len();
@@ -721,6 +782,7 @@ fn switch_to_cached_or_prompt(app: &mut App) {
             .map(|ce| RepoEntry {
                 repo: ce.repo,
                 security: ce.security,
+                dependency_graph: ce.dependency_graph,
                 custom_checks: vec![None; num_checks],
             })
             .collect();
@@ -729,6 +791,7 @@ fn switch_to_cached_or_prompt(app: &mut App) {
         app.cache.insert(sys_id.clone(), entries);
         app.list_state.select(Some(0));
         app.status_msg = format!("{count} repos for {sys_name} (cached, {age_str})");
+        refresh_cached_repo_data_if_needed(app, tx, client, &sys_name);
     } else {
         app.repos.clear();
         app.list_state.select(Some(0));
@@ -745,34 +808,32 @@ async fn run_loop(
     let (tx, mut rx) = mpsc::unbounded_channel::<BgMessage>();
 
     loop {
-        // Advance spinner each render cycle when loading
         if app.loading || app.is_loading_security() {
             app.spinner_frame = app.spinner_frame.wrapping_add(1);
         }
 
         terminal.draw(|f| draw(f, app))?;
 
-        // Check for background task results (non-blocking)
         while let Ok(msg) = rx.try_recv() {
             match msg {
                 BgMessage::ReposLoaded(entries) => {
                     let count = entries.len();
                     let (sys_id, sys_name) = &app.systems[app.selected_system];
                     app.status_msg =
-                        format!("Loaded {count} repos for {sys_name}. Fetching security...");
+                        format!("Loaded {count} repos for {sys_name}. Fetching security + SBOM...");
                     app.repos = entries;
                     app.list_state.select(Some(0));
                     app.loading = false;
                     app.cache.insert(sys_id.clone(), app.repos.clone());
-                    save_to_disk_cache(&app.disk_cache, sys_id, &app.repos);
                     spawn_security_load(&tx, client, &app.repos);
                     spawn_custom_checks(&tx, client, &app.repos, &app.custom_checks);
                 }
-                BgMessage::SecurityLoaded(idx, state) => {
+                BgMessage::SecurityLoaded(idx, state, dependency_graph) => {
                     if let Some(entry) = app.repos.get_mut(idx) {
                         entry.security = Some(state);
+                        entry.dependency_graph = Some(dependency_graph);
                     }
-                    let loaded = app.repos.iter().filter(|r| r.security.is_some()).count();
+                    let loaded = app.repos.iter().filter(|r| has_loaded_repo_data(r)).count();
                     let total = app.repos.len();
                     if loaded == total
                         && app
@@ -783,11 +844,12 @@ async fn run_loop(
                         let (sys_id, sys_name) = &app.systems[app.selected_system];
                         app.status_msg = format!("{total} repos loaded for {sys_name}");
                         app.cache.insert(sys_id.clone(), app.repos.clone());
-                        // Update disk cache now that security data is complete.
                         save_to_disk_cache(&app.disk_cache, sys_id, &app.repos);
                     } else {
-                        app.status_msg =
-                            format!("[{}] Security: {loaded}/{total}...", app.spinner_char());
+                        app.status_msg = format!(
+                            "[{}] Security + SBOM: {loaded}/{total}...",
+                            app.spinner_char()
+                        );
                     }
                 }
                 BgMessage::CustomCheckLoaded(repo_idx, check_idx, result) => {
@@ -796,8 +858,7 @@ async fn run_loop(
                             *slot = Some(result);
                         }
                     }
-                    // Refresh cache & status when everything is done
-                    let all_security = app.repos.iter().all(|r| r.security.is_some());
+                    let all_security = app.repos.iter().all(has_loaded_repo_data);
                     let all_custom = app
                         .repos
                         .iter()
@@ -807,6 +868,7 @@ async fn run_loop(
                         let (sys_id, sys_name) = &app.systems[app.selected_system];
                         app.status_msg = format!("{total} repos loaded for {sys_name}");
                         app.cache.insert(sys_id.clone(), app.repos.clone());
+                        save_to_disk_cache(&app.disk_cache, sys_id, &app.repos);
                     }
                 }
                 BgMessage::SecurityApplied(repo, result) => {
@@ -892,7 +954,6 @@ async fn run_loop(
                 continue;
             }
 
-            // Confirmation mode: only y/n accepted (and template sub-menu keys)
             if app.pending_confirm.is_some() {
                 match key.code {
                     KeyCode::Char('y') => {
@@ -972,7 +1033,6 @@ async fn run_loop(
                             Some(PendingAction::SelectTemplate(_)) | None => {}
                         }
                     }
-                    // Template sub-menu key handling
                     KeyCode::Char('d') => {
                         if let Some(PendingAction::SelectTemplate(repo)) =
                             app.pending_confirm.take()
@@ -1127,7 +1187,7 @@ async fn run_loop(
                 KeyCode::Tab | KeyCode::Char('s') => {
                     if !app.systems.is_empty() {
                         app.selected_system = (app.selected_system + 1) % app.systems.len();
-                        switch_to_cached_or_prompt(app);
+                        switch_to_cached_or_prompt(app, &tx, client);
                     }
                 }
                 KeyCode::BackTab => {
@@ -1137,7 +1197,7 @@ async fn run_loop(
                         } else {
                             app.selected_system - 1
                         };
-                        switch_to_cached_or_prompt(app);
+                        switch_to_cached_or_prompt(app, &tx, client);
                     }
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
@@ -1216,17 +1276,12 @@ fn draw_repos_tab(f: &mut Frame, area: Rect, app: &App) {
         .iter()
         .map(|entry| {
             let lang = entry.repo.language.as_deref().unwrap_or("-");
-            let (indicator, color) = entry
-                .security
-                .as_ref()
-                .map(|s| {
-                    if s.dependabot_alerts && s.secret_scanning && s.push_protection {
-                        ("[ok]", Color::Green)
-                    } else {
-                        ("[!!]", Color::Yellow)
-                    }
-                })
-                .unwrap_or(("[..]", Color::DarkGray));
+            let (indicator, color) =
+                match (entry.security.as_ref(), entry.dependency_graph.as_ref()) {
+                    (Some(s), Some(dep)) if repo_is_healthy(s, dep) => ("[ok]", Color::Green),
+                    (Some(_), Some(_)) => ("[!!]", Color::Yellow),
+                    _ => ("[..]", Color::DarkGray),
+                };
 
             ListItem::new(Line::from(vec![
                 Span::styled(indicator, Style::default().fg(color)),
@@ -1266,6 +1321,7 @@ fn draw_repos_tab(f: &mut Frame, area: Rect, app: &App) {
 
     let detail = if let Some(entry) = app.selected_repo() {
         let sec = entry.security.as_ref();
+        let dependency_graph = entry.dependency_graph.as_ref();
         let icon = |b: bool| -> (&str, Color) {
             if b {
                 ("[Y]", Color::Green)
@@ -1282,7 +1338,6 @@ fn draw_repos_tab(f: &mut Frame, area: Rect, app: &App) {
             Line::from(""),
         ];
 
-        // Description (truncated to 2 lines)
         if let Some(ref desc) = entry.repo.description
             && !desc.is_empty()
         {
@@ -1366,6 +1421,56 @@ fn draw_repos_tab(f: &mut Frame, area: Rect, app: &App) {
             )));
         }
 
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  Dependency Graph",
+            Style::default().fg(Color::Cyan).bold(),
+        )));
+
+        if let Some(dep) = dependency_graph {
+            let (status_text, status_color, status_label) = dependency_graph_indicator(&dep.status);
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(status_text, Style::default().fg(status_color)),
+                Span::raw(format!(" {status_label}")),
+            ]));
+            lines.push(Line::from(vec![
+                Span::raw("      "),
+                Span::styled(dep.reason.clone(), Style::default().fg(Color::DarkGray)),
+            ]));
+            if let Some(count) = dep.dependency_count {
+                lines.push(Line::from(vec![
+                    Span::raw("      "),
+                    Span::styled(
+                        format!("Dependencies: {count}"),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+            }
+            if let Some(ref generated_at) = dep.sbom_generated_at {
+                lines.push(Line::from(vec![
+                    Span::raw("      "),
+                    Span::styled(
+                        format!("Generated: {generated_at}"),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+            }
+            if let Some(ref diagnostic) = dep.dependency_submission
+                && let Some(ref note) = diagnostic.note
+            {
+                lines.push(Line::from(vec![
+                    Span::raw("      "),
+                    Span::styled(note.clone(), Style::default().fg(Color::DarkGray)),
+                ]));
+            }
+        } else {
+            lines.push(Line::from(Span::styled(
+                "  [..] Loading...",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
         lines
     } else {
         vec![Line::from("  Select a repository")]
@@ -1400,7 +1505,6 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
-    // Detect common prefix (system-id + dash) to strip from repo names
     let prefix = format!("{sys_id}-");
     let all_share_prefix = app.repos.iter().all(|e| e.repo.name.starts_with(&prefix));
 
@@ -1412,7 +1516,6 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
         }
     };
 
-    // Dynamic column width from longest display name, capped at 50
     let max_name_len = app
         .repos
         .iter()
@@ -1430,7 +1533,6 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
         }
     };
 
-    // Build header: built-in columns + custom check columns
     let builtin_headers = [
         "Repository",
         "Dependabot",
@@ -1438,6 +1540,7 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
         "AI Detection",
         "Push Protection",
         "Security Updates",
+        "SBOM",
     ];
     let header_style = Style::default().fg(Color::Cyan).bold();
 
@@ -1453,7 +1556,7 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
         .style(Style::default())
         .bottom_margin(0);
 
-    let mut secured = 0;
+    let mut healthy = 0;
     let mut issues = 0;
     let mut pending = 0;
 
@@ -1480,16 +1583,17 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
             let loading_cell =
                 Cell::from(" [..]").style(Style::default().fg(Color::DarkGray).bg(row_bg));
 
-            if let Some(s) = entry.security.as_ref() {
-                let all_ok = s.dependabot_alerts
-                    && s.secret_scanning
-                    && s.secret_scanning_ai_detection
-                    && s.push_protection;
-                if all_ok {
-                    secured += 1;
+            if let (Some(s), Some(dep)) = (entry.security.as_ref(), entry.dependency_graph.as_ref())
+            {
+                if repo_is_healthy(s, dep) {
+                    healthy += 1;
                 } else {
                     issues += 1;
                 }
+
+                let (dep_text, dep_color, _) = dependency_graph_indicator(&dep.status);
+                let dependency_cell = Cell::from(format!(" {dep_text}"))
+                    .style(Style::default().fg(dep_color).bg(row_bg));
 
                 let mut cells = vec![
                     Cell::from(truncate_name(&entry.repo.name)).style(Style::default().bg(row_bg)),
@@ -1498,9 +1602,9 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
                     icon(s.secret_scanning_ai_detection),
                     icon(s.push_protection),
                     icon(s.dependabot_security_updates),
+                    dependency_cell,
                 ];
 
-                // Append custom check cells
                 for result in &entry.custom_checks {
                     cells.push(match result {
                         Some(val) => icon(*val),
@@ -1511,7 +1615,7 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
                 Row::new(cells).style(row_style)
             } else {
                 pending += 1;
-                let builtin_count = 6; // repo name + 5 built-in checks
+                let builtin_count = 7;
                 let total_cols = builtin_count + app.custom_checks.len();
                 let mut cells = Vec::with_capacity(total_cols);
                 cells.push(
@@ -1526,7 +1630,6 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
         })
         .collect();
 
-    // Build column widths: built-in + custom
     let mut widths = vec![
         Constraint::Min(col_repo as u16),
         Constraint::Min(12),
@@ -1534,9 +1637,9 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
         Constraint::Min(14),
         Constraint::Min(17),
         Constraint::Min(18),
+        Constraint::Min(10),
     ];
     for check in &app.custom_checks {
-        // Width based on check name length, with a minimum of 10
         let w = check.name().len().max(10) + 2;
         widths.push(Constraint::Min(w as u16));
     }
@@ -1556,7 +1659,6 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
         )
         .column_spacing(1);
 
-    // Split area: table gets main space, summary gets 1 line at bottom
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(5), Constraint::Length(1)])
@@ -1565,9 +1667,9 @@ fn draw_security_tab(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(table, layout[0]);
 
     let summary = if pending > 0 {
-        format!("  {secured} secured, {issues} issues, {pending} loading...")
+        format!("  {healthy} healthy, {issues} need attention, {pending} loading...")
     } else {
-        format!("  {secured} secured, {issues} need attention")
+        format!("  {healthy} healthy, {issues} need attention")
     };
     let summary_widget = Paragraph::new(Line::from(Span::styled(
         summary,
@@ -1662,7 +1764,6 @@ fn draw_help_tab(f: &mut Frame, area: Rect) {
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(inner);
 
-    // Helper: build a section with a heading, separator, and key/desc rows
     fn section<'a>(
         title: &'a str,
         entries: &[(&'a str, &'a str)],
@@ -1687,7 +1788,6 @@ fn draw_help_tab(f: &mut Frame, area: Rect) {
         lines
     }
 
-    // Left column
     let mut left: Vec<Line> = Vec::new();
     left.push(Line::from(""));
     left.extend(section(
@@ -1733,7 +1833,6 @@ fn draw_help_tab(f: &mut Frame, area: Rect) {
         dim,
     )));
 
-    // Right column
     let mut right: Vec<Line> = Vec::new();
     right.push(Line::from(""));
     right.extend(section(
@@ -1792,9 +1891,12 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
     let status_detail = if app.loading {
         format!("[{}] {}", app.spinner_char(), app.status_msg)
     } else if app.is_loading_security() {
-        let loaded = app.repos.iter().filter(|r| r.security.is_some()).count();
+        let loaded = app.repos.iter().filter(|r| has_loaded_repo_data(r)).count();
         let total = app.repos.len();
-        format!("[{}] Security: {loaded}/{total}...", app.spinner_char())
+        format!(
+            "[{}] Security + SBOM: {loaded}/{total}...",
+            app.spinner_char()
+        )
     } else {
         app.status_msg.clone()
     };
@@ -1829,4 +1931,78 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
     let widget = Paragraph::new(status).block(Block::default().borders(Borders::TOP));
 
     f.render_widget(widget, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn security_state() -> SecurityState {
+        SecurityState {
+            dependabot_alerts: true,
+            dependabot_security_updates: true,
+            secret_scanning: true,
+            secret_scanning_ai_detection: true,
+            push_protection: true,
+        }
+    }
+
+    fn dependency_graph(status: DependencyGraphStatus) -> DependencyGraphAudit {
+        DependencyGraphAudit {
+            status,
+            reason: "test".to_owned(),
+            sbom_generated_at: None,
+            package_count: None,
+            dependency_count: None,
+            dependency_submission: None,
+        }
+    }
+
+    #[test]
+    fn repo_health_requires_sbom_health() {
+        let security = security_state();
+        assert!(repo_is_healthy(
+            &security,
+            &dependency_graph(DependencyGraphStatus::Available)
+        ));
+        assert!(repo_is_healthy(
+            &security,
+            &dependency_graph(DependencyGraphStatus::Empty)
+        ));
+        assert!(!repo_is_healthy(
+            &security,
+            &dependency_graph(DependencyGraphStatus::Unavailable)
+        ));
+    }
+
+    #[test]
+    fn repo_health_requires_ai_detection() {
+        let mut security = security_state();
+        security.secret_scanning_ai_detection = false;
+
+        assert!(!repo_is_healthy(
+            &security,
+            &dependency_graph(DependencyGraphStatus::Available)
+        ));
+    }
+
+    #[test]
+    fn dependency_graph_indicator_matches_status() {
+        assert_eq!(
+            dependency_graph_indicator(&DependencyGraphStatus::Available),
+            ("[Y]", Color::Green, "SBOM available")
+        );
+        assert_eq!(
+            dependency_graph_indicator(&DependencyGraphStatus::Empty),
+            ("[-]", Color::Yellow, "SBOM empty")
+        );
+        assert_eq!(
+            dependency_graph_indicator(&DependencyGraphStatus::Unavailable),
+            ("[N]", Color::Red, "SBOM unavailable")
+        );
+        assert_eq!(
+            dependency_graph_indicator(&DependencyGraphStatus::Unknown),
+            ("[?]", Color::Yellow, "SBOM unknown")
+        );
+    }
 }
