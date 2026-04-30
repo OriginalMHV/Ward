@@ -89,6 +89,7 @@ Use `ward init --non-interactive` to scaffold a minimal `ward.toml` without the 
 
 | Guide | Description |
 |-------|-------------|
+| **[Getting Started](docs/getting-started.md)** | **Start here — from zero to your first managed repo** |
 | [Configuration](docs/configuration.md) | `ward.toml` format, systems, overrides |
 | [Commands](docs/commands.md) | Full CLI reference |
 | [Templates](docs/templates.md) | Built-in and custom Tera templates |
