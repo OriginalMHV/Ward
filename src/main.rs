@@ -26,6 +26,11 @@ async fn main() -> Result<()> {
         return cmd.run().await;
     }
 
+    // Setup handles its own client creation (guided flow)
+    if let Command::Setup(cmd) = cli.command {
+        return cmd.run().await;
+    }
+
     // Import handles its own client creation (it creates the manifest)
     if let Command::Import(cmd) = cli.command {
         return cmd.run().await;
@@ -139,6 +144,7 @@ async fn main() -> Result<()> {
         }
         Command::Tui => ward::cli::tui::run(&client, &manifest).await,
         Command::Init(_) => unreachable!(),
+        Command::Setup(_) => unreachable!(),
         Command::Import(_) => unreachable!(),
         Command::Config(_) => unreachable!(),
         Command::Template(_) => unreachable!(),
