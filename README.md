@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/License-MIT-6B8E23?style=for-the-badge&labelColor=1C1C1C)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/OriginalMHV/ward/ci.yml?style=for-the-badge&label=CI&labelColor=1C1C1C&color=6B8E23)](https://github.com/OriginalMHV/Ward/actions)
 
-[![Lines of Code](https://img.shields.io/badge/Lines_of_Code-15.6k-FFBF00?style=for-the-badge&labelColor=1C1C1C)](https://github.com/OriginalMHV/Ward)
+[![Lines of Code](https://img.shields.io/badge/Lines_of_Code-16.2k-FFBF00?style=for-the-badge&labelColor=1C1C1C)](https://github.com/OriginalMHV/Ward)
 [![Tests](https://img.shields.io/badge/Tests-204-6B8E23?style=for-the-badge&labelColor=1C1C1C)](https://github.com/OriginalMHV/Ward/actions)
 [![Commands](https://img.shields.io/badge/Commands-18-CC5500?style=for-the-badge&labelColor=1C1C1C)](docs/commands.md)
 [![GitHub Release](https://img.shields.io/github/v/release/OriginalMHV/Ward?style=for-the-badge&labelColor=1C1C1C&color=DAA520)](https://github.com/OriginalMHV/Ward/releases/latest)
