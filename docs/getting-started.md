@@ -114,13 +114,13 @@ ward security plan --repo payment-service
 
 ---
 
-## Part 2: Adding Files to Your Repository
+## Part 2: Adding Files to Your Repositories
 
-Ward can commit files to repositories directly — no cloning needed. This is useful for adding Dependabot configs, CI workflows, or any standard file your repos should have.
+Ward can commit files to repositories directly — no cloning needed. This is how you standardize things like CI workflows, CODEOWNERS, PR templates, and any other file your repos should have.
 
 ### How it works
 
-Ward uses GitHub's Git Trees API to create commits server-side. It opens a pull request with your changes so you can review before merging.
+Ward uses GitHub's Git Trees API to create commits server-side. It opens a pull request with your changes so you can review before merging. Nothing lands on `main` without going through your normal PR process.
 
 ### Step 1: Configure templates
 
@@ -153,7 +153,7 @@ Built-in templates:
 ### Step 3: Preview what would be committed
 
 ```bash
-ward commit plan --repo payment-service --template dependabot/gradle.yml.tera
+ward commit plan --repo payment-service --template dependabot
 ```
 
 Ward auto-detects that `payment-service` is a Gradle project (by finding `build.gradle.kts`) and renders the template with the correct Java version. You see the exact file content that would be committed.
@@ -161,24 +161,128 @@ Ward auto-detects that `payment-service` is a Gradle project (by finding `build.
 ### Step 4: Commit it
 
 ```bash
-ward commit apply --repo payment-service --template dependabot/gradle.yml.tera
+ward commit apply --repo payment-service --template dependabot
 ```
 
 This creates a PR on `payment-service` with branch `chore/ward-setup`, adding `.github/dependabot.yml`. Your configured reviewers are assigned automatically.
 
+### Applying across all repos at once
+
+The real power: apply to every repo in a system (or all repos) in one command:
+
+```bash
+# All repos in the "backend" system get a Dependabot config
+ward commit apply --system backend --template dependabot
+
+# All repos in the manifest
+ward commit apply --template codeql
+```
+
+Ward skips repos that already have the file with matching content — it only creates PRs where changes are needed.
+
 ### Custom templates
 
-Want to add your own files? Create templates in `~/.ward/templates/`:
+The built-in templates cover CI/security, but most teams also need things like CODEOWNERS, PR templates, or custom workflows. You create these as custom templates.
 
 ```bash
 # See where custom templates go
 ward template dir
+# → ~/.ward/templates/
 
 # Export built-in templates as a starting point
 ward template export
 ```
 
-Templates use [Tera syntax](https://keats.github.io/tera/docs/) (similar to Jinja2). A custom template at `~/.ward/templates/my-workflow.yml.tera` becomes available as `my-workflow.yml.tera`.
+Templates use [Tera syntax](https://keats.github.io/tera/docs/) (similar to Jinja2). Any `.tera` file you place in `~/.ward/templates/` becomes available immediately.
+
+### Example: CODEOWNERS
+
+Create `~/.ward/templates/codeowners.tera`:
+
+```
+# Managed by Ward — do not edit manually
+* @acme-engineering/platform-team
+/.github/ @acme-engineering/devops
+```
+
+Then apply it:
+
+```bash
+# Preview
+ward commit plan --repo payment-service --template codeowners.tera
+
+# Apply to all repos
+ward commit apply --template codeowners.tera
+```
+
+The file will be committed as `.github/CODEOWNERS` (the target path is derived from the template name, or you can configure it — see [templates.md](templates.md)).
+
+### Example: Pull request template
+
+Create `~/.ward/templates/pull-request-template.tera`:
+
+```markdown
+## What does this PR do?
+
+<!-- Brief description of the change -->
+
+## Checklist
+
+- [ ] Tests pass
+- [ ] Documentation updated (if applicable)
+- [ ] No secrets committed
+```
+
+```bash
+ward commit apply --template pull-request-template.tera
+```
+
+This commits `.github/pull_request_template.md` to your repos.
+
+### Example: Custom CI workflow with variables
+
+Templates have access to auto-detected context variables:
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `default_branch` | Repo's default branch | `main` |
+| `java_version` | Detected from Gradle build file | `21` |
+| `node_version` | Detected from package.json engines | `20` |
+| `registry_url` | JFrog registry URL (if configured) | `https://...` |
+
+Create `~/.ward/templates/ci-build.yml.tera`:
+
+```yaml
+name: CI Build
+on:
+  push:
+    branches: [{{ default_branch }}]
+  pull_request:
+    branches: [{{ default_branch }}]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '{{ java_version }}'
+          distribution: 'temurin'
+      - run: ./gradlew build
+```
+
+Ward detects the Java version from each repo's `build.gradle.kts` and renders accordingly — repo A might get `java-version: '17'` while repo B gets `java-version: '21'`.
+
+### Overriding the target path
+
+By default, Ward maps the template filename to a destination path (stripping the `.tera` extension and prefixing with `.github/`). For custom placement, you can also point templates directly using the `--template` flag with the full Tera template name from `ward template list`.
+
+### What about removing old files?
+
+Ward currently supports **creating and updating** files. If you need to remove an old file (e.g., replacing `ci-cool-x.yaml` with `ci-build.yaml`), you'd remove the old one via a normal PR. Ward will handle pushing the new file.
+
+> **Tip:** A good pattern is: first use Ward to push the replacement file, then clean up the old one in the same PR before merging.
 
 ---
 
