@@ -72,7 +72,7 @@ async fn list_repos(client: &Client, manifest: &Manifest, system: Option<&str>) 
     println!(
         "  {} repositories in {}{}\n",
         style(repos.len()).bold().cyan(),
-        style(&client.org).bold(),
+        style(client.org()).bold(),
         system
             .map(|s| format!(" (system: {s})"))
             .unwrap_or_default()

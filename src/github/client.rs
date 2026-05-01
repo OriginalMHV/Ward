@@ -7,14 +7,19 @@ use tokio::sync::Semaphore;
 use crate::config::auth;
 
 /// GitHub API client with rate limiting and concurrency control.
+#[derive(Clone)]
 pub struct Client {
-    pub http: reqwest::Client,
-    pub org: String,
-    pub semaphore: Arc<Semaphore>,
-    pub base_url: String,
+    pub(crate) http: reqwest::Client,
+    pub(crate) org: String,
+    pub(crate) semaphore: Arc<Semaphore>,
+    pub(crate) base_url: String,
 }
 
 impl Client {
+    /// The GitHub organization this client targets.
+    pub fn org(&self) -> &str {
+        &self.org
+    }
     pub async fn new(org: &str, parallelism: usize) -> Result<Self> {
         let token = auth::resolve_token()?;
 

@@ -165,7 +165,8 @@ impl SetupCommand {
         let mut security_plans: Vec<planner::RepoPlan> = Vec::new();
 
         if chosen.contains(&Feature::Security) {
-            let desired = manifest.security_for_system("default");
+            let system_id = manifest.system_for_repo(&repo_name).unwrap_or("default");
+            let desired = manifest.security_for_system(system_id);
             let current = client.get_security_state(&repo_name).await?;
             let plan = planner::plan_security(&repo_name, &current, desired);
 
@@ -237,7 +238,7 @@ impl SetupCommand {
                 .with_prompt("  Apply security changes now?")
                 .default(true)
                 .interact()
-                .unwrap_or(false);
+                .context("Failed to read confirmation prompt")?;
 
             if apply {
                 println!();
@@ -251,7 +252,8 @@ impl SetupCommand {
                 // Verify
                 println!();
                 println!("  {} Verifying...", style("[..]").bold());
-                let desired = manifest.security_for_system("default");
+                let system_id = manifest.system_for_repo(&repo_name).unwrap_or("default");
+                let desired = manifest.security_for_system(system_id);
                 let verify_report =
                     verifier::verify_security(&client, &security_plans, desired).await?;
                 verify_report.print_summary();
@@ -328,7 +330,7 @@ impl SetupCommand {
             .with_prompt("  Create a ward.toml now?")
             .default(true)
             .interact()
-            .unwrap_or(false);
+            .context("Failed to read confirmation prompt")?;
 
         if !create {
             anyhow::bail!("ward.toml is required. Run `ward init` to create one.");

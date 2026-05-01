@@ -255,7 +255,14 @@ async fn check(
 
     let drifted = results.iter().filter(|r| r.is_drifted()).count();
     if drifted > 0 {
-        std::process::exit(1);
+        anyhow::bail!(
+            "{drifted} {} with configuration drift",
+            if drifted == 1 {
+                "repository"
+            } else {
+                "repositories"
+            }
+        );
     }
 
     Ok(())

@@ -82,21 +82,25 @@ impl Client {
             tokio::join!(self.get(&alerts_path), self.get(&fixes_path));
 
         // Dependabot alerts (vulnerability-alerts): 204 = enabled
-        if let Ok(resp) = alerts_result {
-            state.dependabot_alerts = resp.status().as_u16() == 204;
+        match alerts_result {
+            Ok(resp) => state.dependabot_alerts = resp.status().as_u16() == 204,
+            Err(e) => tracing::warn!("Failed to check dependabot alerts for {repo}: {e}"),
         }
 
         // Dependabot security updates (automated-security-fixes)
-        if let Ok(resp) = fixes_result {
-            if resp.status().is_success() {
-                #[derive(Deserialize)]
-                struct AutoSecFixes {
-                    enabled: bool,
-                }
-                if let Ok(body) = resp.json::<AutoSecFixes>().await {
-                    state.dependabot_security_updates = body.enabled;
+        match fixes_result {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    #[derive(Deserialize)]
+                    struct AutoSecFixes {
+                        enabled: bool,
+                    }
+                    if let Ok(body) = resp.json::<AutoSecFixes>().await {
+                        state.dependabot_security_updates = body.enabled;
+                    }
                 }
             }
+            Err(e) => tracing::warn!("Failed to check security updates for {repo}: {e}"),
         }
 
         // --- Secret scanning / push protection / AI detection ---
