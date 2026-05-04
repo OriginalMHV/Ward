@@ -4,7 +4,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use crate::github::Client;
 
 use super::audit_log::AuditLog;
-use super::planner::RepoPlan;
+use super::planner::{RepoPlan, SecurityFeature};
 
 /// Execute a security plan, applying changes repo by repo.
 pub async fn execute_security_plan(
@@ -43,18 +43,17 @@ pub async fn execute_security_plan(
 
 async fn apply_repo_security(client: &Client, plan: &RepoPlan, audit_log: &AuditLog) -> Result<()> {
     for change in &plan.changes {
-        match change.feature.as_str() {
-            "dependabot_alerts" if change.desired => {
+        match change.feature {
+            SecurityFeature::DependabotAlerts if change.desired => {
                 client.enable_dependabot_alerts(&plan.repo).await?;
             }
-            "dependabot_security_updates" if change.desired => {
+            SecurityFeature::DependabotSecurityUpdates if change.desired => {
                 client
                     .enable_dependabot_security_updates(&plan.repo)
                     .await?;
             }
-            "secret_scanning" | "secret_scanning_ai_detection" | "push_protection" => {
+            f if f.is_secret_scanning_group() => {
                 // These are set together via a single PATCH call
-                // We'll collect them and apply once below
                 continue;
             }
             _ => {
@@ -76,29 +75,23 @@ async fn apply_repo_security(client: &Client, plan: &RepoPlan, audit_log: &Audit
     let ss_changes: Vec<_> = plan
         .changes
         .iter()
-        .filter(|c| {
-            matches!(
-                c.feature.as_str(),
-                "secret_scanning" | "secret_scanning_ai_detection" | "push_protection"
-            )
-        })
+        .filter(|c| c.feature.is_secret_scanning_group())
         .collect();
 
     if !ss_changes.is_empty() {
-        // Determine desired state for each (use desired from change, or keep current)
         let secret_scanning = ss_changes
             .iter()
-            .find(|c| c.feature == "secret_scanning")
+            .find(|c| c.feature == SecurityFeature::SecretScanning)
             .map(|c| c.desired)
             .unwrap_or(true);
         let ai_detection = ss_changes
             .iter()
-            .find(|c| c.feature == "secret_scanning_ai_detection")
+            .find(|c| c.feature == SecurityFeature::SecretScanningAiDetection)
             .map(|c| c.desired)
             .unwrap_or(true);
         let push_protection = ss_changes
             .iter()
-            .find(|c| c.feature == "push_protection")
+            .find(|c| c.feature == SecurityFeature::PushProtection)
             .map(|c| c.desired)
             .unwrap_or(true);
 

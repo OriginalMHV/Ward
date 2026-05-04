@@ -126,10 +126,12 @@ impl Client {
 
         // The search API matches system_id anywhere in the name, so we still
         // need to verify the prefix to avoid false positives.
+        // Require exact match or `{system_id}-` prefix to avoid e.g. "be" matching "backend".
+        let prefix_with_sep = format!("{system_id}-");
         let mut matched: Vec<Repository> = search_results
             .into_iter()
             .filter(|r| !r.archived)
-            .filter(|r| r.name.starts_with(system_id))
+            .filter(|r| r.name == system_id || r.name.starts_with(&prefix_with_sep))
             .filter(|r| {
                 if let Some(ref re) = exclude_regex {
                     let suffix = r

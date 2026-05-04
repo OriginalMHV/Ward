@@ -176,11 +176,30 @@ async fn check(
             client.get_branch_protection(&repo_info.name, &repo_info.default_branch)
         );
 
+        let security = match sec_result {
+            Ok(state) => state,
+            Err(e) => {
+                tracing::warn!("Failed to fetch security state for {}: {e}", repo_info.name);
+                SecurityState::default()
+            }
+        };
+        let branch_protection = match prot_result {
+            Ok(Some(bp)) => bp,
+            Ok(None) => BranchProtectionState::default(),
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to fetch branch protection for {}: {e}",
+                    repo_info.name
+                );
+                BranchProtectionState::default()
+            }
+        };
+
         let ctx = RepoContext {
             visibility: repo_info.visibility.clone(),
             archived: repo_info.archived,
-            security: sec_result.unwrap_or_default(),
-            branch_protection: prot_result.unwrap_or(None).unwrap_or_default(),
+            security,
+            branch_protection,
         };
 
         for policy in &manifest.policies {
@@ -220,7 +239,14 @@ async fn check(
 
     let error_count = violations.iter().filter(|v| v.severity == "error").count();
     if error_count > 0 {
-        std::process::exit(1);
+        anyhow::bail!(
+            "{error_count} policy {} found",
+            if error_count == 1 {
+                "violation"
+            } else {
+                "violations"
+            }
+        );
     }
 
     Ok(())

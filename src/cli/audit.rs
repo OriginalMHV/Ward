@@ -113,7 +113,7 @@ impl AuditCommand {
         if self.format == "json" {
             let report = AuditReport {
                 generated_at: chrono::Utc::now().to_rfc3339(),
-                organization: client.org.clone(),
+                organization: client.org().to_owned(),
                 repositories: audits,
             };
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -374,7 +374,7 @@ async fn get_alert_counts(client: &Client, repo: &str) -> Result<AlertCounts> {
         let resp = client
             .get(&format!(
                 "/repos/{}/{repo}/dependabot/alerts?state=open&severity={severity}&per_page=1",
-                client.org
+                client.org()
             ))
             .await?;
 
@@ -395,7 +395,7 @@ async fn get_alert_counts(client: &Client, repo: &str) -> Result<AlertCounts> {
     let resp = client
         .get(&format!(
             "/repos/{}/{repo}/dependabot/alerts?state=open&per_page=100",
-            client.org
+            client.org()
         ))
         .await?;
 

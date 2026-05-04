@@ -223,22 +223,12 @@ fn spawn_repo_load(
     num_custom_checks: usize,
 ) {
     let tx = tx.clone();
-    let org = client.org.clone();
-    let http = client.http.clone();
-    let base_url = client.base_url.clone();
-    let semaphore = client.semaphore.clone();
+    let bg_client = client.clone();
     let excludes = manifest.exclude_patterns_for_system(system_id);
     let explicit = manifest.explicit_repos_for_system(system_id);
     let sys_id = system_id.to_owned();
 
     tokio::spawn(async move {
-        let bg_client = Client {
-            http,
-            org,
-            semaphore,
-            base_url,
-        };
-
         match bg_client
             .list_repos_for_system(&sys_id, &excludes, &explicit)
             .await
@@ -281,10 +271,7 @@ fn spawn_security_load(
 ) {
     for (idx, entry) in repos.iter().enumerate() {
         let tx = tx.clone();
-        let http = client.http.clone();
-        let org = client.org.clone();
-        let base_url = client.base_url.clone();
-        let semaphore = client.semaphore.clone();
+        let bg_client = client.clone();
         let repo_name = entry.repo.name.clone();
         let repo_data = entry
             .repo
@@ -293,13 +280,6 @@ fn spawn_security_load(
             .map(|sa| serde_json::json!({ "security_and_analysis": sa }));
 
         tokio::spawn(async move {
-            let bg_client = Client {
-                http,
-                org,
-                semaphore,
-                base_url,
-            };
-
             let result = bg_client
                 .get_security_state_with_repo_data(&repo_name, repo_data.as_ref())
                 .await;
@@ -326,18 +306,9 @@ fn spawn_custom_checks(
             let tx = tx.clone();
             let repo = entry.repo.clone();
             let check = check.clone();
-            let http = client.http.clone();
-            let org = client.org.clone();
-            let base_url = client.base_url.clone();
-            let semaphore = client.semaphore.clone();
+            let bg_client = client.clone();
 
             tokio::spawn(async move {
-                let bg_client = Client {
-                    http,
-                    org,
-                    semaphore,
-                    base_url,
-                };
                 let result = bg_client.run_custom_check(&repo, &check).await;
                 let _ = tx.send(BgMessage::CustomCheckLoaded(repo_idx, check_idx, result));
             });
@@ -352,21 +323,11 @@ fn spawn_security_apply(
     config: &SecurityConfig,
 ) {
     let tx = tx.clone();
-    let http = client.http.clone();
-    let org = client.org.clone();
-    let base_url = client.base_url.clone();
-    let semaphore = client.semaphore.clone();
+    let bg_client = client.clone();
     let repo = repo_name.to_owned();
     let cfg = config.clone();
 
     tokio::spawn(async move {
-        let bg_client = Client {
-            http,
-            org,
-            semaphore,
-            base_url,
-        };
-
         let result = async {
             if cfg.dependabot_alerts {
                 bg_client.enable_dependabot_alerts(&repo).await?;
@@ -402,22 +363,12 @@ fn spawn_protection_apply(
     config: &BranchProtectionConfig,
 ) {
     let tx = tx.clone();
-    let http = client.http.clone();
-    let org = client.org.clone();
-    let base_url = client.base_url.clone();
-    let semaphore = client.semaphore.clone();
+    let bg_client = client.clone();
     let repo = repo.to_owned();
     let branch = branch.to_owned();
     let cfg = config.clone();
 
     tokio::spawn(async move {
-        let bg_client = Client {
-            http,
-            org,
-            semaphore,
-            base_url,
-        };
-
         let result = bg_client
             .update_branch_protection(&repo, &branch, &cfg)
             .await;
@@ -439,10 +390,7 @@ fn spawn_template_deploy(
     template_name: &str,
 ) {
     let tx = tx.clone();
-    let http = client.http.clone();
-    let org = client.org.clone();
-    let base_url = client.base_url.clone();
-    let semaphore = client.semaphore.clone();
+    let bg_client = client.clone();
     let repo = repo_name.to_owned();
     let default_br = default_branch.to_owned();
     let template = template_name.to_owned();
@@ -453,13 +401,6 @@ fn spawn_template_deploy(
     let registries = manifest.templates.registries.clone();
 
     tokio::spawn(async move {
-        let bg_client = Client {
-            http,
-            org,
-            semaphore,
-            base_url,
-        };
-
         let result = async {
             let (target_path, template_category) = match template.as_str() {
                 "dependabot" => (".github/dependabot.yml", "dependabot"),
@@ -577,10 +518,7 @@ fn spawn_settings_apply(
     default_branch: &str,
 ) {
     let tx = tx.clone();
-    let http = client.http.clone();
-    let org = client.org.clone();
-    let base_url = client.base_url.clone();
-    let semaphore = client.semaphore.clone();
+    let bg_client = client.clone();
     let repo = repo_name.to_owned();
     let default_br = default_branch.to_owned();
     let branch_name = manifest.templates.branch.clone();
@@ -593,13 +531,6 @@ fn spawn_settings_apply(
         || repo.ends_with("-gitops");
 
     tokio::spawn(async move {
-        let bg_client = Client {
-            http,
-            org,
-            semaphore,
-            base_url,
-        };
-
         let result = async {
             let mut actions: Vec<String> = Vec::new();
 

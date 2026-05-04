@@ -39,11 +39,15 @@ impl Client {
             .get(&format!("/repos/{}/{repo}/rulesets", self.org))
             .await?;
 
-        if !resp.status().is_success() {
+        let status = resp.status();
+        if !status.is_success() {
+            tracing::warn!("Failed to list rulesets for {repo}: HTTP {status}");
             return Ok(Vec::new());
         }
 
-        Ok(resp.json().await.unwrap_or_default())
+        resp.json()
+            .await
+            .context("Failed to parse rulesets response")
     }
 
     /// Get details for a specific ruleset.

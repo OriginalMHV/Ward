@@ -1,12 +1,56 @@
+use std::fmt;
+
 use serde::Serialize;
 
 use crate::config::SecurityConfig;
 use crate::github::security::SecurityState;
 
+/// The set of security features Ward can manage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SecurityFeature {
+    DependabotAlerts,
+    DependabotSecurityUpdates,
+    SecretScanning,
+    SecretScanningAiDetection,
+    PushProtection,
+}
+
+impl fmt::Display for SecurityFeature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DependabotAlerts => write!(f, "dependabot_alerts"),
+            Self::DependabotSecurityUpdates => write!(f, "dependabot_security_updates"),
+            Self::SecretScanning => write!(f, "secret_scanning"),
+            Self::SecretScanningAiDetection => write!(f, "secret_scanning_ai_detection"),
+            Self::PushProtection => write!(f, "push_protection"),
+        }
+    }
+}
+
+impl SecurityFeature {
+    /// All known features, in canonical order.
+    pub const ALL: [SecurityFeature; 5] = [
+        Self::DependabotAlerts,
+        Self::DependabotSecurityUpdates,
+        Self::SecretScanning,
+        Self::SecretScanningAiDetection,
+        Self::PushProtection,
+    ];
+
+    /// Whether this feature is part of the secret-scanning PATCH group.
+    pub fn is_secret_scanning_group(&self) -> bool {
+        matches!(
+            self,
+            Self::SecretScanning | Self::SecretScanningAiDetection | Self::PushProtection
+        )
+    }
+}
+
 /// A planned change for a single security feature.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SecurityChange {
-    pub feature: String,
+    pub feature: SecurityFeature,
     pub current: bool,
     pub desired: bool,
 }
@@ -30,27 +74,27 @@ pub fn plan_security(repo: &str, current: &SecurityState, desired: &SecurityConf
 
     let checks = [
         (
-            "dependabot_alerts",
+            SecurityFeature::DependabotAlerts,
             current.dependabot_alerts,
             desired.dependabot_alerts,
         ),
         (
-            "dependabot_security_updates",
+            SecurityFeature::DependabotSecurityUpdates,
             current.dependabot_security_updates,
             desired.dependabot_security_updates,
         ),
         (
-            "secret_scanning",
+            SecurityFeature::SecretScanning,
             current.secret_scanning,
             desired.secret_scanning,
         ),
         (
-            "secret_scanning_ai_detection",
+            SecurityFeature::SecretScanningAiDetection,
             current.secret_scanning_ai_detection,
             desired.secret_scanning_ai_detection,
         ),
         (
-            "push_protection",
+            SecurityFeature::PushProtection,
             current.push_protection,
             desired.push_protection,
         ),
@@ -59,7 +103,7 @@ pub fn plan_security(repo: &str, current: &SecurityState, desired: &SecurityConf
     for (feature, current_val, desired_val) in checks {
         if current_val != desired_val {
             changes.push(SecurityChange {
-                feature: feature.to_string(),
+                feature,
                 current: current_val,
                 desired: desired_val,
             });
@@ -129,10 +173,10 @@ mod tests {
             &config(true, true, true, true, true),
         );
         assert_eq!(plan.changes.len(), 3);
-        let features: Vec<&str> = plan.changes.iter().map(|c| c.feature.as_str()).collect();
-        assert!(features.contains(&"dependabot_security_updates"));
-        assert!(features.contains(&"secret_scanning_ai_detection"));
-        assert!(features.contains(&"push_protection"));
+        let features: Vec<SecurityFeature> = plan.changes.iter().map(|c| c.feature).collect();
+        assert!(features.contains(&SecurityFeature::DependabotSecurityUpdates));
+        assert!(features.contains(&SecurityFeature::SecretScanningAiDetection));
+        assert!(features.contains(&SecurityFeature::PushProtection));
     }
 
     #[test]
@@ -154,5 +198,43 @@ mod tests {
             &config(true, true, true, true, true),
         );
         assert_eq!(plan.repo, "my-cool-repo");
+    }
+
+    #[test]
+    fn security_feature_display_matches_snake_case() {
+        assert_eq!(
+            SecurityFeature::DependabotAlerts.to_string(),
+            "dependabot_alerts"
+        );
+        assert_eq!(
+            SecurityFeature::DependabotSecurityUpdates.to_string(),
+            "dependabot_security_updates"
+        );
+        assert_eq!(
+            SecurityFeature::SecretScanning.to_string(),
+            "secret_scanning"
+        );
+        assert_eq!(
+            SecurityFeature::SecretScanningAiDetection.to_string(),
+            "secret_scanning_ai_detection"
+        );
+        assert_eq!(
+            SecurityFeature::PushProtection.to_string(),
+            "push_protection"
+        );
+    }
+
+    #[test]
+    fn security_feature_all_covers_every_variant() {
+        assert_eq!(SecurityFeature::ALL.len(), 5);
+    }
+
+    #[test]
+    fn security_feature_secret_scanning_group() {
+        assert!(!SecurityFeature::DependabotAlerts.is_secret_scanning_group());
+        assert!(!SecurityFeature::DependabotSecurityUpdates.is_secret_scanning_group());
+        assert!(SecurityFeature::SecretScanning.is_secret_scanning_group());
+        assert!(SecurityFeature::SecretScanningAiDetection.is_secret_scanning_group());
+        assert!(SecurityFeature::PushProtection.is_secret_scanning_group());
     }
 }

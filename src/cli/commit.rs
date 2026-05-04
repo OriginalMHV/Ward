@@ -137,7 +137,8 @@ async fn detect_and_render(
     // Check if file already exists
     let existing = client.get_file(repo_name, target_path, None).await?;
     let (already_exists, existing_matches) = if let Some(ref content) = existing {
-        let decoded = Client::decode_content(content).unwrap_or_default();
+        let decoded = Client::decode_content(content)
+            .with_context(|| format!("Failed to decode existing {target_path} in {repo_name}"))?;
         (true, decoded.trim() == rendered.trim())
     } else {
         (false, false)
