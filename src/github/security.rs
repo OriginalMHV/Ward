@@ -160,6 +160,10 @@ impl Client {
     }
 
     /// Enable secret scanning, AI detection, and/or push protection.
+    ///
+    /// On private/internal repos, GitHub requires Advanced Security to be enabled
+    /// before secret scanning features can be turned on. We include it automatically
+    /// when enabling any scanning feature.
     pub async fn set_security_features(
         &self,
         repo: &str,
@@ -167,18 +171,28 @@ impl Client {
         ai_detection: bool,
         push_protection: bool,
     ) -> Result<()> {
-        let body = serde_json::json!({
-            "security_and_analysis": {
-                "secret_scanning": {
-                    "status": if secret_scanning { "enabled" } else { "disabled" }
-                },
-                "secret_scanning_ai_detection": {
-                    "status": if ai_detection { "enabled" } else { "disabled" }
-                },
-                "secret_scanning_push_protection": {
-                    "status": if push_protection { "enabled" } else { "disabled" }
-                }
+        let any_enabling = secret_scanning || ai_detection || push_protection;
+
+        let mut security_and_analysis = serde_json::json!({
+            "secret_scanning": {
+                "status": if secret_scanning { "enabled" } else { "disabled" }
+            },
+            "secret_scanning_ai_detection": {
+                "status": if ai_detection { "enabled" } else { "disabled" }
+            },
+            "secret_scanning_push_protection": {
+                "status": if push_protection { "enabled" } else { "disabled" }
             }
+        });
+
+        // GHAS must be enabled before secret scanning on private/internal repos
+        if any_enabling {
+            security_and_analysis["advanced_security"] =
+                serde_json::json!({"status": "enabled"});
+        }
+
+        let body = serde_json::json!({
+            "security_and_analysis": security_and_analysis
         });
 
         let resp = self

@@ -186,14 +186,33 @@ fn run_show(config_override: Option<&str>) -> Result<()> {
     );
 
     println!();
-    println!("  {}", style("Templates").bold());
-    println!("    branch: {}", manifest.templates.branch);
-    println!(
-        "    commit_message_prefix: {}",
-        manifest.templates.commit_message_prefix
-    );
-    if let Some(ref dir) = manifest.templates.custom_dir {
-        println!("    custom_dir: {dir}");
+    println!("  {}", style("Rulesets").bold());
+    if let Some(ref bp) = manifest.rulesets.branch_protection {
+        println!("    {}", style("branch_protection:").dim());
+        print_bool("      enabled", bp.enabled);
+        println!("      required_approvals: {}", bp.required_approvals);
+        print_bool("      dismiss_stale_reviews", bp.dismiss_stale_reviews);
+        print_bool(
+            "      require_code_owner_reviews",
+            bp.require_code_owner_reviews,
+        );
+        print_bool("      require_linear_history", bp.require_linear_history);
+        print_bool("      block_force_pushes", bp.block_force_pushes);
+        if !bp.bypass_teams.is_empty() {
+            println!(
+                "      bypass_teams: {}",
+                bp.bypass_teams
+                    .iter()
+                    .map(|t| t.slug().to_owned())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        if !bp.overrides.is_empty() {
+            println!("      overrides: {} pattern(s)", bp.overrides.len());
+        }
+    } else {
+        println!("    (not configured)");
     }
 
     if manifest.systems.is_empty() {
