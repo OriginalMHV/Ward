@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-04
+
+### Added
+
+- `ward rulesets` -- manage GitHub repository rulesets (plan/apply/audit) with bypass teams and per-repo pattern overrides
+- `ward teams` -- manage team access permissions across repositories
+- `ward drift` -- detect configuration drift from desired state with CI-friendly exit codes
+- Advanced Security auto-enable: secret scanning apply now automatically enables GHAS on private/internal repos
+- `config show` now displays the `[rulesets]` section
+- Per-system security and rulesets overrides in `ward.toml`
+- Bypass teams support with configurable `bypass_mode` (`"always"` or `"pull_request"`)
+- Per-repo pattern overrides via `[[rulesets.branch_protection.overrides]]`
+- Dependency graph / SBOM audit in `ward audit` output
+- 256 tests (227 unit + 29 integration)
+
+### Changed
+
+- God modules split: `tui.rs` → `tui/` directory, `manifest.rs` → `manifest/` directory, `api_integration` tests modularized
+- Type safety improvements: replaced string-based enums with proper Rust enums throughout
+- Error handling consolidated: unified error types with context propagation
+- Encapsulation: struct fields made private with accessor methods
+
+### Fixed
+
+- `ward security apply` now works on private/internal repos by enabling Advanced Security before secret scanning
+- `config show` no longer skips the rulesets section
+
 ## [0.3.0] - 2026-03-24
 
 ### Added

@@ -155,7 +155,7 @@ Required token scopes: `repo`, `read:org`, `workflow`.
 | `src/cli/init.rs` | Interactive setup wizard |
 | `src/cli/tui/` | Terminal dashboard (ratatui) |
 | `src/config/` | Configuration parsing and types |
-| `src/config/manifest.rs` | Top-level config struct (Manifest) |
+| `src/config/manifest/` | Manifest struct, types, accessors, and parsing |
 | `src/config/auth.rs` | Token resolution |
 | `src/github/` | GitHub API client and types |
 | `src/github/client.rs` | HTTP client with semaphore-based rate limiting |
