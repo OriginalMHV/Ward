@@ -389,6 +389,16 @@ impl Manifest {
         self.systems.iter().find(|s| s.id == id)
     }
 
+    /// Find the system that owns a repo by matching the repo name against system id prefixes.
+    /// Returns the system id, or `None` if the repo doesn't match any system.
+    pub fn system_for_repo(&self, repo_name: &str) -> Option<&str> {
+        self.systems
+            .iter()
+            .filter(|s| repo_name == s.id || repo_name.starts_with(&format!("{}-", s.id)))
+            .max_by_key(|s| s.id.len()) // longest match wins
+            .map(|s| s.id.as_str())
+    }
+
     pub fn security_for_system(&self, system_id: &str) -> &SecurityConfig {
         self.systems
             .iter()
@@ -1267,5 +1277,77 @@ mod tests {
         assert_eq!(app_config.bypass_teams.len(), 1);
         assert_eq!(app_config.bypass_teams[0].slug(), "party-owners");
         assert_eq!(app_config.bypass_teams[0].bypass_mode(), "pull_request");
+    }
+
+    #[test]
+    fn system_for_repo_matches_exact() {
+        let toml = r#"
+            [org]
+            name = "org"
+            [[systems]]
+            id = "be"
+            name = "Backend"
+        "#;
+        let m: Manifest = toml::from_str(toml).unwrap();
+        assert_eq!(m.system_for_repo("be"), Some("be"));
+    }
+
+    #[test]
+    fn system_for_repo_matches_prefix_with_dash() {
+        let toml = r#"
+            [org]
+            name = "org"
+            [[systems]]
+            id = "be"
+            name = "Backend"
+        "#;
+        let m: Manifest = toml::from_str(toml).unwrap();
+        assert_eq!(m.system_for_repo("be-api"), Some("be"));
+        assert_eq!(m.system_for_repo("be-frontend"), Some("be"));
+    }
+
+    #[test]
+    fn system_for_repo_rejects_partial_prefix() {
+        let toml = r#"
+            [org]
+            name = "org"
+            [[systems]]
+            id = "be"
+            name = "Backend"
+        "#;
+        let m: Manifest = toml::from_str(toml).unwrap();
+        // "backend" starts with "be" but NOT at a boundary (no dash separator)
+        assert_eq!(m.system_for_repo("backend"), None);
+        assert_eq!(m.system_for_repo("bear-service"), None);
+    }
+
+    #[test]
+    fn system_for_repo_picks_longest_match() {
+        let toml = r#"
+            [org]
+            name = "org"
+            [[systems]]
+            id = "s07"
+            name = "All S07"
+            [[systems]]
+            id = "s07411"
+            name = "Party Management"
+        "#;
+        let m: Manifest = toml::from_str(toml).unwrap();
+        assert_eq!(m.system_for_repo("s07411-api"), Some("s07411"));
+        assert_eq!(m.system_for_repo("s07-other"), Some("s07"));
+    }
+
+    #[test]
+    fn system_for_repo_returns_none_when_no_match() {
+        let toml = r#"
+            [org]
+            name = "org"
+            [[systems]]
+            id = "be"
+            name = "Backend"
+        "#;
+        let m: Manifest = toml::from_str(toml).unwrap();
+        assert_eq!(m.system_for_repo("unrelated-repo"), None);
     }
 }

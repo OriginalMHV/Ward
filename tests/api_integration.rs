@@ -176,6 +176,46 @@ async fn test_list_repos_for_system_with_prefix() {
     assert!(repos.iter().all(|r| !r.archived));
 }
 
+#[tokio::test]
+async fn test_list_repos_for_system_rejects_partial_prefix() {
+    let server = MockServer::start().await;
+
+    // Search returns repos that GitHub matches broadly — our code filters further
+    Mock::given(method("GET"))
+        .and(path("/search/repositories"))
+        .and(query_param("page", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "total_count": 3,
+            "items": [
+                make_repo_json("be-api", false),
+                make_repo_json("be-frontend", false),
+                make_repo_json("backend-service", false),
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/search/repositories"))
+        .and(query_param("page", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "total_count": 3,
+            "items": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let repos = client.list_repos_for_system("be", &[], &[]).await.unwrap();
+
+    // "backend-service" should NOT match system "be" — only "be-api" and "be-frontend"
+    assert_eq!(repos.len(), 2);
+    let names: Vec<&str> = repos.iter().map(|r| r.name.as_str()).collect();
+    assert!(names.contains(&"be-api"));
+    assert!(names.contains(&"be-frontend"));
+    assert!(!names.contains(&"backend-service"));
+}
+
 // ===========================================================================
 // B. Security state
 // ===========================================================================

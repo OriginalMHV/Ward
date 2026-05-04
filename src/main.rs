@@ -50,6 +50,13 @@ async fn main() -> Result<()> {
 
     let manifest = Manifest::load(cli.config.as_deref())?;
     let org = cli.org.as_deref().unwrap_or(&manifest.org.name);
+
+    if org.is_empty() {
+        anyhow::bail!(
+            "No organization configured. Either set [org] name in ward.toml or pass --org <name>."
+        );
+    }
+
     let client = Client::new(org, cli.parallelism).await?;
 
     match cli.command {
