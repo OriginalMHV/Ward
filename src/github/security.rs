@@ -187,8 +187,7 @@ impl Client {
 
         // GHAS must be enabled before secret scanning on private/internal repos
         if any_enabling {
-            security_and_analysis["advanced_security"] =
-                serde_json::json!({"status": "enabled"});
+            security_and_analysis["advanced_security"] = serde_json::json!({"status": "enabled"});
         }
 
         let body = serde_json::json!({
