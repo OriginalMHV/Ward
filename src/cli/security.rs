@@ -194,16 +194,12 @@ async fn audit(
         repo_names.len()
     );
 
-    println!();
-    println!(
-        "  {:40} {:8} {:8} {:8} {:8} {:8}",
-        style("Repository").bold().underlined(),
-        style("Dep.A").bold().underlined(),
-        style("Dep.SU").bold().underlined(),
-        style("Secret").bold().underlined(),
-        style("AI").bold().underlined(),
-        style("Push").bold().underlined(),
-    );
+    use tabled::builder::Builder;
+    use tabled::settings::object::{Columns, Rows};
+    use tabled::settings::{Alignment, Modify, Style};
+
+    let mut builder = Builder::default();
+    builder.push_record(["Repository", "Dep.A", "Dep.SU", "Secret", "AI", "Push"]);
 
     let mut total_ok = 0;
     let mut total_issues = 0;
@@ -237,10 +233,30 @@ async fn audit(
             })
             .collect();
 
-        println!(
-            "  {:40} {:8} {:8} {:8} {:8} {:8}",
-            repo_name, icons[0], icons[1], icons[2], icons[3], icons[4]
-        );
+        builder.push_record([
+            repo_name.clone(),
+            icons[0].clone(),
+            icons[1].clone(),
+            icons[2].clone(),
+            icons[3].clone(),
+            icons[4].clone(),
+        ]);
+    }
+
+    let table = builder
+        .build()
+        .with(Style::blank())
+        .with(
+            Modify::new(Rows::first()).with(tabled::settings::Format::content(|s| {
+                format!("{}", style(s).bold().underlined())
+            })),
+        )
+        .with(Modify::new(Columns::new(..)).with(Alignment::left()))
+        .to_string();
+
+    println!();
+    for line in table.lines() {
+        println!("  {line}");
     }
 
     println!();

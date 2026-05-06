@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Args;
 use console::style;
-use tabled::{Table, settings::Style};
+use tabled::settings::Style;
 
 use crate::config::Manifest;
 use crate::github::Client;
@@ -66,8 +66,6 @@ async fn list_repos(client: &Client, manifest: &Manifest, system: Option<&str>) 
         })
         .collect();
 
-    let _table = Table::new(rows).with(Style::rounded()).to_string();
-
     println!();
     println!(
         "  {} repositories in {}{}\n",
@@ -78,26 +76,31 @@ async fn list_repos(client: &Client, manifest: &Manifest, system: Option<&str>) 
             .unwrap_or_default()
     );
 
-    // Manual header + data table
-    println!(
-        "  {:40} {:15} {:12} {}",
-        style("Repository").bold().underlined(),
-        style("Language").bold().underlined(),
-        style("Visibility").bold().underlined(),
-        style("Branch").bold().underlined(),
-    );
+    use tabled::builder::Builder;
+    use tabled::settings::object::{Columns, Rows};
+    use tabled::settings::{Alignment, Modify};
 
-    for r in &repos {
-        println!(
-            "  {:40} {:15} {:12} {}",
-            r.name,
-            r.language.as_deref().unwrap_or("-"),
-            r.visibility,
-            r.default_branch,
-        );
+    let mut builder = Builder::default();
+    builder.push_record(["Repository", "Language", "Visibility", "Branch"]);
+    for row in &rows {
+        builder.push_record(row);
     }
 
-    let _ = _table; // table available for --json mode later
+    let table = builder
+        .build()
+        .with(Style::blank())
+        .with(
+            Modify::new(Rows::first()).with(tabled::settings::Format::content(|s| {
+                format!("{}", style(s).bold().underlined())
+            })),
+        )
+        .with(Modify::new(Columns::new(..)).with(Alignment::left()))
+        .to_string();
+
+    for line in table.lines() {
+        println!("  {line}");
+    }
+
     Ok(())
 }
 

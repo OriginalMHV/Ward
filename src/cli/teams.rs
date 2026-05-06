@@ -383,13 +383,12 @@ async fn audit(
         repos.len()
     );
 
-    println!();
-    println!(
-        "  {} {}",
-        style(format!("{:<40}", "Repository")).bold().underlined(),
-        style("Teams").bold().underlined(),
-    );
-    println!("  {}", style("\u{2500}".repeat(70)).dim());
+    use tabled::builder::Builder;
+    use tabled::settings::object::{Columns, Rows};
+    use tabled::settings::{Alignment, Modify, Style};
+
+    let mut builder = Builder::default();
+    builder.push_record(["Status", "Repository", "Teams"]);
 
     let mut total_ok = 0;
     let mut total_issues = 0;
@@ -425,7 +424,23 @@ async fn audit(
                 .join(", ")
         };
 
-        println!("  {} {:<38} {}", indicator, repo_name, summary);
+        builder.push_record([indicator, repo_name.clone(), summary]);
+    }
+
+    let table = builder
+        .build()
+        .with(Style::blank())
+        .with(
+            Modify::new(Rows::first()).with(tabled::settings::Format::content(|s| {
+                format!("{}", style(s).bold().underlined())
+            })),
+        )
+        .with(Modify::new(Columns::new(..)).with(Alignment::left()))
+        .to_string();
+
+    println!();
+    for line in table.lines() {
+        println!("  {line}");
     }
 
     println!();

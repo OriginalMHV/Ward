@@ -336,18 +336,21 @@ async fn audit(
         repos.len()
     );
 
-    println!();
-    println!(
-        "  {:40} {:8} {:10} {:10} {:10} {:10} {:10} {:10}",
-        style("Repository").bold().underlined(),
-        style("Branch").bold().underlined(),
-        style("PR Rev").bold().underlined(),
-        style("Approvals").bold().underlined(),
-        style("Stale").bold().underlined(),
-        style("Admins").bold().underlined(),
-        style("Linear").bold().underlined(),
-        style("Force").bold().underlined(),
-    );
+    use tabled::builder::Builder;
+    use tabled::settings::object::{Columns, Rows};
+    use tabled::settings::{Alignment, Modify, Style};
+
+    let mut builder = Builder::default();
+    builder.push_record([
+        "Repository",
+        "Branch",
+        "PR Rev",
+        "Approvals",
+        "Stale",
+        "Admins",
+        "Linear",
+        "Force",
+    ]);
 
     let mut total_ok = 0;
     let mut total_issues = 0;
@@ -373,17 +376,32 @@ async fn audit(
             }
         };
 
-        println!(
-            "  {:40} {:8} {:10} {:10} {:10} {:10} {:10} {:10}",
-            repo_name,
-            default_branch,
+        builder.push_record([
+            repo_name.clone(),
+            default_branch.clone(),
             icon(state.required_pull_request_reviews),
-            state.required_approving_review_count,
+            state.required_approving_review_count.to_string(),
             icon(state.dismiss_stale_reviews),
             icon(state.enforce_admins),
             icon(state.required_linear_history),
             icon(state.allow_force_pushes),
-        );
+        ]);
+    }
+
+    let table = builder
+        .build()
+        .with(Style::blank())
+        .with(
+            Modify::new(Rows::first()).with(tabled::settings::Format::content(|s| {
+                format!("{}", style(s).bold().underlined())
+            })),
+        )
+        .with(Modify::new(Columns::new(..)).with(Alignment::left()))
+        .to_string();
+
+    println!();
+    for line in table.lines() {
+        println!("  {line}");
     }
 
     println!();

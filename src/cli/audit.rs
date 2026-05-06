@@ -535,38 +535,41 @@ fn extract_quoted_version(s: &str) -> Option<String> {
 }
 
 fn print_table(audits: &[RepoAudit]) {
-    println!();
-    println!(
-        "  {:35} {:8} {:12} {:18} {:5} {:5} {:5} {:5} {:5} {:5} {:5} {:5}",
-        style("Repository").bold().underlined(),
-        style("Type").bold().underlined(),
-        style("Runtime").bold().underlined(),
-        style("Framework").bold().underlined(),
-        style("Dep.A").bold().underlined(),
-        style("SecSc").bold().underlined(),
-        style("Push").bold().underlined(),
-        style("DBot").bold().underlined(),
-        style("CQL").bold().underlined(),
-        style("SBOM").bold().underlined(),
-        style("CopRv").bold().underlined(),
-        style("Alert").bold().underlined(),
-    );
+    use tabled::builder::Builder;
+    use tabled::settings::object::{Columns, Rows};
+    use tabled::settings::{Alignment, Modify, Style};
+
+    let mut builder = Builder::default();
+    builder.push_record([
+        "Repository",
+        "Type",
+        "Runtime",
+        "Framework",
+        "Dep.A",
+        "SecSc",
+        "Push",
+        "DBot",
+        "CQL",
+        "SBOM",
+        "CopRv",
+        "Alert",
+    ]);
 
     let mut total_alerts = 0u32;
     let mut fully_secured = 0;
     let mut dependency_graph_available = 0;
 
-    for a in audits {
-        let runtime = truncate_cell(&runtime_summary(&a.versions), 12);
-        let framework = truncate_cell(&framework_summary(&a.versions), 18);
+    let icon = |b: bool| {
+        if b {
+            format!("{}", style("[ok]").green())
+        } else {
+            format!("{}", style("[!!]").red())
+        }
+    };
 
-        let icon = |b: bool| {
-            if b {
-                format!("{}", style("[ok]").green())
-            } else {
-                format!("{}", style("[!!]").red())
-            }
-        };
+    for a in audits {
+        let runtime = truncate_cell(&runtime_summary(&a.versions), 16);
+        let framework = truncate_cell(&framework_summary(&a.versions), 20);
 
         let alert_total = a.security.alert_counts.critical
             + a.security.alert_counts.high
@@ -604,10 +607,9 @@ fn print_table(audits: &[RepoAudit]) {
             DependencyGraphStatus::Unknown => format!("{}", style("[??]").yellow()),
         };
 
-        println!(
-            "  {:35} {:8} {:12} {:18} {:5} {:5} {:5} {:5} {:5} {:5} {:5} {:5}",
-            &a.name,
-            &a.project_type,
+        builder.push_record([
+            a.name.clone(),
+            a.project_type.clone(),
             runtime,
             framework,
             icon(a.security.dependabot_alerts),
@@ -618,7 +620,23 @@ fn print_table(audits: &[RepoAudit]) {
             dependency_graph_icon,
             icon(a.settings.has_copilot_review_ruleset),
             alert_str,
-        );
+        ]);
+    }
+
+    let table = builder
+        .build()
+        .with(Style::blank())
+        .with(
+            Modify::new(Rows::first()).with(tabled::settings::Format::content(|s| {
+                format!("{}", style(s).bold().underlined())
+            })),
+        )
+        .with(Modify::new(Columns::new(..)).with(Alignment::left()))
+        .to_string();
+
+    println!();
+    for line in table.lines() {
+        println!("  {line}");
     }
 
     println!();

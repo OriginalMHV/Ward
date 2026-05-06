@@ -294,26 +294,23 @@ fn print_json(results: &[DriftResult]) {
 }
 
 fn print_table(results: &[DriftResult]) {
-    println!();
-    println!(
-        "  {} {} {} {}",
-        style(format!("{:<40}", "Repository")).bold().underlined(),
-        style(format!("{:<15}", "Security")).bold().underlined(),
-        style(format!("{:<15}", "Protection")).bold().underlined(),
-        style("Status").bold().underlined(),
-    );
-    println!("  {}", style("\u{2500}".repeat(80)).dim());
+    use tabled::builder::Builder;
+    use tabled::settings::object::{Columns, Rows};
+    use tabled::settings::{Alignment, Modify, Style};
+
+    let mut builder = Builder::default();
+    builder.push_record(["Repository", "Security", "Protection", "Status"]);
 
     for result in results {
         let sec = if result.security_drifts.is_empty() {
-            format!("{}", style(format!("{:<15}", "[ok]")).green())
+            format!("{}", style("[ok]").green())
         } else {
-            format!("{}", style(format!("{:<15}", "[!!]")).red())
+            format!("{}", style("[!!]").red())
         };
         let prot = if result.protection_drifts.is_empty() {
-            format!("{}", style(format!("{:<15}", "[ok]")).green())
+            format!("{}", style("[ok]").green())
         } else {
-            format!("{}", style(format!("{:<15}", "[!!]")).red())
+            format!("{}", style("[!!]").red())
         };
         let status = if result.is_drifted() {
             format!("{}", style("DRIFTED").red().bold())
@@ -321,23 +318,43 @@ fn print_table(results: &[DriftResult]) {
             format!("{}", style("In sync").green())
         };
 
-        println!("  {:<40} {} {} {}", result.repo, sec, prot, status);
+        builder.push_record([result.repo.clone(), sec, prot, status]);
+    }
 
-        for drift in &result.security_drifts {
-            println!(
-                "    - {}: expected {}, got {}",
-                drift.field,
-                style(&drift.expected).green(),
-                style(&drift.actual).red()
-            );
-        }
-        for drift in &result.protection_drifts {
-            println!(
-                "    - {}: expected {}, got {}",
-                drift.field,
-                style(&drift.expected).green(),
-                style(&drift.actual).red()
-            );
+    let table = builder
+        .build()
+        .with(Style::blank())
+        .with(
+            Modify::new(Rows::first()).with(tabled::settings::Format::content(|s| {
+                format!("{}", style(s).bold().underlined())
+            })),
+        )
+        .with(Modify::new(Columns::new(..)).with(Alignment::left()))
+        .to_string();
+
+    println!();
+    for line in table.lines() {
+        println!("  {line}");
+    }
+
+    for result in results {
+        if result.is_drifted() {
+            for drift in &result.security_drifts {
+                println!(
+                    "    - {}: expected {}, got {}",
+                    drift.field,
+                    style(&drift.expected).green(),
+                    style(&drift.actual).red()
+                );
+            }
+            for drift in &result.protection_drifts {
+                println!(
+                    "    - {}: expected {}, got {}",
+                    drift.field,
+                    style(&drift.expected).green(),
+                    style(&drift.actual).red()
+                );
+            }
         }
     }
 

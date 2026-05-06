@@ -464,14 +464,13 @@ async fn audit(
         style("[..]").bold(),
         repos.len()
     );
-    println!();
-    println!(
-        "  {:40} {:10} {:14} {}",
-        style("Repository").bold().underlined(),
-        style("Type").bold().underlined(),
-        style("Review Rule").bold().underlined(),
-        style("Instructions").bold().underlined(),
-    );
+
+    use tabled::builder::Builder;
+    use tabled::settings::object::{Columns, Rows};
+    use tabled::settings::{Alignment, Modify, Style};
+
+    let mut builder = Builder::default();
+    builder.push_record(["Repository", "Type", "Review Rule", "Instructions"]);
 
     let mut all_ok = 0;
     let mut issues = 0;
@@ -498,10 +497,23 @@ async fn audit(
             issues += 1;
         }
 
-        println!(
-            "  {:40} {:10} {:14} {}",
-            repo_name, repo_type, ruleset_icon, instr_icon
-        );
+        builder.push_record([repo_name.as_str(), repo_type, &ruleset_icon, &instr_icon]);
+    }
+
+    let table = builder
+        .build()
+        .with(Style::blank())
+        .with(
+            Modify::new(Rows::first()).with(tabled::settings::Format::content(|s| {
+                format!("{}", style(s).bold().underlined())
+            })),
+        )
+        .with(Modify::new(Columns::new(..)).with(Alignment::left()))
+        .to_string();
+
+    println!();
+    for line in table.lines() {
+        println!("  {line}");
     }
 
     println!();
