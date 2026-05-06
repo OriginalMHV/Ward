@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-06
+
+### Fixed
+
+- `rustfmt` formatting in security.rs (CI was failing)
+
+### Changed
+
+- README: removed all badges (cleaner look, less maintenance)
+- Deleted `update-loc.yml` workflow (no longer needed without LOC badge)
+- CLAUDE.md: complete rewrite with full architecture, setup guide, and AI assistance context
+- CONTRIBUTING.md: updated test count (250+)
+- docs/architecture.md: fixed stale path reference
+
 ## [0.4.0] - 2026-05-04
 
 ### Added
@@ -99,7 +113,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JSON lines audit trail logged to `~/.ward/audit.log`
 - Custom template support via `~/.ward/templates/` directory
 
-[Unreleased]: https://github.com/OriginalMHV/Ward/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/OriginalMHV/Ward/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/OriginalMHV/Ward/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/OriginalMHV/Ward/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/OriginalMHV/Ward/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/OriginalMHV/Ward/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/OriginalMHV/Ward/compare/v0.1.0...v0.2.0
