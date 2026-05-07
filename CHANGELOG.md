@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-05-07
+
+### Fixed
+
+- All CLI table output now uses ANSI-aware column rendering (`tabled` with `ansi` feature), fixing column alignment skewing caused by ANSI escape codes in colored icons
+
 ## [0.4.1] - 2026-05-06
 
 ### Fixed
@@ -114,6 +120,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Custom template support via `~/.ward/templates/` directory
 
 [Unreleased]: https://github.com/OriginalMHV/Ward/compare/v0.4.1...HEAD
+[0.4.2]: https://github.com/OriginalMHV/Ward/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/OriginalMHV/Ward/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/OriginalMHV/Ward/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/OriginalMHV/Ward/compare/v0.2.1...v0.3.0
