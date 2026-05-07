@@ -689,6 +689,11 @@ fn truncate_cell(value: &str, width: usize) -> String {
 mod tests {
     use super::*;
 
+    fn strip_ansi(s: &str) -> String {
+        let re = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
+        re.replace_all(s, "").to_string()
+    }
+
     #[test]
     fn test_extract_spring_boot_version() {
         assert_eq!(
@@ -778,6 +783,108 @@ mod tests {
         assert_eq!(
             framework_summary(&versions),
             "spring-boot 3.5.6, next.js ^14.2.3"
+        );
+    }
+
+    #[test]
+    fn test_truncate_cell_within_limit() {
+        assert_eq!(truncate_cell("short", 10), "short");
+        assert_eq!(truncate_cell("exactly10!", 10), "exactly10!");
+    }
+
+    #[test]
+    fn test_truncate_cell_exceeds_limit() {
+        assert_eq!(truncate_cell("this is too long", 10), "this is...");
+        assert_eq!(truncate_cell("abcdefghijklmnop", 8), "abcde...");
+    }
+
+    #[test]
+    fn test_truncate_cell_edge_cases() {
+        assert_eq!(truncate_cell("abc", 3), "abc");
+        assert_eq!(truncate_cell("abcd", 3), "...");
+        assert_eq!(truncate_cell("", 5), "");
+    }
+
+    #[test]
+    fn test_table_columns_align_with_ansi_codes() {
+        use tabled::builder::Builder;
+        use tabled::settings::object::Columns;
+        use tabled::settings::{Alignment, Modify, Style};
+
+        let ok = format!("{}", console::style("[ok]").green());
+        let fail = format!("{}", console::style("[!!]").red());
+
+        let mut builder = Builder::default();
+        builder.push_record(["Name", "Status", "Value"]);
+        builder.push_record(["short", &ok, "100"]);
+        builder.push_record(["a-very-long-repository-name", &fail, "0"]);
+        builder.push_record(["medium-name", &ok, "42"]);
+
+        let table = builder
+            .build()
+            .with(Style::blank())
+            .with(Modify::new(Columns::new(..)).with(Alignment::left()))
+            .to_string();
+
+        let lines: Vec<&str> = table.lines().collect();
+        assert!(lines.len() >= 4, "should have header + 3 data rows");
+
+        // Verify all lines produce consistent visible widths per column.
+        // The ansi feature ensures that ANSI escapes don't inflate column width.
+        // Strip ANSI and check that the plain-text column positions are consistent.
+        let stripped: Vec<String> = lines.iter().copied().map(strip_ansi).collect();
+        let header_len = stripped[0].len();
+
+        for (i, line) in stripped.iter().enumerate().skip(1) {
+            assert_eq!(
+                line.len(),
+                header_len,
+                "row {i} visible width ({}) != header width ({header_len}): '{line}'",
+                line.len()
+            );
+        }
+    }
+
+    #[test]
+    fn test_table_handles_empty_data() {
+        use tabled::builder::Builder;
+        use tabled::settings::Style;
+
+        let mut builder = Builder::default();
+        builder.push_record(["Name", "Status"]);
+        // No data rows
+
+        let table = builder.build().with(Style::blank()).to_string();
+        let lines: Vec<&str> = table.lines().collect();
+        assert_eq!(lines.len(), 1, "header-only table should have 1 line");
+    }
+
+    #[test]
+    fn test_table_handles_long_repo_names() {
+        use tabled::builder::Builder;
+        use tabled::settings::object::Columns;
+        use tabled::settings::{Alignment, Modify, Style};
+
+        let long_name = "s07439-party-customer-service-operations-extremely-long-name";
+        let ok = format!("{}", console::style("[ok]").green());
+
+        let mut builder = Builder::default();
+        builder.push_record(["Repository", "Status"]);
+        builder.push_record([long_name, &ok]);
+        builder.push_record(["short", &ok]);
+
+        let table = builder
+            .build()
+            .with(Style::blank())
+            .with(Modify::new(Columns::new(..)).with(Alignment::left()))
+            .to_string();
+
+        let stripped: Vec<String> = table.lines().map(strip_ansi).collect();
+        // All rows should still have the same visible width (padded to longest)
+        let widths: Vec<usize> = stripped.iter().map(|l| l.len()).collect();
+        assert!(
+            widths.windows(2).all(|w| w[0] == w[1]),
+            "all rows should have same visible width, got: {widths:?}"
         );
     }
 }
