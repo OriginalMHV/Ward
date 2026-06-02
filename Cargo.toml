@@ -44,7 +44,7 @@ tera = "1"
 rust-embed = "8"
 
 # Output formatting
-tabled = { version = "0.20", features = ["ansi"] }
+tabled = { version = "0.21", features = ["ansi"] }
 console = "0.16"
 indicatif = "0.18"
 # TUI
