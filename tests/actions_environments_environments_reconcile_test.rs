@@ -13,6 +13,7 @@ use ward::config::manifest::{
     ReferencedResourceConfig, ReferencedResourceType, SecretPlaceholderConfig,
 };
 use ward::github::Client;
+use ward::github::environments::DeploymentBranchPolicySummary;
 use ward::reconcile::actions_environments::{
     IssueSeverity, apply_environments_plan, collect_environments_category,
     plan_environments_category, verify_environments_category,
@@ -1103,5 +1104,393 @@ async fn reconcile_snapshot_preserves_desired_policy() {
         collected.category.policy,
         managed_policy(true),
         "the collected snapshot must preserve the caller's desired policy, not reset it"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Deployment branch/tag policy: an omitted `protected_branches` combined with
+// `custom_branch_policies = true` must plan a settings update that resolves
+// `protected_branches` to `false`, and that update must be applied before any
+// branch/tag pattern is created (GitHub rejects patterns until custom policies
+// are enabled).
+// ---------------------------------------------------------------------------
+
+/// Mount empty protection-rule/variable/secret sub-resources but NOT
+/// `deployment-branch-policies`, which pattern/prune tests mount with an
+/// explicit body.
+async fn mount_empty_non_branch_subresources(server: &MockServer, repo: &str, env: &str) {
+    for (suffix, body) in [
+        (
+            "deployment_protection_rules",
+            json!({"custom_deployment_protection_rules": []}),
+        ),
+        ("variables", json!({"variables": []})),
+        ("secrets", json!({"secrets": []})),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/repos/test-org/{repo}/environments/{env}/{suffix}"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(server)
+            .await;
+    }
+}
+
+#[tokio::test]
+async fn omitted_protected_branches_with_custom_plans_and_orders_settings_before_patterns() {
+    let server = MockServer::start().await;
+    // The environment currently restricts deploys to protected branches only.
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/my-repo/environments"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "environments": [{
+                "name": "production",
+                "deployment_branch_policy": {"protected_branches": true, "custom_branch_policies": false},
+                "protection_rules": []
+            }]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/repos/test-org/my-repo/environments/production/deployment-branch-policies",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"branch_policies": []})))
+        .mount(&server)
+        .await;
+    mount_empty_non_branch_subresources(&server, "my-repo", "production").await;
+    Mock::given(method("PUT"))
+        .and(path("/repos/test-org/my-repo/environments/production"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "name": "production",
+            "protection_rules": []
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(
+            "/repos/test-org/my-repo/environments/production/deployment-branch-policies",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 1,
+            "name": "release/*",
+            "type": "branch"
+        })))
+        .mount(&server)
+        .await;
+
+    let desired = EnvironmentsCategoryV2 {
+        policy: managed_policy(false),
+        entries: vec![EnvironmentConfigV2 {
+            name: "production".to_owned(),
+            deployment_policy: Some(EnvironmentDeploymentPolicyConfig {
+                protected_branches: None,
+                custom_branch_policies: Some(true),
+                branch_patterns: vec!["release/*".to_owned()],
+                tag_patterns: vec![],
+            }),
+            ..Default::default()
+        }],
+    };
+
+    let client = client(&server);
+    let collected = collect_environments_category(&client, "my-repo", Some(&desired))
+        .await
+        .unwrap();
+    let plan = plan_environments_category(&desired, &collected);
+
+    let settings = plan.environment_plans[0]
+        .settings_change
+        .as_ref()
+        .expect("omitted protected_branches with custom=true must still plan a settings update");
+    assert_eq!(
+        settings.deployment_branch_policy,
+        Some(DeploymentBranchPolicySummary {
+            protected_branches: false,
+            custom_branch_policies: true,
+        }),
+        "custom_branch_policies=true with omitted protected_branches must resolve to protected_branches=false"
+    );
+    assert_eq!(
+        plan.environment_plans[0].branch_policy_creates,
+        vec![("release/*".to_owned(), "branch".to_owned())]
+    );
+
+    let result = apply_environments_plan(&client, "my-repo", &plan)
+        .await
+        .unwrap();
+    assert!(
+        result.issues.is_empty(),
+        "unexpected issues: {:?}",
+        result.issues
+    );
+
+    // The environment settings PUT (which enables custom_branch_policies) must
+    // precede the branch-policy POST, or GitHub rejects the pattern.
+    let requests = server.received_requests().await.unwrap();
+    let put_index = requests.iter().position(|request| {
+        request.method.as_str() == "PUT"
+            && request.url.path() == "/repos/test-org/my-repo/environments/production"
+    });
+    let post_index = requests.iter().position(|request| {
+        request.method.as_str() == "POST"
+            && request.url.path()
+                == "/repos/test-org/my-repo/environments/production/deployment-branch-policies"
+    });
+    assert!(
+        matches!((put_index, post_index), (Some(put), Some(post)) if put < post),
+        "settings PUT must precede the branch-policy POST (put={put_index:?}, post={post_index:?})"
+    );
+}
+
+#[tokio::test]
+async fn omitted_protected_branches_custom_policy_converges_once_applied() {
+    let server = MockServer::start().await;
+    // The post-apply state: custom policies enabled and the pattern present.
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/my-repo/environments"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "environments": [{
+                "name": "production",
+                "deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true},
+                "protection_rules": []
+            }]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/repos/test-org/my-repo/environments/production/deployment-branch-policies",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "branch_policies": [{"id": 1, "name": "release/*", "type": "branch"}]
+        })))
+        .mount(&server)
+        .await;
+    mount_empty_non_branch_subresources(&server, "my-repo", "production").await;
+
+    let desired = EnvironmentsCategoryV2 {
+        policy: managed_policy(false),
+        entries: vec![EnvironmentConfigV2 {
+            name: "production".to_owned(),
+            deployment_policy: Some(EnvironmentDeploymentPolicyConfig {
+                protected_branches: None,
+                custom_branch_policies: Some(true),
+                branch_patterns: vec!["release/*".to_owned()],
+                tag_patterns: vec![],
+            }),
+            ..Default::default()
+        }],
+    };
+
+    let result = verify_environments_category(&client(&server), "my-repo", &desired)
+        .await
+        .unwrap();
+    assert!(
+        result.compliant,
+        "expected convergence with omitted protected_branches, plan: {:?}",
+        result.plan
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Deployment branch/tag policy prune: with `policy.prune = true`, current
+// patterns absent from desired are deleted, matched by both type and name via
+// the numeric GitHub ids retained in collection state. Prune must never fire
+// when disabled or when the branch-policy listing was incompletely observed.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn prune_deletes_branch_and_tag_patterns_absent_from_desired() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/my-repo/environments"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "environments": [{
+                "name": "production",
+                "deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true},
+                "protection_rules": []
+            }]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/repos/test-org/my-repo/environments/production/deployment-branch-policies",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "branch_policies": [
+                {"id": 10, "name": "main", "type": "branch"},
+                {"id": 11, "name": "legacy", "type": "branch"},
+                {"id": 12, "name": "v1.0", "type": "tag"},
+                {"id": 13, "name": "release", "type": "tag"},
+                {"id": 14, "name": "release", "type": "branch"}
+            ]
+        })))
+        .mount(&server)
+        .await;
+    mount_empty_non_branch_subresources(&server, "my-repo", "production").await;
+    for id in [11, 13] {
+        Mock::given(method("DELETE"))
+            .and(path(format!(
+                "/repos/test-org/my-repo/environments/production/deployment-branch-policies/{id}"
+            )))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+    }
+
+    let desired = EnvironmentsCategoryV2 {
+        policy: managed_policy(true),
+        entries: vec![EnvironmentConfigV2 {
+            name: "production".to_owned(),
+            deployment_policy: Some(EnvironmentDeploymentPolicyConfig {
+                protected_branches: Some(false),
+                custom_branch_policies: Some(true),
+                branch_patterns: vec!["main".to_owned(), "release".to_owned()],
+                tag_patterns: vec!["v1.0".to_owned()],
+            }),
+            ..Default::default()
+        }],
+    };
+
+    let client = client(&server);
+    let collected = collect_environments_category(&client, "my-repo", Some(&desired))
+        .await
+        .unwrap();
+    let plan = plan_environments_category(&desired, &collected);
+
+    let mut deletes = plan.environment_plans[0].branch_policy_deletes.clone();
+    deletes.sort_unstable();
+    assert_eq!(
+        deletes,
+        vec![11, 13],
+        "prune must delete branch `legacy` (11) and tag `release` (13) while keeping branch `release` (14)"
+    );
+    assert!(
+        plan.environment_plans[0].branch_policy_creates.is_empty(),
+        "no creates expected: {:?}",
+        plan.environment_plans[0].branch_policy_creates
+    );
+
+    let result = apply_environments_plan(&client, "my-repo", &plan)
+        .await
+        .unwrap();
+    assert!(
+        result.issues.is_empty(),
+        "unexpected issues: {:?}",
+        result.issues
+    );
+}
+
+#[tokio::test]
+async fn prune_disabled_keeps_patterns_absent_from_desired() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/my-repo/environments"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "environments": [{
+                "name": "production",
+                "deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true},
+                "protection_rules": []
+            }]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/repos/test-org/my-repo/environments/production/deployment-branch-policies",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "branch_policies": [
+                {"id": 10, "name": "main", "type": "branch"},
+                {"id": 11, "name": "legacy", "type": "branch"}
+            ]
+        })))
+        .mount(&server)
+        .await;
+    mount_empty_non_branch_subresources(&server, "my-repo", "production").await;
+
+    let desired = EnvironmentsCategoryV2 {
+        policy: managed_policy(false),
+        entries: vec![EnvironmentConfigV2 {
+            name: "production".to_owned(),
+            deployment_policy: Some(EnvironmentDeploymentPolicyConfig {
+                protected_branches: Some(false),
+                custom_branch_policies: Some(true),
+                branch_patterns: vec!["main".to_owned()],
+                tag_patterns: vec![],
+            }),
+            ..Default::default()
+        }],
+    };
+
+    let collected = collect_environments_category(&client(&server), "my-repo", Some(&desired))
+        .await
+        .unwrap();
+    let plan = plan_environments_category(&desired, &collected);
+    assert!(
+        plan.environment_plans[0].branch_policy_deletes.is_empty(),
+        "prune=false must not delete patterns: {:?}",
+        plan.environment_plans[0].branch_policy_deletes
+    );
+}
+
+#[tokio::test]
+async fn incomplete_branch_policy_collection_never_prunes_patterns() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/my-repo/environments"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "environments": [{
+                "name": "production",
+                "deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true},
+                "protection_rules": []
+            }]
+        })))
+        .mount(&server)
+        .await;
+    // The branch-policy listing is permission-denied: an incomplete observation
+    // that must never be treated as an authoritative "current patterns" set.
+    Mock::given(method("GET"))
+        .and(path(
+            "/repos/test-org/my-repo/environments/production/deployment-branch-policies",
+        ))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({
+            "message": "Must have admin rights to Repository."
+        })))
+        .mount(&server)
+        .await;
+    mount_empty_non_branch_subresources(&server, "my-repo", "production").await;
+
+    let desired = EnvironmentsCategoryV2 {
+        policy: managed_policy(true),
+        entries: vec![EnvironmentConfigV2 {
+            name: "production".to_owned(),
+            deployment_policy: Some(EnvironmentDeploymentPolicyConfig {
+                protected_branches: Some(false),
+                custom_branch_policies: Some(true),
+                branch_patterns: vec!["main".to_owned()],
+                tag_patterns: vec![],
+            }),
+            ..Default::default()
+        }],
+    };
+
+    let collected = collect_environments_category(&client(&server), "my-repo", Some(&desired))
+        .await
+        .unwrap();
+    assert!(
+        !collected
+            .deployment_policies_observed
+            .contains("production"),
+        "a coverage-gapped branch-policy read must not mark the environment as fully observed"
+    );
+    let plan = plan_environments_category(&desired, &collected);
+    assert!(
+        plan.environment_plans[0].branch_policy_deletes.is_empty(),
+        "prune must be skipped when the branch-policy listing was incomplete: {:?}",
+        plan.environment_plans[0].branch_policy_deletes
     );
 }

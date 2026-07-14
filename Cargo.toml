@@ -44,7 +44,7 @@ tera = "1"
 rust-embed = "8"
 
 # Output formatting
-tabled = { version = "0.20", features = ["ansi"] }
+tabled = { version = "0.20", default-features = false, features = ["ansi"] }
 console = "0.16"
 indicatif = "0.18"
 
@@ -60,9 +60,6 @@ regex = "1"
 
 # Time
 chrono = { version = "0.4", features = ["serde"] }
-
-# Cache directory resolution
-dirs = "6"
 
 # Glob pattern matching for repo overrides
 glob-match = "0.2"

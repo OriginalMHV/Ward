@@ -1846,6 +1846,16 @@ pub struct EnvironmentsCollection {
     /// `plan_environments_category` can detect prune candidates that were
     /// filtered out of `category.entries` for collection efficiency.
     pub observed_names: Vec<String>,
+    /// Numeric GitHub ids for observed deployment branch/tag policy patterns,
+    /// keyed by `(environment, policy_type, pattern_name)` where `policy_type`
+    /// is `"branch"` or `"tag"`. Retained only in collection state so prune
+    /// can delete a pattern by id while the manifest itself stays free of
+    /// volatile GitHub ids.
+    pub deployment_policy_ids: BTreeMap<(String, String, String), u64>,
+    /// Environments whose deployment-branch-policy listing was fully read
+    /// (no 403/404/422 coverage gap). Only these are eligible for pattern
+    /// prune; an incomplete read must never trigger deletions.
+    pub deployment_policies_observed: std::collections::BTreeSet<String>,
     pub coverage: Vec<CoverageEntry>,
     pub issues: Vec<ReconcileIssue>,
 }
@@ -1910,6 +1920,9 @@ pub async fn collect_environments_category(
 ) -> Result<EnvironmentsCollection> {
     let mut issues = Vec::new();
     let mut coverage = Vec::new();
+    let mut deployment_policy_ids: BTreeMap<(String, String, String), u64> = BTreeMap::new();
+    let mut deployment_policies_observed: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
 
     // A collected/observed snapshot must carry a sensible policy: preserve
     // the caller's `desired.policy` when reconciling against a manifest, or
@@ -1937,6 +1950,8 @@ pub async fn collect_environments_category(
                     ..EnvironmentsCategoryV2::default()
                 },
                 observed_names: Vec::new(),
+                deployment_policy_ids: BTreeMap::new(),
+                deployment_policies_observed: std::collections::BTreeSet::new(),
                 coverage,
                 issues,
             });
@@ -1985,14 +2000,31 @@ pub async fn collect_environments_category(
                     )
                 })?,
         ) {
+            // A complete read (even an empty one) makes this environment
+            // eligible for pattern prune; a coverage-gapped read must not.
+            deployment_policies_observed.insert(env.name.clone());
             if !branch_policies.is_empty() {
                 let policy = deployment_policy
                     .get_or_insert_with(EnvironmentDeploymentPolicyConfig::default);
                 for branch_policy in &branch_policies {
-                    match branch_policy.policy_type.as_str() {
-                        "tag" => policy.tag_patterns.push(branch_policy.name.clone()),
-                        _ => policy.branch_patterns.push(branch_policy.name.clone()),
-                    }
+                    let policy_type = match branch_policy.policy_type.as_str() {
+                        "tag" => {
+                            policy.tag_patterns.push(branch_policy.name.clone());
+                            "tag"
+                        }
+                        _ => {
+                            policy.branch_patterns.push(branch_policy.name.clone());
+                            "branch"
+                        }
+                    };
+                    deployment_policy_ids.insert(
+                        (
+                            env.name.clone(),
+                            policy_type.to_owned(),
+                            branch_policy.name.clone(),
+                        ),
+                        branch_policy.id,
+                    );
                 }
             }
         }
@@ -2088,6 +2120,8 @@ pub async fn collect_environments_category(
     Ok(EnvironmentsCollection {
         category: EnvironmentsCategoryV2 { policy, entries },
         observed_names: observed.iter().map(|env| env.name.clone()).collect(),
+        deployment_policy_ids,
+        deployment_policies_observed,
         coverage,
         issues: std::mem::take(&mut issues),
     })
@@ -2226,11 +2260,22 @@ pub fn plan_environments_category(
                 })
             });
 
+        // A settings update is warranted whenever either branch-policy flag
+        // is explicitly set. GitHub treats `protected_branches` and
+        // `custom_branch_policies` as mutually exclusive, so an omitted
+        // `protected_branches` defaults to `false`. This matters when
+        // `custom_branch_policies = true` is set without `protected_branches`:
+        // the environment must first be updated to `{protected_branches:
+        // false, custom_branch_policies: true}` before any custom pattern can
+        // be created.
         let wanted_branch_policy_summary = wanted.deployment_policy.as_ref().and_then(|policy| {
-            Some(DeploymentBranchPolicySummary {
-                protected_branches: policy.protected_branches?,
-                custom_branch_policies: policy.custom_branch_policies.unwrap_or(false),
-            })
+            match (policy.protected_branches, policy.custom_branch_policies) {
+                (None, None) => None,
+                (protected, custom) => Some(DeploymentBranchPolicySummary {
+                    protected_branches: protected.unwrap_or(false),
+                    custom_branch_policies: custom.unwrap_or(false),
+                }),
+            }
         });
 
         let wait_timer_changed = plan.create
@@ -2287,6 +2332,54 @@ pub fn plan_environments_category(
                     if !current_tag_patterns.contains(&pattern.as_str()) {
                         plan.branch_policy_creates
                             .push((pattern.clone(), "tag".to_owned()));
+                    }
+                }
+            }
+        }
+
+        // Prune current branch/tag patterns that are absent from desired.
+        // Requires a complete observation of this environment's
+        // deployment-branch-policy listing: a coverage-gapped read must never
+        // delete. Patterns are matched by both type and name, resolved to the
+        // numeric GitHub id retained in collection state.
+        if desired.policy.prune
+            && actual
+                .deployment_policies_observed
+                .contains(wanted.name.as_str())
+        {
+            let desired_branch_patterns: std::collections::BTreeSet<&str> = wanted
+                .deployment_policy
+                .as_ref()
+                .map(|policy| policy.branch_patterns.iter().map(String::as_str).collect())
+                .unwrap_or_default();
+            let desired_tag_patterns: std::collections::BTreeSet<&str> = wanted
+                .deployment_policy
+                .as_ref()
+                .map(|policy| policy.tag_patterns.iter().map(String::as_str).collect())
+                .unwrap_or_default();
+
+            if let Some(current_policy) =
+                current.and_then(|current| current.deployment_policy.as_ref())
+            {
+                for (patterns, policy_type, desired_patterns) in [
+                    (
+                        &current_policy.branch_patterns,
+                        "branch",
+                        &desired_branch_patterns,
+                    ),
+                    (&current_policy.tag_patterns, "tag", &desired_tag_patterns),
+                ] {
+                    for name in patterns {
+                        if desired_patterns.contains(name.as_str()) {
+                            continue;
+                        }
+                        if let Some(id) = actual.deployment_policy_ids.get(&(
+                            wanted.name.clone(),
+                            policy_type.to_owned(),
+                            name.clone(),
+                        )) {
+                            plan.branch_policy_deletes.push(*id);
+                        }
                     }
                 }
             }

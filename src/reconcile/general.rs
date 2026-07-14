@@ -890,6 +890,14 @@ pub fn plan_with_options(
 }
 
 pub async fn apply(client: &Client, plan: &GeneralPlan) -> Result<GeneralVerification> {
+    if plan.has_blocked_changes() {
+        bail!(
+            "General settings plan for {} is blocked by {} change(s)",
+            plan.repo,
+            plan.blocked_changes.len()
+        );
+    }
+
     if let Some(branch) = plan
         .rest_patch
         .as_object()

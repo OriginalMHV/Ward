@@ -180,6 +180,40 @@ async fn apply_blocks_when_default_branch_does_not_exist() {
     assert!(error.to_string().contains("branch does not exist"));
 }
 
+#[tokio::test]
+async fn apply_rejects_mixed_blocked_and_actionable_plan_before_writing() {
+    let current = current_state();
+    let desired = GeneralDesiredState {
+        repository: RepositoryCategoryV2 {
+            policy: CategoryPolicy::managed(),
+            settings: Some(RepositorySettingsConfig {
+                has_issues: Some(false),
+                ..RepositorySettingsConfig::default()
+            }),
+            metadata: Some(RepositoryMetadataConfig {
+                visibility: Some("private".to_owned()),
+                ..RepositoryMetadataConfig::default()
+            }),
+            custom_properties: Vec::new(),
+            immutable_releases: None,
+            references: Vec::new(),
+        },
+        labels: Vec::new(),
+        custom_properties: Vec::new(),
+        extensions: Default::default(),
+    };
+    let planned = plan("my-repo", &desired, &current);
+    assert!(planned.has_actionable_changes());
+    assert!(planned.has_blocked_changes());
+
+    let server = MockServer::start().await;
+    let client = Client::new_for_test("test-org", &server.uri());
+    let error = apply(&client, &planned).await.unwrap_err();
+
+    assert!(error.to_string().contains("blocked"));
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
 #[test]
 fn immutable_releases_enforced_by_owner_are_reference_only() {
     let mut current = current_state();

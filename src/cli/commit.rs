@@ -63,14 +63,14 @@ impl CommitCommand {
                 plan_managed_files(client, manifest, system, repo).await
             }
             CommitAction::Apply { template, yes } => {
+                crate::reconcile::unified::guard_legacy_mutation(
+                    manifest,
+                    crate::reconcile::unified::Category::Files,
+                    "commit apply",
+                )?;
                 if let Some(template) = template {
                     apply(client, manifest, system, repo, template, *yes).await
                 } else {
-                    crate::reconcile::unified::guard_legacy_mutation(
-                        manifest,
-                        crate::reconcile::unified::Category::Files,
-                        "commit apply",
-                    )?;
                     apply_managed_files(client, manifest, system, repo, *yes).await
                 }
             }
@@ -460,8 +460,16 @@ async fn apply_managed_files(
             style(failed.len()).red().bold()
         }
     );
-    for (repo, error) in failed {
+    for (repo, error) in &failed {
         println!("    {} {repo}: {error}", style("[!!]").red());
+    }
+
+    if !failed.is_empty() {
+        anyhow::bail!(
+            "{} of {} repositories failed during commit apply",
+            failed.len(),
+            succeeded + failed.len()
+        );
     }
 
     Ok(())
@@ -475,7 +483,7 @@ async fn commit_managed_files_and_pr(
     let branch = &manifest.templates.branch;
     let prefix = &manifest.templates.commit_message_prefix;
     client
-        .create_branch(&plan.repo_name, branch, &plan.default_branch)
+        .ensure_dedicated_branch(&plan.repo_name, branch, &plan.default_branch)
         .await?;
     client
         .create_commit(
@@ -768,6 +776,14 @@ async fn apply(
         audit_log.path().display()
     );
 
+    if !failed.is_empty() {
+        anyhow::bail!(
+            "{} of {} repositories failed during commit apply",
+            failed.len(),
+            succeeded + failed.len()
+        );
+    }
+
     Ok(())
 }
 
@@ -796,9 +812,10 @@ async fn commit_and_pr(params: &CommitPrParams<'_>) -> Result<String> {
         commit_prefix,
     } = params;
 
-    // Create branch from default branch
+    // Ensure the dedicated branch is ready (created, preserved when an open PR
+    // tracks it, or refreshed to the default head when stale).
     client
-        .create_branch(repo, branch_name, default_branch)
+        .ensure_dedicated_branch(repo, branch_name, default_branch)
         .await?;
 
     // Commit the file

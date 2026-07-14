@@ -789,11 +789,8 @@ fn normalize_environment_placeholders(category: &mut EnvironmentsCategoryV2) {
 
 fn normalize_integration_placeholders(category: &mut RepositoryIntegrationsCategoryV2) {
     for (index, webhook) in category.webhooks.iter_mut().enumerate() {
-        if webhook.url_from.is_some() {
-            normalize_external_value(
-                webhook.url_from.as_mut().expect("url_from checked"),
-                format!("WARD_WEBHOOK_URL_{}", index + 1),
-            );
+        if let Some(url_from) = webhook.url_from.as_mut() {
+            normalize_external_value(url_from, format!("WARD_WEBHOOK_URL_{}", index + 1));
         }
         if let Some(secret) = webhook.secret.as_mut() {
             normalize_external_value(secret, format!("WARD_WEBHOOK_SECRET_{}", index + 1));

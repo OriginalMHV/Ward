@@ -112,14 +112,14 @@ impl SetupCommand {
                 println!(
                     "\r  {} Repository found: {}         ",
                     style("✓").green(),
-                    &repo_name
+                    repo_name
                 );
             }
             Err(_) => {
                 println!(
                     "\r  {} Repository not found: {}         ",
                     style("✗").red(),
-                    &repo_name
+                    repo_name
                 );
                 println!();
                 println!(
@@ -196,7 +196,7 @@ impl SetupCommand {
                 println!(
                     "  {} Rulesets: configured in ward.toml — run {} to preview",
                     style("ℹ").blue(),
-                    style(format!("ward rulesets plan --repo {}", &repo_name)).cyan()
+                    style(format!("ward rulesets plan --repo {}", repo_name)).cyan()
                 );
             } else {
                 println!(
@@ -220,7 +220,7 @@ impl SetupCommand {
                 "      Then: {}",
                 style(format!(
                     "ward commit plan --repo {} --template <name>",
-                    &repo_name
+                    repo_name
                 ))
                 .cyan()
             );
@@ -261,7 +261,7 @@ impl SetupCommand {
                 println!();
                 println!(
                     "  No changes made. Run {} when ready.",
-                    style(format!("ward security apply --repo {}", &repo_name)).cyan()
+                    style(format!("ward security apply --repo {}", repo_name)).cyan()
                 );
             }
         }
@@ -276,12 +276,12 @@ impl SetupCommand {
             println!(
                 "    {} ward rulesets plan --repo {}     (preview branch rules)",
                 style("1.").cyan(),
-                &repo_name
+                repo_name
             );
             println!(
                 "    {} ward rulesets apply --repo {}    (apply when happy)",
                 style("2.").cyan(),
-                &repo_name
+                repo_name
             );
         }
 
@@ -293,7 +293,7 @@ impl SetupCommand {
             println!(
                 "    {} ward commit plan --repo {} --template X  (preview file commit)",
                 style("4.").cyan(),
-                &repo_name
+                repo_name
             );
         }
 

@@ -630,15 +630,6 @@ pub fn plan_security_category(
         && desired.policy.prune;
 
     if desired.configuration_reference.is_some() || detaching_existing_configuration {
-        if !desired.policy.sensitive {
-            issues.push(blocker_issue(
-                Some(SECURITY_ATTACHED_CONFIGURATION_PATH.to_owned()),
-                "security-sensitive-gate",
-                "Changing code security configuration attachments requires policy.sensitive = true"
-                    .to_owned(),
-            ));
-        }
-
         if let Some(reference) = &desired.configuration_reference {
             if let Some(configuration) =
                 actual
@@ -677,6 +668,16 @@ pub fn plan_security_category(
             }
         } else if detaching_existing_configuration {
             detach_configuration = true;
+        }
+
+        if (attach_configuration_id.is_some() || detach_configuration) && !desired.policy.sensitive
+        {
+            issues.push(blocker_issue(
+                Some(SECURITY_ATTACHED_CONFIGURATION_PATH.to_owned()),
+                "security-sensitive-gate",
+                "Changing code security configuration attachments requires policy.sensitive = true"
+                    .to_owned(),
+            ));
         }
 
         if desired.settings.is_some()
@@ -1347,19 +1348,49 @@ pub async fn apply_rulesets_plan(
     }
 
     let mut applied_steps = Vec::new();
-    let role_lookup = repository_role_lookup(
-        &client
-            .list_ruleset_custom_repository_roles()
+    let requires_role_lookup = plan.actions.iter().any(|action| {
+        matches!(
+            action,
+            RulesetPlanAction::Create { ruleset } | RulesetPlanAction::Update { ruleset, .. }
+                if ruleset
+                    .bypass_actors
+                    .iter()
+                    .any(|actor| matches!(&actor.actor, ActorReference::Role { .. }))
+        )
+    });
+    let requires_app_lookup = plan.actions.iter().any(|action| {
+        matches!(
+            action,
+            RulesetPlanAction::Create { ruleset } | RulesetPlanAction::Update { ruleset, .. }
+                if ruleset
+                    .bypass_actors
+                    .iter()
+                    .any(|actor| matches!(&actor.actor, ActorReference::App { .. }))
+        )
+    });
+    let role_lookup = if requires_role_lookup {
+        repository_role_lookup(
+            &client
+                .list_ruleset_custom_repository_roles()
+                .await
+                .context(
+                    "Failed to resolve repository roles required by ruleset create/update actions",
+                )?,
+        )
+    } else {
+        repository_role_lookup(&[])
+    };
+    let app_lookup: HashMap<String, u64> = if requires_app_lookup {
+        client
+            .list_org_installations()
             .await
-            .unwrap_or_default(),
-    );
-    let app_lookup: HashMap<String, u64> = client
-        .list_org_installations()
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|app| (app.app_slug, app.app_id))
-        .collect();
+            .context("Failed to resolve installed apps required by ruleset create/update actions")?
+            .into_iter()
+            .map(|app| (app.app_slug, app.app_id))
+            .collect()
+    } else {
+        HashMap::new()
+    };
 
     for action in &plan.actions {
         match action {

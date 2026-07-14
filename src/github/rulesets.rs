@@ -76,6 +76,8 @@ pub struct GitHubUser {
 #[derive(Debug, Deserialize)]
 struct InstallationsResponse {
     #[serde(default)]
+    total_count: Option<usize>,
+    #[serde(default)]
     installations: Vec<InstalledApp>,
 }
 
@@ -175,19 +177,51 @@ impl Client {
     pub async fn list_ruleset_custom_repository_roles(
         &self,
     ) -> Result<Vec<RulesetCustomRepositoryRole>> {
-        let path = format!("/orgs/{}/custom-repository-roles", self.org);
-        response::expect_json(self.get(&path).await?, "GET", &path)
+        self.list_custom_repository_roles()
             .await
-            .context("Failed to parse custom repository roles response")
+            .map(|roles| {
+                roles
+                    .into_iter()
+                    .map(|role| RulesetCustomRepositoryRole {
+                        id: role.id,
+                        name: role.name,
+                    })
+                    .collect()
+            })
+            .context("Failed to list custom repository roles for ruleset actor resolution")
     }
 
     pub async fn list_org_installations(&self) -> Result<Vec<InstalledApp>> {
-        let path = format!("/orgs/{}/installations", self.org);
-        let response: InstallationsResponse =
-            response::expect_json(self.get(&path).await?, "GET", &path)
-                .await
-                .context("Failed to parse organization installations response")?;
-        Ok(response.installations)
+        let mut page = pagination::Page::default();
+        let mut installations = Vec::new();
+
+        loop {
+            let path = format!(
+                "/orgs/{}/installations?per_page={}&page={}",
+                self.org, page.per_page, page.number
+            );
+            let payload: InstallationsResponse =
+                response::expect_json(self.get(&path).await?, "GET", &path)
+                    .await
+                    .context("Failed to parse organization installations response")?;
+            let item_count = payload.installations.len();
+            installations.extend(payload.installations);
+
+            if item_count < page.per_page as usize
+                || payload
+                    .total_count
+                    .is_some_and(|total_count| installations.len() >= total_count)
+            {
+                break;
+            }
+
+            page = pagination::Page {
+                number: page.number + 1,
+                ..page
+            };
+        }
+
+        Ok(installations)
     }
 
     pub async fn create_copilot_review_ruleset(&self, repo: &str) -> Result<()> {

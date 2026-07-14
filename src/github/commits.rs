@@ -111,6 +111,14 @@ pub struct CommitFile {
     pub content: String,
 }
 
+/// Result of attempting to create a `refs/heads/*` ref.
+enum BranchRefOutcome {
+    /// The ref was created fresh at the requested base commit.
+    Created,
+    /// The ref already existed and was left untouched.
+    Existing,
+}
+
 impl Client {
     /// Create an atomic multi-file commit using the Git Trees API.
     /// This avoids cloning the repo - everything happens via the API.
@@ -228,7 +236,7 @@ impl Client {
         Ok(commit.sha)
     }
 
-    /// Create a new branch from the default branch.
+    /// Create a new branch from another branch's current head.
     pub async fn create_branch(
         &self,
         repo: &str,
@@ -237,22 +245,37 @@ impl Client {
     ) -> Result<()> {
         validate_git_ref_name(branch_name)?;
         validate_git_ref_name(from_branch)?;
-        let ref_path = self.branch_ref_lookup_url(repo, from_branch)?;
-        let ref_info: RefResponse =
-            response::expect_json(self.get(&ref_path).await?, "GET", &ref_path).await?;
+        let source_sha = self.get_ref_sha(repo, from_branch).await?;
+        self.create_branch_ref(repo, branch_name, &source_sha)
+            .await?;
+        Ok(())
+    }
 
+    /// Create the `refs/heads/{branch_name}` ref at `sha`, reporting whether it
+    /// was created fresh or already existed. A `422` is only treated as
+    /// "already exists" once a follow-up lookup confirms the branch is present,
+    /// so genuine validation failures still surface as errors.
+    async fn create_branch_ref(
+        &self,
+        repo: &str,
+        branch_name: &str,
+        sha: &str,
+    ) -> Result<BranchRefOutcome> {
+        validate_git_ref_name(branch_name)?;
         let body = serde_json::json!({
             "ref": format!("refs/heads/{branch_name}"),
-            "sha": ref_info.object.sha
+            "sha": sha
         });
 
         let path =
             build_repo_api_url(&self.org, repo, &["git".to_owned(), "refs".to_owned()], &[])?;
         match response::classify_empty(self.post_json(&path, &body).await?, "POST", &path).await? {
-            ClassifiedResponse::Success(()) | ClassifiedResponse::NoContent => Ok(()),
+            ClassifiedResponse::Success(()) | ClassifiedResponse::NoContent => {
+                Ok(BranchRefOutcome::Created)
+            }
             ClassifiedResponse::Unprocessable(error) => {
                 if self.get_ref_sha(repo, branch_name).await.is_ok() {
-                    Ok(())
+                    Ok(BranchRefOutcome::Existing)
                 } else {
                     Err(anyhow::Error::new(error))
                 }
@@ -263,7 +286,35 @@ impl Client {
         }
     }
 
-    /// Ensure a non-default branch exists for file changes and return its name.
+    /// Force `refs/heads/{branch}` to point at `sha`, discarding any commits
+    /// only reachable from the previous branch head.
+    async fn force_update_branch(&self, repo: &str, branch: &str, sha: &str) -> Result<()> {
+        validate_git_ref_name(branch)?;
+        let update_ref = UpdateRefRequest {
+            sha: sha.to_owned(),
+            force: true,
+        };
+        let update_ref_path = self.branch_ref_url(repo, branch)?;
+        response::expect_empty(
+            self.patch_json(&update_ref_path, &update_ref).await?,
+            "PATCH",
+            &update_ref_path,
+        )
+        .await
+    }
+
+    /// Ensure a dedicated (non-default) branch is ready for file changes and
+    /// return its name.
+    ///
+    /// - If the branch does not exist, it is created from the current default
+    ///   head.
+    /// - If it exists and an open pull request already tracks it, the branch is
+    ///   preserved so a rerun updates that PR instead of resetting review
+    ///   history.
+    /// - If it exists without an open pull request, it is force-refreshed to the
+    ///   current default head so stale commits never leak into the new change.
+    ///
+    /// The default branch is never modified here.
     pub async fn ensure_dedicated_branch(
         &self,
         repo: &str,
@@ -275,9 +326,34 @@ impl Client {
                 "Refusing to reuse source branch {from_branch} for file mutations; use a dedicated branch"
             );
         }
+        validate_git_ref_name(branch_name)?;
+        validate_git_ref_name(from_branch)?;
 
-        self.create_branch(repo, branch_name, from_branch).await?;
-        Ok(branch_name.to_owned())
+        let default_head = self.get_ref_sha(repo, from_branch).await?;
+
+        match self
+            .create_branch_ref(repo, branch_name, &default_head)
+            .await?
+        {
+            BranchRefOutcome::Created => Ok(branch_name.to_owned()),
+            BranchRefOutcome::Existing => {
+                if self
+                    .find_open_pull_request(repo, branch_name)
+                    .await?
+                    .is_some()
+                {
+                    // An open PR tracks this branch: preserve it so the rerun
+                    // updates that PR rather than resetting shared history.
+                    Ok(branch_name.to_owned())
+                } else {
+                    // Stale reusable branch with no open PR: force it back to
+                    // the current default head before committing.
+                    self.force_update_branch(repo, branch_name, &default_head)
+                        .await?;
+                    Ok(branch_name.to_owned())
+                }
+            }
+        }
     }
 
     pub async fn get_branch_head_sha(&self, repo: &str, branch: &str) -> Result<String> {

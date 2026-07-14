@@ -1,7 +1,7 @@
 mod common;
 
 use serde_json::json;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use ward::github::Client;
@@ -107,4 +107,100 @@ async fn test_create_ruleset() {
 
     assert_eq!(created.id, 456);
     assert_eq!(created.name, "Copilot Code Review");
+}
+
+#[tokio::test]
+async fn custom_repository_roles_use_documented_envelope_and_paginate() {
+    let server = MockServer::start().await;
+    let first_page = (1..=100)
+        .map(|id| json!({ "id": id, "name": format!("role-{id}") }))
+        .collect::<Vec<_>>();
+
+    Mock::given(method("GET"))
+        .and(path("/orgs/test-org/custom-repository-roles"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "total_count": 101,
+            "custom_roles": first_page
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/orgs/test-org/custom-repository-roles"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "total_count": 101,
+            "custom_roles": [{ "id": 101, "name": "role-101" }]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let roles = client.list_ruleset_custom_repository_roles().await.unwrap();
+
+    assert_eq!(roles.len(), 101);
+    assert_eq!(roles.last().unwrap().id, 101);
+    assert_eq!(roles.last().unwrap().name, "role-101");
+}
+
+#[tokio::test]
+async fn organization_installations_paginate_using_total_count_envelope() {
+    let server = MockServer::start().await;
+    let first_page = (1..=100)
+        .map(|app_id| json!({ "app_id": app_id, "app_slug": format!("app-{app_id}") }))
+        .collect::<Vec<_>>();
+
+    Mock::given(method("GET"))
+        .and(path("/orgs/test-org/installations"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "total_count": 101,
+            "installations": first_page
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/orgs/test-org/installations"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "total_count": 101,
+            "installations": [{ "app_id": 101, "app_slug": "app-101" }]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let installations = client.list_org_installations().await.unwrap();
+
+    assert_eq!(installations.len(), 101);
+    assert_eq!(installations.last().unwrap().app_id, 101);
+    assert_eq!(installations.last().unwrap().app_slug, "app-101");
+}
+
+#[tokio::test]
+async fn organization_installations_stop_when_total_count_is_reached() {
+    let server = MockServer::start().await;
+    let installations = (1..=100)
+        .map(|app_id| json!({ "app_id": app_id, "app_slug": format!("app-{app_id}") }))
+        .collect::<Vec<_>>();
+
+    Mock::given(method("GET"))
+        .and(path("/orgs/test-org/installations"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "total_count": 100,
+            "installations": installations
+        })))
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let installations = client.list_org_installations().await.unwrap();
+
+    assert_eq!(installations.len(), 100);
 }

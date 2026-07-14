@@ -1344,6 +1344,13 @@ pub async fn apply_integrations(
     if plan.policy.disposition != ManagementDisposition::Managed {
         return Ok(report);
     }
+    if !plan.policy.sensitive && !plan.is_empty() {
+        report.blocked.push(
+            "Webhook, deploy-key, Pages, and autolink mutations require `policy.sensitive: true`."
+                .to_owned(),
+        );
+        return Ok(report);
+    }
 
     for action in &plan.webhook_actions {
         match action {
@@ -1396,21 +1403,19 @@ pub async fn apply_integrations(
                     };
                 let config_patch = WebhookConfigPatch {
                     url: url_patch.as_deref(),
-                    content_type: (current.config.content_type != desired.content_type)
-                        .then_some(desired.content_type.as_deref())
-                        .flatten(),
-                    insecure_ssl: (current.config.insecure_ssl != desired.insecure_ssl)
-                        .then_some(desired.insecure_ssl)
-                        .flatten(),
+                    content_type: (current_normalized.content_type
+                        != desired_normalized.content_type)
+                        .then_some(desired_normalized.content_type.as_str()),
+                    insecure_ssl: (current_normalized.insecure_ssl
+                        != desired_normalized.insecure_ssl)
+                        .then_some(desired_normalized.insecure_ssl),
                     secret: None,
                 };
                 let metadata_patch = WebhookMetadataPatch {
-                    active: (current.config.active.unwrap_or(true)
-                        != desired.active.unwrap_or(true))
-                    .then_some(desired.active.unwrap_or(true)),
-                    events: (normalize_events(&current.config.events)
-                        != normalize_events(&desired.events))
-                    .then_some(desired.events.as_slice()),
+                    active: (current_normalized.active != desired_normalized.active)
+                        .then_some(desired_normalized.active),
+                    events: (current_normalized.events != desired_normalized.events)
+                        .then_some(desired_normalized.events.as_slice()),
                 };
                 client
                     .update_repo_webhook(repo, *hook_id, config_patch, metadata_patch)
@@ -2151,8 +2156,11 @@ fn normalized_webhook_config(webhook: &WebhookConfigV2) -> NormalizedWebhook {
         canonical_url: canonicalize_url(&webhook.url),
         active: webhook.active.unwrap_or(true),
         events: normalize_events(&webhook.events),
-        content_type: webhook.content_type.clone(),
-        insecure_ssl: webhook.insecure_ssl,
+        content_type: webhook
+            .content_type
+            .clone()
+            .unwrap_or_else(|| "form".to_owned()),
+        insecure_ssl: webhook.insecure_ssl.unwrap_or(false),
     }
 }
 
@@ -2161,8 +2169,8 @@ struct NormalizedWebhook {
     canonical_url: String,
     active: bool,
     events: Vec<String>,
-    content_type: Option<String>,
-    insecure_ssl: Option<bool>,
+    content_type: String,
+    insecure_ssl: bool,
 }
 
 fn normalized_pages(pages: &PagesConfigV2) -> NormalizedPages {
@@ -2210,7 +2218,11 @@ fn normalized_autolink(autolink: &AutolinkConfigV2) -> NormalizedAutolink {
 }
 
 fn normalize_events(events: &[String]) -> Vec<String> {
-    let mut events = events.to_vec();
+    let mut events = if events.is_empty() {
+        vec!["push".to_owned()]
+    } else {
+        events.to_vec()
+    };
     events.sort();
     events.dedup();
     events
@@ -2612,19 +2624,18 @@ fn apply_integrations_policy_gates(
         if !webhook_actions.is_empty()
             || !deploy_key_actions.is_empty()
             || pages_action.is_some()
+            || !autolink_actions.is_empty()
             || desired.policy.prune
         {
             issues.push(ReconcileIssue {
                 scope: "integrations".to_owned(),
                 severity: IssueSeverity::Blocker,
-                message: "Webhook, deploy-key, Pages, and prune mutations require `policy.sensitive: true`.".to_owned(),
+                message: "Webhook, deploy-key, Pages, autolink, and prune mutations require `policy.sensitive: true`.".to_owned(),
             });
         }
         webhook_actions.clear();
         deploy_key_actions.clear();
         *pages_action = None;
-        if desired.policy.prune {
-            autolink_actions.retain(|action| !matches!(action, AutolinkAction::Delete { .. }));
-        }
+        autolink_actions.clear();
     }
 }

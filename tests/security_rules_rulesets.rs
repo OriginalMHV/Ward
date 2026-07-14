@@ -3,11 +3,13 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use ward::config::manifest::{
-    ActorReference, CategoryPolicy, ManagementDisposition, RulesetsCategoryV2,
+    ActorReference, CategoryPolicy, ManagementDisposition, RepositoryRulesetV2,
+    RulesetBypassActorV2, RulesetsCategoryV2,
 };
 use ward::github::Client;
 use ward::reconcile::security_rules::{
-    RulesetPlanAction, collect_rulesets_category, plan_rulesets_category,
+    RulesetPlanAction, RulesetsPlan, apply_rulesets_plan, collect_rulesets_category,
+    plan_rulesets_category,
 };
 
 #[tokio::test]
@@ -52,12 +54,16 @@ async fn security_rules_rulesets_remap_actors_and_prune_only_repository_owned_ru
         .await;
     Mock::given(method("GET"))
         .and(path("/orgs/test-org/custom-repository-roles"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "total_count": 0,
+            "custom_roles": []
+        })))
         .mount(&server)
         .await;
     Mock::given(method("GET"))
         .and(path("/orgs/test-org/installations"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "total_count": 1,
             "installations": [
                 { "app_id": 3, "app_slug": "release-bot" }
             ]
@@ -150,5 +156,114 @@ async fn security_rules_rulesets_remap_actors_and_prune_only_repository_owned_ru
         plan.issues
             .iter()
             .any(|issue| issue.code == "rulesets-sensitive-gate")
+    );
+}
+
+#[tokio::test]
+async fn ruleset_apply_skips_actor_lookups_for_delete_only_plan() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/repos/test-org/example/rulesets/10"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let plan = RulesetsPlan {
+        actions: vec![RulesetPlanAction::Delete {
+            ruleset_id: 10,
+            name: "obsolete".to_owned(),
+        }],
+        issues: Vec::new(),
+    };
+
+    let result = apply_rulesets_plan(&client, "example", &plan)
+        .await
+        .unwrap();
+
+    assert_eq!(result.applied_steps, vec!["delete:obsolete"]);
+}
+
+#[tokio::test]
+async fn ruleset_apply_propagates_required_app_lookup_failure() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/orgs/test-org/installations"))
+        .respond_with(ResponseTemplate::new(500).set_body_json(json!({
+            "message": "installation lookup failed"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let plan = RulesetsPlan {
+        actions: vec![RulesetPlanAction::Create {
+            ruleset: RepositoryRulesetV2 {
+                name: "main".to_owned(),
+                target: "branch".to_owned(),
+                enforcement: "active".to_owned(),
+                conditions_json: None,
+                rules: Vec::new(),
+                bypass_actors: vec![RulesetBypassActorV2 {
+                    actor: ActorReference::App {
+                        slug: "release-bot".to_owned(),
+                    },
+                    bypass_mode: "always".to_owned(),
+                }],
+            },
+        }],
+        issues: Vec::new(),
+    };
+
+    let error = apply_rulesets_plan(&client, "example", &plan)
+        .await
+        .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("Failed to resolve installed apps required by ruleset create/update actions")
+    );
+}
+
+#[tokio::test]
+async fn ruleset_apply_propagates_required_role_lookup_failure() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/orgs/test-org/custom-repository-roles"))
+        .respond_with(ResponseTemplate::new(500).set_body_json(json!({
+            "message": "role lookup failed"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let plan = RulesetsPlan {
+        actions: vec![RulesetPlanAction::Create {
+            ruleset: RepositoryRulesetV2 {
+                name: "main".to_owned(),
+                target: "branch".to_owned(),
+                enforcement: "active".to_owned(),
+                conditions_json: None,
+                rules: Vec::new(),
+                bypass_actors: vec![RulesetBypassActorV2 {
+                    actor: ActorReference::Role {
+                        name: "release-manager".to_owned(),
+                    },
+                    bypass_mode: "always".to_owned(),
+                }],
+            },
+        }],
+        issues: Vec::new(),
+    };
+
+    let error = apply_rulesets_plan(&client, "example", &plan)
+        .await
+        .unwrap_err();
+
+    assert!(
+        error.to_string().contains(
+            "Failed to resolve repository roles required by ruleset create/update actions"
+        )
     );
 }

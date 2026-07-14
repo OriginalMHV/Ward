@@ -57,6 +57,7 @@ pub struct RepositoryAppInstallation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CustomRepositoryRole {
+    pub id: u64,
     pub name: String,
 }
 

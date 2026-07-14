@@ -403,6 +403,97 @@ async fn existing_webhook_update_preserves_unknown_secret() {
 }
 
 #[tokio::test]
+async fn omitted_webhook_fields_apply_github_defaults_and_verify_cleanly() {
+    let current = IntegrationsCollection {
+        category: RepositoryIntegrationsCategoryV2::default(),
+        state: CollectedIntegrationsState {
+            webhooks: vec![CollectedWebhook {
+                id: 7,
+                canonical_url: canonicalize_url("https://hooks.example.test/events"),
+                config: WebhookConfigV2 {
+                    url: "https://hooks.example.test/events".to_owned(),
+                    url_from: None,
+                    active: Some(false),
+                    events: vec!["issues".to_owned()],
+                    content_type: Some("json".to_owned()),
+                    insecure_ssl: Some(true),
+                    secret: None,
+                },
+            }],
+            webhooks_complete: true,
+            deploy_keys: Vec::new(),
+            deploy_keys_complete: true,
+            pages: None,
+            pages_complete: true,
+            autolinks: Vec::new(),
+            autolinks_complete: true,
+        },
+        coverage: Vec::new(),
+        issues: Vec::new(),
+    };
+    let desired = RepositoryIntegrationsCategoryV2 {
+        policy: managed_sensitive_policy(false),
+        webhooks: vec![WebhookConfigV2 {
+            url: "https://hooks.example.test/events".to_owned(),
+            ..WebhookConfigV2::default()
+        }],
+        ..RepositoryIntegrationsCategoryV2::default()
+    };
+    let plan = plan_integrations(&current, &desired);
+    assert_eq!(plan.webhook_actions.len(), 1);
+
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path("/repos/test-org/my-repo/hooks/7/config"))
+        .and(body_partial_json(json!({
+            "content_type": "form",
+            "insecure_ssl": "0"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path("/repos/test-org/my-repo/hooks/7"))
+        .and(body_partial_json(json!({
+            "active": true,
+            "events": ["push"]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let report = apply_integrations(&client, "my-repo", &plan).await.unwrap();
+    assert_eq!(report.applied.len(), 1);
+
+    let converged = IntegrationsCollection {
+        state: CollectedIntegrationsState {
+            webhooks: vec![CollectedWebhook {
+                id: 7,
+                canonical_url: canonicalize_url("https://hooks.example.test/events"),
+                config: WebhookConfigV2 {
+                    url: "https://hooks.example.test/events".to_owned(),
+                    url_from: None,
+                    active: Some(true),
+                    events: vec!["push".to_owned()],
+                    content_type: Some("form".to_owned()),
+                    insecure_ssl: Some(false),
+                    secret: None,
+                },
+            }],
+            ..current.state.clone()
+        },
+        ..current
+    };
+    assert!(plan_integrations(&converged, &desired).is_empty());
+
+    let verification = verify_integrations_state(&converged, &desired);
+    assert!(verification.issues.is_empty());
+}
+
+#[tokio::test]
 async fn deploy_key_replace_creates_before_delete() {
     unsafe {
         std::env::set_var("WARD_DEPLOY_KEY", "ssh-rsa AAA");
@@ -597,4 +688,101 @@ fn prune_and_sensitive_gates_block_mutations() {
             .iter()
             .any(|issue| issue.message.contains("require `policy.sensitive: true`"))
     );
+}
+
+#[test]
+fn sensitive_gate_removes_autolink_create_recreate_and_delete_actions() {
+    let current = IntegrationsCollection {
+        category: RepositoryIntegrationsCategoryV2::default(),
+        state: CollectedIntegrationsState {
+            webhooks: Vec::new(),
+            webhooks_complete: true,
+            deploy_keys: Vec::new(),
+            deploy_keys_complete: true,
+            pages: None,
+            pages_complete: true,
+            autolinks: vec![
+                CollectedAutolink {
+                    id: 10,
+                    config: AutolinkConfigV2 {
+                        key_prefix: "ABC-".to_owned(),
+                        url_template: "https://tracker.example/ABC-<num>".to_owned(),
+                        is_alphanumeric: Some(true),
+                    },
+                },
+                CollectedAutolink {
+                    id: 11,
+                    config: AutolinkConfigV2 {
+                        key_prefix: "STALE-".to_owned(),
+                        url_template: "https://tracker.example/STALE-<num>".to_owned(),
+                        is_alphanumeric: Some(true),
+                    },
+                },
+            ],
+            autolinks_complete: true,
+        },
+        coverage: Vec::new(),
+        issues: Vec::new(),
+    };
+    let desired = RepositoryIntegrationsCategoryV2 {
+        policy: CategoryPolicy {
+            disposition: ManagementDisposition::Managed,
+            prune: true,
+            sensitive: false,
+        },
+        autolinks: vec![
+            AutolinkConfigV2 {
+                key_prefix: "ABC-".to_owned(),
+                url_template: "https://tracker.example/ABC-<num>".to_owned(),
+                is_alphanumeric: Some(false),
+            },
+            AutolinkConfigV2 {
+                key_prefix: "NEW-".to_owned(),
+                url_template: "https://tracker.example/NEW-<num>".to_owned(),
+                is_alphanumeric: Some(true),
+            },
+        ],
+        ..RepositoryIntegrationsCategoryV2::default()
+    };
+
+    let plan = plan_integrations(&current, &desired);
+
+    assert!(plan.autolink_actions.is_empty());
+    assert!(plan.issues.iter().any(|issue| {
+        issue.severity == IssueSeverity::Blocker && issue.message.contains("autolink")
+    }));
+}
+
+#[tokio::test]
+async fn apply_with_sensitive_false_never_writes_autolinks() {
+    let server = MockServer::start().await;
+    let client = Client::new_for_test("test-org", &server.uri());
+    let plan = IntegrationsPlan {
+        policy: CategoryPolicy {
+            disposition: ManagementDisposition::Managed,
+            prune: false,
+            sensitive: false,
+        },
+        webhook_actions: Vec::new(),
+        deploy_key_actions: Vec::new(),
+        pages_action: None,
+        autolink_actions: vec![AutolinkAction::Create(AutolinkConfigV2 {
+            key_prefix: "ABC-".to_owned(),
+            url_template: "https://tracker.example/ABC-<num>".to_owned(),
+            is_alphanumeric: Some(true),
+        })],
+        notes: Vec::new(),
+        issues: Vec::new(),
+    };
+
+    let report = apply_integrations(&client, "my-repo", &plan).await.unwrap();
+
+    assert!(report.applied.is_empty());
+    assert!(
+        report
+            .blocked
+            .iter()
+            .any(|message| message.contains("autolink"))
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
 }

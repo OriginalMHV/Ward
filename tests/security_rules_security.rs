@@ -12,7 +12,7 @@ use ward::config::manifest::{
 use ward::github::Client;
 use ward::github::security::SecurityAndAnalysisState;
 use ward::reconcile::security_rules::{
-    SecurityCollection, collect_security_category, plan_security_category,
+    SecurityCollection, collect_security_category, plan_security_category, verify_security_category,
 };
 
 fn managed_sensitive_policy() -> CategoryPolicy {
@@ -236,6 +236,91 @@ async fn security_rules_attached_configuration_precedence_ignores_direct_setting
 }
 
 #[tokio::test]
+async fn matching_attached_configuration_verifies_without_sensitive_policy() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/example"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 42,
+            "name": "example",
+            "full_name": "test-org/example",
+            "archived": false,
+            "default_branch": "main",
+            "visibility": "private",
+            "security_and_analysis": {}
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/example/vulnerability-alerts"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/example/automated-security-fixes"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "enabled": true })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/repos/test-org/example/private-vulnerability-reporting",
+        ))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({ "message": "Not Found" })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/example/code-scanning/default-setup"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({ "message": "Not Found" })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/example/code-security-configuration"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "attached",
+            "configuration": {
+                "id": 7,
+                "name": "baseline",
+                "target_type": "organization"
+            }
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/orgs/test-org/code-security/configurations"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": 7,
+            "name": "baseline",
+            "target_type": "organization"
+        }])))
+        .mount(&server)
+        .await;
+
+    let desired = SecurityCategoryV2 {
+        policy: CategoryPolicy::managed(),
+        configuration_reference: Some(ReferencedResourceConfig {
+            resource_type: ReferencedResourceType::CodeSecurityConfiguration,
+            name: "baseline".to_owned(),
+        }),
+        ..base_security_category()
+    };
+    let client = Client::new_for_test("test-org", &server.uri());
+
+    let verification = verify_security_category(&client, "example", &desired)
+        .await
+        .unwrap();
+
+    assert!(verification.matches);
+    assert!(!verification.plan.has_changes());
+    assert!(
+        verification
+            .plan
+            .issues
+            .iter()
+            .all(|issue| issue.code != "security-sensitive-gate")
+    );
+}
+
+#[tokio::test]
 async fn security_rules_denied_dependabot_alerts_stay_unknown() {
     let server = MockServer::start().await;
     let repo = json!({
@@ -360,7 +445,10 @@ async fn security_rules_collects_delegated_bypass_reviewers_with_stable_identity
         .await;
     Mock::given(method("GET"))
         .and(path("/orgs/test-org/custom-repository-roles"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "total_count": 0,
+            "custom_roles": []
+        })))
         .mount(&server)
         .await;
 
