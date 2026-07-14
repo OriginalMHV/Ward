@@ -1,13 +1,95 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-
-use crate::config::manifest::SecurityCheck;
+use serde_json::json;
 
 use super::Client;
-use super::repos::Repository;
+use super::actions::{ReadOutcome, classify_read};
+use super::pagination;
+use super::response;
 
-/// Current security state of a repository.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SecurityFeatureStatus {
+    #[serde(default)]
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DelegatedBypassReviewer {
+    pub reviewer_id: u64,
+    pub reviewer_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DelegatedBypassOptions {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reviewers: Vec<DelegatedBypassReviewer>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SecurityAndAnalysisState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub advanced_security: Option<SecurityFeatureStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_security: Option<SecurityFeatureStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dependabot_security_updates: Option<SecurityFeatureStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_scanning: Option<SecurityFeatureStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_scanning_ai_detection: Option<SecurityFeatureStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_scanning_push_protection: Option<SecurityFeatureStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_scanning_validity_checks: Option<SecurityFeatureStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_scanning_non_provider_patterns: Option<SecurityFeatureStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_scanning_delegated_alert_dismissal_options: Option<DelegatedBypassOptions>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_scanning_delegated_alert_dismissal: Option<SecurityFeatureStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_scanning_delegated_bypass: Option<SecurityFeatureStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_scanning_delegated_bypass_options: Option<DelegatedBypassOptions>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodeqlDefaultSetupState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub languages: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query_suite: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threat_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodeSecurityConfiguration {
+    pub id: u64,
+    pub name: String,
+    #[serde(default)]
+    pub target_type: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RepositoryCodeSecurityConfiguration {
+    #[serde(default)]
+    pub status: String,
+    pub configuration: CodeSecurityConfiguration,
+}
+
+/// Current security state of a repository used by legacy security commands.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SecurityState {
     pub dependabot_alerts: bool,
     pub dependabot_security_updates: bool,
@@ -17,23 +99,35 @@ pub struct SecurityState {
 }
 
 #[derive(Debug, Deserialize)]
-struct RepoSecurityResponse {
-    security_and_analysis: Option<SecurityAndAnalysis>,
+struct RepositoryIdResponse {
+    id: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct RepositorySecurityBaseline {
+    #[serde(default)]
+    pub id: u64,
+    #[serde(default)]
+    pub security_and_analysis: Option<SecurityAndAnalysisState>,
 }
 
 #[derive(Debug, Deserialize)]
-struct SecurityAndAnalysis {
-    secret_scanning: Option<FeatureStatus>,
-    secret_scanning_ai_detection: Option<FeatureStatus>,
-    secret_scanning_push_protection: Option<FeatureStatus>,
+struct EnabledState {
+    enabled: bool,
 }
 
-#[derive(Debug, Deserialize)]
-struct FeatureStatus {
-    status: String,
+fn status_is_enabled(status: Option<&SecurityFeatureStatus>) -> bool {
+    status.is_some_and(|value| value.status == "enabled")
+}
+
+fn security_status(status: bool) -> serde_json::Value {
+    json!({
+        "status": if status { "enabled" } else { "disabled" }
+    })
 }
 
 /// Extract secret-scanning fields from a pre-fetched `security_and_analysis` JSON value.
+#[cfg(test)]
 fn extract_scanning_from_json(sa_value: &serde_json::Value) -> (bool, bool, bool) {
     let enabled = |key: &str| -> bool {
         sa_value
@@ -51,119 +145,318 @@ fn extract_scanning_from_json(sa_value: &serde_json::Value) -> (bool, bool, bool
 }
 
 impl Client {
+    pub async fn get_repository_security_baseline(
+        &self,
+        repo: &str,
+    ) -> Result<RepositorySecurityBaseline> {
+        let path = format!("/repos/{}/{repo}", self.org);
+        response::expect_json(self.get(&path).await?, "GET", &path)
+            .await
+            .context("Failed to parse repository security baseline response")
+    }
+
+    pub async fn get_repository_security_and_analysis(
+        &self,
+        repo: &str,
+    ) -> Result<Option<SecurityAndAnalysisState>> {
+        self.get_repository_security_and_analysis_with_repo_data(repo, None)
+            .await
+    }
+
+    pub async fn get_repository_security_and_analysis_with_repo_data(
+        &self,
+        repo: &str,
+        repo_data: Option<&serde_json::Value>,
+    ) -> Result<Option<SecurityAndAnalysisState>> {
+        if let Some(repo_data) = repo_data {
+            return Self::parse_prefetched_security_and_analysis(repo_data);
+        }
+
+        Ok(self
+            .get_repository_security_baseline(repo)
+            .await?
+            .security_and_analysis)
+    }
+
+    pub async fn update_repository_security_and_analysis(
+        &self,
+        repo: &str,
+        security_and_analysis: &serde_json::Value,
+    ) -> Result<()> {
+        let path = format!("/repos/{}/{repo}", self.org);
+        let body = json!({
+            "security_and_analysis": security_and_analysis,
+        });
+        response::expect_empty(self.patch_json(&path, &body).await?, "PATCH", &path).await
+    }
+
+    fn parse_prefetched_security_and_analysis(
+        repo_data: &serde_json::Value,
+    ) -> Result<Option<SecurityAndAnalysisState>> {
+        let value = repo_data.get("security_and_analysis").unwrap_or(repo_data);
+        if value.is_null() {
+            return Ok(None);
+        }
+
+        serde_json::from_value(value.clone())
+            .map(Some)
+            .context("Failed to parse pre-fetched security_and_analysis data")
+    }
+
+    pub async fn read_private_vulnerability_reporting_status(
+        &self,
+        repo: &str,
+    ) -> Result<ReadOutcome<bool>> {
+        let path = format!("/repos/{}/{repo}/private-vulnerability-reporting", self.org);
+        match classify_read::<EnabledState>(self.get(&path).await?, "GET", &path, true).await? {
+            ReadOutcome::Available(state) => Ok(ReadOutcome::Available(state.enabled)),
+            ReadOutcome::NotApplicable(reason) => Ok(ReadOutcome::NotApplicable(reason)),
+            ReadOutcome::PermissionDenied(reason) => Ok(ReadOutcome::PermissionDenied(reason)),
+            ReadOutcome::Unavailable(reason) => Ok(ReadOutcome::Unavailable(reason)),
+        }
+    }
+
+    pub async fn get_private_vulnerability_reporting_status(&self, repo: &str) -> Result<bool> {
+        Ok(matches!(
+            self.read_private_vulnerability_reporting_status(repo)
+                .await?,
+            ReadOutcome::Available(true)
+        ))
+    }
+
+    pub async fn set_private_vulnerability_reporting(
+        &self,
+        repo: &str,
+        enabled: bool,
+    ) -> Result<()> {
+        let path = format!("/repos/{}/{repo}/private-vulnerability-reporting", self.org);
+        let response = if enabled {
+            self.put(&path).await?
+        } else {
+            self.delete(&path).await?
+        };
+        response::expect_empty(response, if enabled { "PUT" } else { "DELETE" }, &path).await
+    }
+
+    pub async fn read_codeql_default_setup(
+        &self,
+        repo: &str,
+    ) -> Result<ReadOutcome<CodeqlDefaultSetupState>> {
+        let path = format!("/repos/{}/{repo}/code-scanning/default-setup", self.org);
+        classify_read(self.get(&path).await?, "GET", &path, false)
+            .await
+            .context("Failed to parse CodeQL default setup response")
+    }
+
+    pub async fn get_codeql_default_setup(
+        &self,
+        repo: &str,
+    ) -> Result<Option<CodeqlDefaultSetupState>> {
+        Ok(self.read_codeql_default_setup(repo).await?.available())
+    }
+
+    pub async fn update_codeql_default_setup(
+        &self,
+        repo: &str,
+        body: &CodeqlDefaultSetupState,
+    ) -> Result<Option<CodeqlDefaultSetupState>> {
+        let path = format!("/repos/{}/{repo}/code-scanning/default-setup", self.org);
+        response::optional_json(self.patch_json(&path, body).await?, "PATCH", &path)
+            .await
+            .context("Failed to parse CodeQL default setup update response")
+    }
+
+    pub async fn list_code_security_configurations(
+        &self,
+    ) -> Result<Vec<CodeSecurityConfiguration>> {
+        pagination::collect_paginated(self, |page| {
+            format!(
+                "/orgs/{}/code-security/configurations?per_page={}&page={}",
+                self.org, page.per_page, page.number
+            )
+        })
+        .await
+        .context("Failed to parse code security configurations response")
+    }
+
+    pub async fn read_repository_code_security_configuration(
+        &self,
+        repo: &str,
+    ) -> Result<ReadOutcome<RepositoryCodeSecurityConfiguration>> {
+        let path = format!("/repos/{}/{repo}/code-security-configuration", self.org);
+        classify_read(self.get(&path).await?, "GET", &path, false)
+            .await
+            .context("Failed to parse repository code security configuration response")
+    }
+
+    pub async fn get_repository_code_security_configuration(
+        &self,
+        repo: &str,
+    ) -> Result<Option<RepositoryCodeSecurityConfiguration>> {
+        Ok(self
+            .read_repository_code_security_configuration(repo)
+            .await?
+            .available())
+    }
+
+    pub async fn attach_code_security_configuration(
+        &self,
+        configuration_id: u64,
+        repository_id: u64,
+    ) -> Result<()> {
+        let path = format!(
+            "/orgs/{}/code-security/configurations/{configuration_id}/attach",
+            self.org
+        );
+        let body = json!({
+            "scope": "selected",
+            "selected_repository_ids": [repository_id],
+        });
+        response::expect_empty(self.post_json(&path, &body).await?, "POST", &path).await
+    }
+
+    pub async fn detach_code_security_configurations(&self, repository_ids: &[u64]) -> Result<()> {
+        let path = format!("/orgs/{}/code-security/configurations/detach", self.org);
+        let body = json!({
+            "selected_repository_ids": repository_ids,
+        });
+        let url = format!("{}{}", self.base_url, path);
+        let response = self
+            .http
+            .delete(&url)
+            .json(&body)
+            .send()
+            .await
+            .with_context(|| format!("DELETE {url} failed"))?;
+        response::expect_empty(response, "DELETE", &path).await
+    }
+
+    pub async fn get_repository_numeric_id(&self, repo: &str) -> Result<u64> {
+        let path = format!("/repos/{}/{repo}", self.org);
+        Ok(
+            response::expect_json::<RepositoryIdResponse>(self.get(&path).await?, "GET", &path)
+                .await
+                .context("Failed to parse repository id response")?
+                .id,
+        )
+    }
+
     /// Read the current security state of a repository.
-    ///
-    /// This makes 3 HTTP requests. Prefer [`get_security_state_with_repo_data`]
-    /// when you already have the repo JSON (e.g., from a repo listing) to skip
-    /// the extra GET /repos/{org}/{repo} call.
     pub async fn get_security_state(&self, repo: &str) -> Result<SecurityState> {
         self.get_security_state_with_repo_data(repo, None).await
     }
 
     /// Read the current security state, optionally using pre-fetched repo data.
-    ///
-    /// When `repo_data` contains a `security_and_analysis` object, secret scanning
-    /// fields are extracted from it and the separate GET /repos/{org}/{repo} call
-    /// is skipped, reducing API calls from 3 to 2.
-    ///
-    /// The two remaining Dependabot calls are executed concurrently.
     pub async fn get_security_state_with_repo_data(
         &self,
         repo: &str,
         repo_data: Option<&serde_json::Value>,
     ) -> Result<SecurityState> {
-        let mut state = SecurityState::default();
-
-        // --- Dependabot calls (concurrent) ---
         let alerts_path = format!("/repos/{}/{repo}/vulnerability-alerts", self.org);
         let fixes_path = format!("/repos/{}/{repo}/automated-security-fixes", self.org);
 
-        let (alerts_result, fixes_result) =
-            tokio::join!(self.get(&alerts_path), self.get(&fixes_path));
+        let (alerts_result, fixes_result, repo_security_result) = tokio::join!(
+            self.get(&alerts_path),
+            self.get(&fixes_path),
+            self.get_repository_security_and_analysis_with_repo_data(repo, repo_data)
+        );
 
-        // Dependabot alerts (vulnerability-alerts): 204 = enabled
+        let mut state = SecurityState::default();
+
         match alerts_result {
-            Ok(resp) => state.dependabot_alerts = resp.status().as_u16() == 204,
-            Err(e) => tracing::warn!("Failed to check dependabot alerts for {repo}: {e}"),
+            Ok(response) => state.dependabot_alerts = response.status().as_u16() == 204,
+            Err(error) => tracing::warn!("Failed to check dependabot alerts for {repo}: {error}"),
         }
 
-        // Dependabot security updates (automated-security-fixes)
         match fixes_result {
-            Ok(resp) => {
-                if resp.status().is_success() {
+            Ok(response) => {
+                if response.status().is_success() {
                     #[derive(Deserialize)]
                     struct AutoSecFixes {
                         enabled: bool,
                     }
-                    if let Ok(body) = resp.json::<AutoSecFixes>().await {
+                    if let Ok(body) = response.json::<AutoSecFixes>().await {
                         state.dependabot_security_updates = body.enabled;
                     }
                 }
             }
-            Err(e) => tracing::warn!("Failed to check security updates for {repo}: {e}"),
+            Err(error) => {
+                tracing::warn!("Failed to check security updates for {repo}: {error}");
+            }
         }
 
-        // --- Secret scanning / push protection / AI detection ---
-        // Try pre-fetched data first, fall back to a fresh API call.
-        let sa_from_prefetch = repo_data.and_then(|v| v.get("security_and_analysis"));
-
-        if let Some(sa_value) = sa_from_prefetch {
-            let (scanning, ai, push) = extract_scanning_from_json(sa_value);
-            state.secret_scanning = scanning;
-            state.secret_scanning_ai_detection = ai;
-            state.push_protection = push;
-        } else {
-            // Fallback: fetch repo endpoint for security_and_analysis
-            let resp = self.get(&format!("/repos/{}/{repo}", self.org)).await?;
-
-            if resp.status().is_success()
-                && let Ok(body) = resp.json::<RepoSecurityResponse>().await
-                && let Some(sa) = body.security_and_analysis
-            {
-                state.secret_scanning = sa
-                    .secret_scanning
-                    .as_ref()
-                    .is_some_and(|f| f.status == "enabled");
-                state.secret_scanning_ai_detection = sa
-                    .secret_scanning_ai_detection
-                    .as_ref()
-                    .is_some_and(|f| f.status == "enabled");
-                state.push_protection = sa
-                    .secret_scanning_push_protection
-                    .as_ref()
-                    .is_some_and(|f| f.status == "enabled");
+        match repo_security_result {
+            Ok(Some(security)) => {
+                state.dependabot_security_updates = state.dependabot_security_updates
+                    || status_is_enabled(security.dependabot_security_updates.as_ref());
+                state.secret_scanning = status_is_enabled(security.secret_scanning.as_ref());
+                state.secret_scanning_ai_detection =
+                    status_is_enabled(security.secret_scanning_ai_detection.as_ref());
+                state.push_protection =
+                    status_is_enabled(security.secret_scanning_push_protection.as_ref());
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!("Failed to inspect repository security settings for {repo}: {error}")
             }
         }
 
         Ok(state)
     }
 
-    /// Enable vulnerability alerts (Dependabot alerts) for a repo.
+    pub async fn read_dependabot_alerts_state(&self, repo: &str) -> Result<ReadOutcome<bool>> {
+        let path = format!("/repos/{}/{repo}/vulnerability-alerts", self.org);
+        Ok(
+            match response::classify_empty(self.get(&path).await?, "GET", &path).await? {
+                response::ClassifiedResponse::Success(())
+                | response::ClassifiedResponse::NoContent => ReadOutcome::Available(true),
+                response::ClassifiedResponse::Forbidden(error) => {
+                    ReadOutcome::PermissionDenied(error.to_string())
+                }
+                response::ClassifiedResponse::Unprocessable(error) => {
+                    ReadOutcome::Unavailable(error.to_string())
+                }
+                response::ClassifiedResponse::NotFound(error)
+                | response::ClassifiedResponse::Other(error) => {
+                    ReadOutcome::Unavailable(error.to_string())
+                }
+            },
+        )
+    }
+
+    pub async fn read_dependabot_security_updates_state(
+        &self,
+        repo: &str,
+    ) -> Result<ReadOutcome<bool>> {
+        let path = format!("/repos/{}/{repo}/automated-security-fixes", self.org);
+        match classify_read::<EnabledState>(self.get(&path).await?, "GET", &path, false).await? {
+            ReadOutcome::Available(state) => Ok(ReadOutcome::Available(state.enabled)),
+            ReadOutcome::NotApplicable(reason) => Ok(ReadOutcome::NotApplicable(reason)),
+            ReadOutcome::PermissionDenied(reason) => Ok(ReadOutcome::PermissionDenied(reason)),
+            ReadOutcome::Unavailable(reason) => Ok(ReadOutcome::Unavailable(reason)),
+        }
+    }
+
     pub async fn enable_dependabot_alerts(&self, repo: &str) -> Result<()> {
-        let resp = self
-            .put(&format!("/repos/{}/{repo}/vulnerability-alerts", self.org))
-            .await?;
-
-        ensure_success(resp, "enable Dependabot alerts", repo).await
+        let path = format!("/repos/{}/{repo}/vulnerability-alerts", self.org);
+        response::expect_empty(self.put(&path).await?, "PUT", &path).await
     }
 
-    /// Enable automated security fixes (Dependabot security updates) for a repo.
+    pub async fn disable_dependabot_alerts(&self, repo: &str) -> Result<()> {
+        let path = format!("/repos/{}/{repo}/vulnerability-alerts", self.org);
+        response::expect_empty(self.delete(&path).await?, "DELETE", &path).await
+    }
+
     pub async fn enable_dependabot_security_updates(&self, repo: &str) -> Result<()> {
-        let resp = self
-            .put(&format!(
-                "/repos/{}/{repo}/automated-security-fixes",
-                self.org
-            ))
-            .await?;
-
-        ensure_success(resp, "enable Dependabot security updates", repo).await
+        let path = format!("/repos/{}/{repo}/automated-security-fixes", self.org);
+        response::expect_empty(self.put(&path).await?, "PUT", &path).await
     }
 
-    /// Enable secret scanning, AI detection, and/or push protection.
-    ///
-    /// On private/internal repos, GitHub requires Advanced Security to be enabled
-    /// before secret scanning features can be turned on. We include it automatically
-    /// when enabling any scanning feature.
+    pub async fn disable_dependabot_security_updates(&self, repo: &str) -> Result<()> {
+        let path = format!("/repos/{}/{repo}/automated-security-fixes", self.org);
+        response::expect_empty(self.delete(&path).await?, "DELETE", &path).await
+    }
+
     pub async fn set_security_features(
         &self,
         repo: &str,
@@ -171,65 +464,14 @@ impl Client {
         ai_detection: bool,
         push_protection: bool,
     ) -> Result<()> {
-        let any_enabling = secret_scanning || ai_detection || push_protection;
-
-        let mut security_and_analysis = serde_json::json!({
-            "secret_scanning": {
-                "status": if secret_scanning { "enabled" } else { "disabled" }
-            },
-            "secret_scanning_ai_detection": {
-                "status": if ai_detection { "enabled" } else { "disabled" }
-            },
-            "secret_scanning_push_protection": {
-                "status": if push_protection { "enabled" } else { "disabled" }
-            }
+        let body = json!({
+            "secret_scanning": security_status(secret_scanning),
+            "secret_scanning_ai_detection": security_status(ai_detection),
+            "secret_scanning_push_protection": security_status(push_protection),
+            "advanced_security": security_status(secret_scanning || ai_detection || push_protection),
         });
-
-        // GHAS must be enabled before secret scanning on private/internal repos
-        if any_enabling {
-            security_and_analysis["advanced_security"] = serde_json::json!({"status": "enabled"});
-        }
-
-        let body = serde_json::json!({
-            "security_and_analysis": security_and_analysis
-        });
-
-        let resp = self
-            .patch_json(&format!("/repos/{}/{repo}", self.org), &body)
-            .await?;
-
-        ensure_success(resp, "set security features", repo).await
-    }
-
-    /// Run a single custom security check against a repository.
-    ///
-    /// Returns `true` when the check passes. Network or API errors are treated
-    /// as `false` (check failed) so the TUI always gets a definitive answer.
-    pub async fn run_custom_check(&self, repo: &Repository, check: &SecurityCheck) -> bool {
-        match check {
-            SecurityCheck::FileExists { path, .. } | SecurityCheck::WorkflowExists { path, .. } => {
-                matches!(self.get_file(&repo.name, path, None).await, Ok(Some(_)))
-            }
-            SecurityCheck::TopicContains { topic, .. } => repo.topics.iter().any(|t| t == topic),
-            SecurityCheck::BranchProtection { .. } => {
-                matches!(
-                    self.get_branch_protection(&repo.name, &repo.default_branch)
-                        .await,
-                    Ok(Some(_))
-                )
-            }
-            SecurityCheck::DefaultBranch { expected, .. } => repo.default_branch == *expected,
-        }
-    }
-}
-
-async fn ensure_success(resp: reqwest::Response, action: &str, repo: &str) -> Result<()> {
-    let status = resp.status();
-    if status.is_success() || status.as_u16() == 204 {
-        Ok(())
-    } else {
-        let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!("Failed to {action} for {repo} (HTTP {status}): {body}")
+        self.update_repository_security_and_analysis(repo, &body)
+            .await
     }
 }
 
@@ -304,73 +546,45 @@ mod tests {
         assert!(!push);
     }
 
-    /// Helper to build a minimal `Repository` for testing.
-    fn make_repo(name: &str, default_branch: &str, topics: Vec<&str>) -> Repository {
-        Repository {
-            name: name.to_owned(),
-            full_name: format!("org/{name}"),
-            archived: false,
-            default_branch: default_branch.to_owned(),
-            description: None,
-            visibility: "private".to_owned(),
-            language: None,
-            security_and_analysis: None,
-            topics: topics.into_iter().map(String::from).collect(),
-        }
+    #[test]
+    fn status_helper_detects_enabled() {
+        assert!(status_is_enabled(Some(&SecurityFeatureStatus {
+            status: "enabled".to_owned(),
+        })));
+        assert!(!status_is_enabled(Some(&SecurityFeatureStatus {
+            status: "disabled".to_owned(),
+        })));
+        assert!(!status_is_enabled(None));
     }
 
-    #[tokio::test]
-    async fn custom_check_default_branch_match() {
-        let client = Client::new_for_test("org", "http://unused");
-        let repo = make_repo("my-repo", "main", vec![]);
-        let check = SecurityCheck::DefaultBranch {
-            name: "Main Branch".into(),
-            expected: "main".into(),
-        };
-        assert!(client.run_custom_check(&repo, &check).await);
+    #[test]
+    fn parses_security_from_full_prefetched_repository_payload() {
+        let payload = json!({
+            "name": "example",
+            "security_and_analysis": {
+                "secret_scanning": { "status": "enabled" }
+            }
+        });
+
+        let security = Client::parse_prefetched_security_and_analysis(&payload)
+            .unwrap()
+            .unwrap();
+
+        assert!(status_is_enabled(security.secret_scanning.as_ref()));
     }
 
-    #[tokio::test]
-    async fn custom_check_default_branch_mismatch() {
-        let client = Client::new_for_test("org", "http://unused");
-        let repo = make_repo("my-repo", "master", vec![]);
-        let check = SecurityCheck::DefaultBranch {
-            name: "Main Branch".into(),
-            expected: "main".into(),
-        };
-        assert!(!client.run_custom_check(&repo, &check).await);
-    }
+    #[test]
+    fn parses_direct_prefetched_security_payload() {
+        let payload = json!({
+            "secret_scanning_push_protection": { "status": "enabled" }
+        });
 
-    #[tokio::test]
-    async fn custom_check_topic_contains_found() {
-        let client = Client::new_for_test("org", "http://unused");
-        let repo = make_repo("my-repo", "main", vec!["ward-managed", "backend"]);
-        let check = SecurityCheck::TopicContains {
-            name: "Managed".into(),
-            topic: "ward-managed".into(),
-        };
-        assert!(client.run_custom_check(&repo, &check).await);
-    }
+        let security = Client::parse_prefetched_security_and_analysis(&payload)
+            .unwrap()
+            .unwrap();
 
-    #[tokio::test]
-    async fn custom_check_topic_contains_not_found() {
-        let client = Client::new_for_test("org", "http://unused");
-        let repo = make_repo("my-repo", "main", vec!["backend"]);
-        let check = SecurityCheck::TopicContains {
-            name: "Managed".into(),
-            topic: "ward-managed".into(),
-        };
-        assert!(!client.run_custom_check(&repo, &check).await);
-    }
-
-    #[tokio::test]
-    async fn custom_check_topic_contains_empty_topics() {
-        let client = Client::new_for_test("org", "http://unused");
-        let repo = make_repo("my-repo", "main", vec![]);
-        let check = SecurityCheck::TopicContains {
-            name: "Managed".into(),
-            topic: "ward-managed".into(),
-        };
-        assert!(!client.run_custom_check(&repo, &check).await);
+        assert!(status_is_enabled(
+            security.secret_scanning_push_protection.as_ref()
+        ));
     }
 }

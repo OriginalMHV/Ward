@@ -136,8 +136,24 @@ async fn main() -> Result<()> {
             .await
         }
         Command::Plan(cmd) => {
-            cmd.run(&client, &manifest, cli.system.as_deref(), cli.json)
-                .await
+            cmd.run(
+                &client,
+                &manifest,
+                cli.system.as_deref(),
+                cli.repo.as_deref(),
+                cli.json,
+            )
+            .await
+        }
+        Command::Apply(cmd) => {
+            cmd.run(
+                &client,
+                &manifest,
+                cli.system.as_deref(),
+                cli.repo.as_deref(),
+                cli.json,
+            )
+            .await
         }
         Command::Policy(cmd) => {
             cmd.run(
@@ -149,7 +165,6 @@ async fn main() -> Result<()> {
             )
             .await
         }
-        Command::Tui => ward::cli::tui::run(&client, &manifest).await,
         Command::Init(_) => unreachable!(),
         Command::Setup(_) => unreachable!(),
         Command::Import(_) => unreachable!(),

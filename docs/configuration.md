@@ -1,486 +1,569 @@
 # Configuration
 
-Ward reads its configuration from `ward.toml`. This file defines your GitHub organization, desired security posture, branch protection rules, template settings, and system groupings.
-
----
-
-## File location and loading order
-
-Ward looks for `ward.toml` in the current working directory by default. Override with `--config <path>`.
+Ward reads `ward.toml` from the current directory. Override the path with `--config <PATH>`.
 
 ```bash
-ward config path          # show where Ward is looking
-ward config show          # pretty-print the loaded config
+ward config path
+ward config show
 ```
 
----
+Repository imports generate manifest schema version 2. Legacy sections remain readable for backward compatibility, but comprehensive `ward plan` and `ward apply` use the versioned `categories` state.
 
-## `[org]`
-
-The GitHub organization to manage.
+## Identity and provenance
 
 ```toml
 [org]
-name = "my-github-org"
+name = "acme"
+
+[source]
+repository = "acme/reference-service"
+
+[schema]
+version = 2
+
+[provenance]
+repository = "acme/reference-service"
+default_branch = "main"
+repository_node_id = "R_..."
+default_branch_head_oid = "..."
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | yes | GitHub organization name |
+| Table | Purpose |
+|---|---|
+| `[org]` | Owner containing the source and existing target repositories |
+| `[source]` | Backward-compatible source repository reference |
+| `[schema]` | Manifest format version |
+| `[provenance]` | Source branch and stable source identity captured during import |
 
----
+Targets must remain under the configured owner. Ward does not create, rename, transfer, or delete repositories.
 
-## `[security]`
+## Category policies
 
-Desired security feature state for repositories. When you run `ward security apply`, Ward enables these features on every repo in the targeted system.
+Every category has the same policy shape:
 
 ```toml
-[security]
-secret_scanning = true
-secret_scanning_ai_detection = true
-push_protection = true
+[categories.actions.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+```
+
+| Field | Values | Meaning |
+|---|---|---|
+| `disposition` | `managed`, `observe`, `reference`, `placeholder` | Whether Ward may reconcile the category |
+| `prune` | boolean | Whether target-only collection entries may be removed |
+| `sensitive` | boolean | Enables the category's high-impact mutation gate |
+
+Imported defaults:
+
+| Category | Default |
+|---|---|
+| `repository` | managed, no prune |
+| `files` | managed, no prune |
+| `security` | observe + sensitive |
+| `rulesets` | observe + sensitive |
+| `branch_protection` | observe + sensitive |
+| `actions` | observe + sensitive |
+| `environments` | observe + sensitive |
+| `access` | observe + sensitive |
+| `integrations` | observe + sensitive |
+
+Changing `disposition` to `managed` is the explicit opt-in for an imported sensitive category. Keep `prune = false` until removal of target-only entries is intentional.
+
+## `[categories.repository]`
+
+General repository settings and metadata:
+
+```toml
+[categories.repository.policy]
+disposition = "managed"
+prune = false
+sensitive = false
+
+[categories.repository.metadata]
+description = "Reference service"
+homepage = "https://example.com"
+default_branch = "main"
+visibility = "private"
+archived = false
+is_template = false
+allow_forking = false
+
+[categories.repository.settings]
+has_issues = true
+has_projects = false
+has_wiki = false
+has_discussions = true
+has_pull_requests = true
+pull_request_creation_policy = "ALL"
+issue_creation_policy = "ALL"
+has_sponsorships_enabled = false
+allow_squash_merge = true
+allow_merge_commit = false
+allow_rebase_merge = true
+allow_auto_merge = true
+delete_branch_on_merge = true
+allow_update_branch = true
+squash_merge_commit_title = "PR_TITLE"
+squash_merge_commit_message = "PR_BODY"
+merge_commit_title = "PR_TITLE"
+merge_commit_message = "PR_BODY"
+web_commit_signoff_required = true
+use_squash_pr_title_as_default = false
+topics = ["managed", "platform"]
+```
+
+Custom property values:
+
+```toml
+[[categories.repository.custom_properties]]
+property_name = "system"
+value = "payments"
+```
+
+Immutable releases:
+
+```toml
+[categories.repository.immutable_releases]
+enabled = true
+enforced_by_owner = false
+```
+
+Visibility and archive changes require `--allow-high-impact` unless the repository category itself is marked sensitive.
+
+Labels are serialized under `categories.integrations.labels` but are planned with the repository category:
+
+```toml
+[[categories.integrations.labels]]
+name = "bug"
+color = "d73a4a"
+description = "Something is not working"
+default = true
+```
+
+## `[categories.security]`
+
+```toml
+[categories.security]
+advanced_security = true
+code_security = true
 dependabot_alerts = true
 dependabot_security_updates = true
-codeql_advanced_setup = false
+secret_scanning = true
+secret_scanning_push_protection = true
+secret_scanning_validity_checks = true
+secret_scanning_non_provider_patterns = true
+secret_scanning_ai_detection = true
+secret_scanning_delegated_alert_dismissal = false
+secret_scanning_delegated_bypass = true
+private_vulnerability_reporting = true
+
+[categories.security.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[categories.security.codeql_default_setup]
+state = "configured"
+languages = ["java-kotlin"]
+query_suite = "default"
+runner_type = "standard"
 ```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `secret_scanning` | bool | `true` | Enable GitHub secret scanning |
-| `secret_scanning_ai_detection` | bool | `true` | Enable AI-powered secret detection |
-| `push_protection` | bool | `true` | Block pushes containing secrets |
-| `dependabot_alerts` | bool | `true` | Enable Dependabot vulnerability alerts |
-| `dependabot_security_updates` | bool | `true` | Enable automatic Dependabot security PRs |
-| `codeql_advanced_setup` | bool | `false` | Enable CodeQL advanced setup |
-
-All fields default to `true` when loaded from TOML, except `codeql_advanced_setup` which defaults to `false`.
-
----
-
-## `[branch_protection]`
-
-Branch protection rules applied to default branches.
+Attached code-security configurations are stable references:
 
 ```toml
-[branch_protection]
-enabled = true
-required_approvals = 1
-dismiss_stale_reviews = true
-require_code_owner_reviews = false
-require_status_checks = true
-strict_status_checks = false
-enforce_admins = false
-required_linear_history = false
-allow_force_pushes = false
-allow_deletions = false
+[categories.security.configuration_reference]
+type = "code_security_configuration"
+name = "Recommended"
 ```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | bool | `false` | Enable branch protection |
-| `required_approvals` | u32 | `1` | Minimum PR approvals required |
-| `dismiss_stale_reviews` | bool | `false` | Dismiss approvals when new commits are pushed |
-| `require_code_owner_reviews` | bool | `false` | Require review from code owners |
-| `require_status_checks` | bool | `false` | Require status checks to pass before merging |
-| `strict_status_checks` | bool | `false` | Require branch to be up-to-date before merging |
-| `enforce_admins` | bool | `false` | Apply rules to admins too |
-| `required_linear_history` | bool | `false` | Require linear commit history (no merge commits) |
-| `allow_force_pushes` | bool | `false` | Allow force pushes to protected branch |
-| `allow_deletions` | bool | `false` | Allow deleting the protected branch |
+Delegated reviewer entries use stable actors and preserve reviewer mode. Repository fields that GitHub exposes but does not document as repository-writable remain observed/reference state and are never sent in an unsupported PATCH.
 
----
+## `[categories.rulesets]`
 
-## `[rulesets.branch_protection]`
-
-Repository rulesets are the successor to branch protection rules. They offer more flexibility and can be applied at the org or repo level.
+Repository-owned rulesets are exact normalized copies:
 
 ```toml
-[rulesets.branch_protection]
-enabled = true
-name = "Branch Protection"
+[categories.rulesets.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[[categories.rulesets.repository_rulesets]]
+name = "Protect main"
+target = "branch"
 enforcement = "active"
-required_approvals = 1
-dismiss_stale_reviews = true
-require_code_owner_reviews = false
-required_status_checks = ["ci"]
-require_linear_history = false
-block_force_pushes = true
-block_deletions = true
-bypass_teams = ["global-admins"]
+conditions_json = '{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}}'
+
+[[categories.rulesets.repository_rulesets.rules]]
+type = "deletion"
+
+[[categories.rulesets.repository_rulesets.rules]]
+type = "pull_request"
+parameters_json = '{"required_approving_review_count":2}'
+
+[[categories.rulesets.repository_rulesets.bypass_actors]]
+bypass_mode = "pull_request"
+
+[categories.rulesets.repository_rulesets.bypass_actors.actor]
+type = "team"
+slug = "platform"
 ```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | bool | `true` | Enable this ruleset |
-| `name` | string | `"Branch Protection"` | Ruleset display name |
-| `enforcement` | string | `"active"` | `"active"` to enforce, `"evaluate"` for dry-run |
-| `required_approvals` | u32 | `1` | Minimum PR approvals |
-| `dismiss_stale_reviews` | bool | `false` | Dismiss stale approvals on new pushes |
-| `require_code_owner_reviews` | bool | `false` | Require code owner review |
-| `required_status_checks` | list | `[]` | Status checks that must pass |
-| `require_linear_history` | bool | `false` | Require linear history |
-| `block_force_pushes` | bool | `false` | Block force pushes |
-| `block_deletions` | bool | `false` | Block branch deletion |
-| `bypass_teams` | list | `[]` | Teams that can bypass the ruleset (see below) |
-| `overrides` | list | `[]` | Per-repo pattern overrides (see below) |
+Stable actor forms:
 
-### Bypass teams
-
-The `bypass_teams` field specifies GitHub teams that can bypass the ruleset. It supports two forms:
-
-**Simple form** (defaults to `bypass_mode = "always"`):
 ```toml
-bypass_teams = ["my-team", "release-managers"]
+type = "organization_admin"
+type = "team"       # slug = "..."
+type = "user"       # login = "..."
+type = "app"        # slug = "..."
+type = "role"       # name = "..."
+type = "unresolved" # actor_type = "...", optional actor_id
 ```
 
-**Detailed form** with explicit `bypass_mode`:
-```toml
-bypass_teams = [
-    { slug = "my-team", bypass_mode = "pull_request" },
-    { slug = "release-managers", bypass_mode = "always" },
-]
-```
+Inherited organization or enterprise rulesets are stored under `[[categories.rulesets.references]]` with name, target, enforcement, source, and source type. They are never recreated as repository-owned rulesets.
 
-**Mixed form** (both simple and detailed in the same list):
-```toml
-bypass_teams = [
-    "read-only-team",
-    { slug = "owners", bypass_mode = "pull_request" },
-]
-```
+## `[categories.branch_protection]`
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `slug` | string | required | GitHub team slug |
-| `bypass_mode` | string | `"always"` | `"always"` to always bypass, `"pull_request"` to bypass only via PR |
-
-### Per-repo pattern overrides
-
-Use `[[overrides]]` to give repos matching certain glob patterns different ruleset settings within the same system. This is useful when operations repos need more liberal bypass rules than application repos.
+The category stores both a backward-compatible default-branch summary and detailed state:
 
 ```toml
-[rulesets.branch_protection]
+[categories.branch_protection.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[categories.branch_protection.default_branch]
 enabled = true
 required_approvals = 2
-block_force_pushes = true
-bypass_teams = [{ slug = "default-admins", bypass_mode = "always" }]
+dismiss_stale_reviews = true
+require_code_owner_reviews = true
+require_status_checks = true
+strict_status_checks = true
+enforce_admins = true
+required_linear_history = true
+allow_force_pushes = false
+allow_deletions = false
 
-[[rulesets.branch_protection.overrides]]
-repo_patterns = ["*-operations", "*-operation", "*-system"]
-block_force_pushes = false
-bypass_teams = [{ slug = "ops-admins", bypass_mode = "always" }]
+[[categories.branch_protection.default_branch_detailed.status_checks]]
+context = "build"
+app_slug = "github-actions"
 ```
 
-The `repo_patterns` field accepts glob patterns matched against repository names. The first matching override wins. Override fields take precedence over the base config; unset fields fall back to the base.
+Additional protected branches use `[[categories.branch_protection.protected_branches]]` and can include:
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `repo_patterns` | list | yes | Glob patterns to match repo names |
-| *(any ruleset field)* | -- | no | Override value for matching repos |
+- status check contexts and app bindings
+- push and dismissal restrictions
+- pull-request bypass allowances
+- last-push approval
+- block creations
+- conversation resolution
+- signed commits
+- branch lock
+- fork syncing
 
-Per-system overrides can also define their own repo pattern overrides:
+Branch names and actor/app identities are validated before apply.
+
+## `[categories.actions]`
+
+```toml
+[categories.actions.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[categories.actions.settings]
+enabled = true
+allowed_actions = "selected"
+selected_actions = ["actions/checkout@*", "gradle/actions/setup-gradle@*"]
+allow_github_owned_actions = true
+allow_verified_creator_actions = false
+requires_pinned_actions = true
+default_workflow_permissions = "read"
+can_approve_pull_request_reviews = false
+artifact_retention_days = 30
+log_retention_days = 30
+private_fork_workflows_enabled = false
+fork_pull_request_contributor_approval = "first_time_contributors"
+workflow_access_level = "organization"
+oidc_use_default = true
+oidc_use_immutable_subject = true
+oidc_subject_claim_include_keys = ["repo", "context"]
+```
+
+Readable variables are copied:
+
+```toml
+[[categories.actions.variables]]
+name = "JAVA_VERSION"
+value = "25"
+```
+
+Workflow state:
+
+```toml
+[[categories.actions.workflows]]
+path = ".github/workflows/ci.yml"
+enabled = true
+```
+
+Secret names use external values:
+
+```toml
+[[categories.actions.secrets]]
+name = "DEPLOY_TOKEN"
+
+[categories.actions.secrets.value_from]
+source = "env"
+key = "WARD_ACTIONS_SECRET_DEPLOY_TOKEN"
+```
+
+`dependabot_secrets` and `codespaces_secrets` use the same shape. Organization variables/secrets, apps, self-hosted runners, and other observed resources use `[[categories.actions.references]]`.
+
+Self-hosted runner references are diagnostic only. Ward never registers or deletes a runner.
+
+## `[categories.environments]`
+
+```toml
+[categories.environments.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[[categories.environments.entries]]
+name = "production"
+wait_timer_minutes = 10
+prevent_self_review = true
+
+[categories.environments.entries.deployment_policy]
+protected_branches = false
+custom_branch_policies = true
+branch_patterns = ["main", "release/*"]
+tag_patterns = ["v*"]
+
+[[categories.environments.entries.reviewers]]
+[categories.environments.entries.reviewers.actor]
+type = "team"
+slug = "release-managers"
+
+[[categories.environments.entries.variables]]
+name = "REGION"
+value = "eu-west-1"
+
+[[categories.environments.entries.secrets]]
+name = "PROD_TOKEN"
+
+[categories.environments.entries.secrets.value_from]
+source = "env"
+key = "WARD_ENV_PRODUCTION_SECRET_PROD_TOKEN"
+```
+
+Deployment protection apps are references under `protection_apps`.
+
+## `[categories.access]`
+
+```toml
+[categories.access.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[[categories.access.teams]]
+slug = "developers"
+permission = "push"
+
+[[categories.access.collaborators]]
+permission = "maintain"
+
+[categories.access.collaborators.actor]
+type = "user"
+login = "octocat"
+
+[[categories.access.references]]
+type = "app"
+name = "dependabot"
+```
+
+Custom repository roles and app installations remain stable references. Pending invitations retain enough target state to cancel the correct invitation when pruning is explicitly enabled.
+
+## `[categories.integrations]`
+
+Webhooks:
+
+```toml
+[categories.integrations.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[[categories.integrations.webhooks]]
+url = "https://hooks.example.com/..."
+active = true
+events = ["push", "pull_request"]
+content_type = "json"
+insecure_ssl = false
+
+[categories.integrations.webhooks.secret]
+source = "env"
+key = "WARD_WEBHOOK_SECRET_1"
+```
+
+Credentialed URLs also have `url_from`; Ward never applies the redacted display URL.
+
+Deploy keys:
+
+```toml
+[[categories.integrations.deploy_keys]]
+title = "deployment"
+read_only = true
+fingerprint = "SHA256:..."
+
+[categories.integrations.deploy_keys.replacement_key]
+source = "env"
+key = "WARD_DEPLOY_KEY_DEPLOYMENT_1"
+```
+
+Pages:
+
+```toml
+[categories.integrations.pages]
+build_type = "workflow"
+source_branch = "main"
+source_path = "/docs"
+cname = "docs.example.com"
+https_enforced = true
+```
+
+Autolinks:
+
+```toml
+[[categories.integrations.autolinks]]
+key_prefix = "JIRA-"
+url_template = "https://jira.example.com/browse/<num>"
+is_alphanumeric = false
+```
+
+## `[categories.files]`
+
+```toml
+[categories.files]
+include = [".github/**", "renovate.json"]
+exclude = [".github/workflows/experimental-*"]
+
+[categories.files.policy]
+disposition = "managed"
+prune = false
+sensitive = false
+
+[[categories.files.entries]]
+path = ".github/workflows/ci.yml"
+content = "name: CI\n"
+encoding = "utf-8"
+mode = "100644"
+source_sha = "..."
+
+[[categories.files.entries]]
+path = ".github/logo.png"
+content = "iVBORw0KGgo..."
+encoding = "base64"
+mode = "100644"
+source_sha = "..."
+```
+
+Supported write modes are `100644` and `100755`. Symlinks, submodules, LFS payloads, unsafe paths, unknown modes, oversized blobs, and truncated listings block unsafe prune behavior.
+
+## External values
+
+```toml
+[some.value_from]
+source = "env"
+key = "WARD_VALUE"
+```
+
+Manual placeholders are also accepted:
+
+```toml
+[some.value_from]
+source = "manual"
+hint = "Supply this value before apply"
+```
+
+An unresolved value blocks only the write that requires it.
+
+## `[[coverage]]`
+
+```toml
+[[coverage]]
+category = "repository"
+endpoint = "commit-comments"
+outcome = "unsupported"
+reason = "No documented public repository API"
+```
+
+Outcomes are `collected`, `redacted`, `permission_denied`, `unsupported`, `unavailable`, and `not_applicable`. Coverage is source evidence, not desired mutable state.
+
+## Targets: `[[systems]]`
 
 ```toml
 [[systems]]
-id = "acme"
-name = "Party Registry"
-
-[systems.rulesets.branch_protection]
-bypass_teams = [{ slug = "party-owners", bypass_mode = "pull_request" }]
-
-[[systems.rulesets.branch_protection.overrides]]
-repo_patterns = ["*-operations", "*-system"]
-bypass_teams = [{ slug = "party-owners", bypass_mode = "always" }]
+id = "payments"
+name = "Payments"
+match_prefix = false
+repos = ["payments-api", "payments-worker"]
+exclude = []
 ```
 
----
+When `match_prefix = true`, Ward finds repositories named exactly `id` or beginning with `id-`, applies exclusion regexes, then adds explicit `repos`. Imported manifests use explicit-only targeting.
+
+Global `--repo` and `--system` flags narrow this set.
 
 ## `[templates]`
 
-Controls how `ward commit` creates PRs and deploys files.
-
 ```toml
 [templates]
-branch = "chore/ward-setup"
+branch = "chore/ward-sync"
 reviewers = ["alice", "bob"]
 commit_message_prefix = "chore: "
-# custom_dir = "/path/to/custom/templates"
 ```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `branch` | string | `"chore/ward-setup"` | Branch name for template PRs |
-| `reviewers` | list | `[]` | GitHub usernames to request review from |
-| `commit_message_prefix` | string | `"chore: "` | Prefix for commit messages |
-| `custom_dir` | string | none | Path to custom templates directory (default: `~/.ward/templates/`) |
+These fields control the configuration-file branch, commit/PR title prefix, and requested reviewers. Existing template-registry configuration remains supported for `ward commit --template`.
 
-### `[templates.registries.<name>]`
+## Legacy compatibility
 
-Configure package registries for Dependabot templates. Useful for private Artifactory or other registry proxies.
+Ward still loads the legacy sections:
 
-```toml
-[templates.registries.gradle-artifactory]
-type = "maven-repository"
-url = "https://your-artifactory.example.com/artifactory/maven"
-jfrog_oidc_provider = "your-oidc-provider-id"
-```
+- `[security]`
+- `[repository]`
+- `[branch_protection]`
+- `[rulesets.branch_protection]`
+- `[[rulesets.repository]]`
+- `[[files]]`
+- team entries under `[[systems]]`
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `type` | string | yes | Registry type (e.g., `"maven-repository"`) |
-| `url` | string | yes | Registry URL |
-| `jfrog_oidc_provider` | string | no | JFrog OIDC provider name for authentication |
-| `audience` | string | no | OIDC audience claim |
+They are retained for existing manifests and focused legacy commands. New imports also emit compatibility fields, but v2 categories are authoritative for comprehensive plan/apply and safety gates.
 
----
+Use `ward apply --category <CATEGORY>` for imported v2 state rather than bypassing category policies through an older command.
 
-## `[[systems]]`
+## Policy rules
 
-Systems group repositories by naming convention. Each system matches repos whose name starts with the system `id` as a prefix.
-
-```toml
-[[systems]]
-id = "backend"
-name = "Backend Services"
-exclude = ["operations?", "workflows", "system"]
-repos = ["standalone-service", "shared-library"]
-teams = [
-    { slug = "developers", permission = "push" },
-    { slug = "devops", permission = "admin" },
-]
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `id` | string | yes | System identifier, used as repo name prefix for matching |
-| `name` | string | yes | Human-readable display name |
-| `exclude` | list | no | Regex patterns to exclude from matched repos |
-| `repos` | list | no | Explicit repo names to include (no prefix needed) |
-| `security` | table | no | Per-system security overrides (same fields as `[security]`) |
-| `teams` | list | no | Team access configuration |
-
-### System filtering logic
-
-1. **Prefix matching**: a system with `id = "backend"` matches all repos named `backend-*` in the org (requires at least 2 repos to match the prefix pattern).
-2. **Exclude patterns**: the `exclude` list contains regex patterns. Repos whose suffix (after the prefix) matches any pattern are excluded. For example, `"operations?"` matches both `backend-operation` and `backend-operations`.
-3. **Explicit repos**: the `repos` list adds specific repos by name, regardless of prefix. These repos do not need to start with the system id.
-
-Filtering is applied in order: prefix match, then exclude, then add explicit repos.
-
-### Per-system overrides
-
-A system can override global security settings:
-
-```toml
-[[systems]]
-id = "frontend"
-name = "Frontend Apps"
-
-[systems.security]
-codeql_advanced_setup = true
-```
-
-Fields not specified in the override inherit from the global `[security]` section.
-
-### Team access
-
-Each team entry specifies a GitHub team slug and a permission level:
-
-| Permission | Description |
-|------------|-------------|
-| `pull` | Read-only access |
-| `triage` | Read + manage issues and PRs |
-| `push` | Read + write (push code) |
-| `maintain` | Push + manage repo settings (except destructive) |
-| `admin` | Full access |
-
----
-
-## `[[policies]]`
-
-Policy rules define org-wide compliance requirements. Each policy is a rule that is evaluated against every repository. Violations are reported by `ward policy check`.
+The existing `[[policies]]` engine remains available:
 
 ```toml
 [[policies]]
 name = "no-public-repos"
 rule = "visibility != 'public'"
 severity = "error"
-
-[[policies]]
-name = "require-secret-scanning"
-rule = "security.secret_scanning"
-severity = "error"
-
-[[policies]]
-name = "require-push-protection"
-rule = "security.push_protection"
-severity = "error"
-
-[[policies]]
-name = "minimum-approvers"
-rule = "branch_protection.required_approvals >= 2"
-severity = "warning"
-
-[[policies]]
-name = "no-force-push"
-rule = "!branch_protection.allow_force_pushes"
-severity = "warning"
 ```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `name` | string | required | Human-readable policy name |
-| `rule` | string | required | Rule expression (see syntax below) |
-| `severity` | string | `"error"` | `"error"` or `"warning"` |
+See `ward policy list` and `ward policy check` for supported expressions.
 
-### Policy rule syntax
+## Complete example
 
-Rules support these patterns:
-
-| Pattern | Example | Description |
-|---------|---------|-------------|
-| `field.subfield` | `security.secret_scanning` | Boolean check (true = pass) |
-| `!field.subfield` | `!branch_protection.allow_force_pushes` | Negated boolean (false = pass) |
-| `field >= N` | `branch_protection.required_approvals >= 2` | Numeric comparison |
-| `field != 'value'` | `visibility != 'public'` | String comparison |
-| `field == 'value'` | `visibility == 'private'` | String equality |
-
-Supported comparison operators: `>=`, `<=`, `==`, `!=`, `>`, `<`.
-
-### Available fields
-
-| Field path | Type | Description |
-|------------|------|-------------|
-| `visibility` | string | Repository visibility (`public`, `private`, `internal`) |
-| `archived` | bool | Whether the repository is archived |
-| `security.secret_scanning` | bool | Secret scanning enabled |
-| `security.push_protection` | bool | Push protection enabled |
-| `security.dependabot_alerts` | bool | Dependabot alerts enabled |
-| `security.dependabot_security_updates` | bool | Dependabot security updates enabled |
-| `security.secret_scanning_ai_detection` | bool | AI secret detection enabled |
-| `branch_protection.enabled` | bool | PR reviews required |
-| `branch_protection.required_approvals` | number | Required approving review count |
-| `branch_protection.dismiss_stale_reviews` | bool | Dismiss stale reviews on push |
-| `branch_protection.require_code_owner_reviews` | bool | Code owner review required |
-| `branch_protection.require_status_checks` | bool | Status checks required |
-| `branch_protection.enforce_admins` | bool | Rules enforced for admins |
-| `branch_protection.allow_force_pushes` | bool | Force pushes allowed |
-| `branch_protection.allow_deletions` | bool | Branch deletions allowed |
-
----
-
-## Full annotated example
-
-See [ward.example.toml](../ward.example.toml) in the repository root for a complete working example with comments.
-
-```toml
-[org]
-name = "my-github-org"
-
-[security]
-secret_scanning = true
-secret_scanning_ai_detection = true
-push_protection = true
-dependabot_alerts = true
-dependabot_security_updates = true
-codeql_advanced_setup = false
-
-[templates]
-branch = "chore/ward-setup"
-reviewers = ["alice", "bob"]
-commit_message_prefix = "chore: "
-
-[templates.registries.gradle-artifactory]
-type = "maven-repository"
-url = "https://your-artifactory.example.com/artifactory/maven"
-
-[branch_protection]
-enabled = true
-required_approvals = 1
-dismiss_stale_reviews = true
-require_code_owner_reviews = false
-require_status_checks = true
-strict_status_checks = false
-enforce_admins = false
-required_linear_history = false
-allow_force_pushes = false
-allow_deletions = false
-
-[rulesets.branch_protection]
-enabled = true
-enforcement = "active"
-required_approvals = 1
-dismiss_stale_reviews = true
-require_code_owner_reviews = false
-required_status_checks = ["ci"]
-require_linear_history = false
-block_force_pushes = true
-block_deletions = true
-bypass_teams = [{ slug = "global-admins", bypass_mode = "always" }]
-
-# Operations repos get different bypass rules
-[[rulesets.branch_protection.overrides]]
-repo_patterns = ["*-operations", "*-operation", "*-system"]
-block_force_pushes = false
-bypass_teams = [{ slug = "global-admins", bypass_mode = "always" }]
-
-[[systems]]
-id = "backend"
-name = "Backend Services"
-exclude = ["operations?", "workflows", "system"]
-repos = ["standalone-service", "shared-library"]
-teams = [
-    { slug = "developers", permission = "push" },
-    { slug = "devops", permission = "admin" },
-]
-
-[systems.rulesets.branch_protection]
-bypass_teams = [{ slug = "backend-owners", bypass_mode = "pull_request" }]
-
-[[systems.rulesets.branch_protection.overrides]]
-repo_patterns = ["*-operations"]
-bypass_teams = [{ slug = "backend-owners", bypass_mode = "always" }]
-
-[[systems]]
-id = "frontend"
-name = "Frontend Apps"
-exclude = ["operations?", "workflows"]
-
-[[systems]]
-id = "platform"
-name = "Platform & Infra"
-exclude = ["operations?", "workflows"]
-
-[[policies]]
-name = "no-public-repos"
-rule = "visibility != 'public'"
-severity = "error"
-
-[[policies]]
-name = "require-secret-scanning"
-rule = "security.secret_scanning"
-severity = "error"
-
-[[policies]]
-name = "minimum-approvers"
-rule = "branch_protection.required_approvals >= 1"
-severity = "warning"
-```
-
----
-
-## Managing config without hand-editing
-
-Ward provides `ward config` subcommands for programmatic config changes:
+The most accurate complete example is generated from a real repository:
 
 ```bash
-ward config show                                # pretty-print current config
-ward config path                                # show config file location
-ward config edit                                # open in $EDITOR
-ward config set security.push_protection true   # set a value
-ward config set branch_protection.required_approvals 2
-ward config add-system                          # interactive system wizard
-ward config remove-system backend               # remove a system by ID
+ward import OWNER/REPO --stdout > ward.toml
 ```
 
-See the [Commands](commands.md) reference for full details on `ward config`.
+See [ward.example.toml](../ward.example.toml) for a compact hand-authored example.

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Manifest v2 with source provenance, per-category management policies, coverage evidence, stable references, and external-value placeholders
+- Comprehensive repository import for General settings, security, rulesets, detailed branch protection, Actions, environments, access, integrations, labels, and configuration files
+- `ward import --target`, `--include`, `--exclude`, and `--strict` for one-command baseline and target setup
+- Binary-safe configuration-file snapshots with Git modes, source SHAs, include/exclude globs, and atomic Git Data API commits
+- Unified `ward plan` and `ward apply` with category filtering, high-impact gates, dependency-aware ordering, verification, and structured audit records
+- Bounded GitHub retries for rate limits and transient 5xx responses
+- Explicit-only systems via `match_prefix = false`
+
+### Changed
+
+- Repository import now snapshots every reusable setting available through documented public GitHub APIs and records partial/unsupported state instead of guessing
+- Imported sensitive categories default to observe-only and require explicit managed+sensitive opt-in
+- Secret values, credentialed webhook URLs, and deploy-key replacement material use external placeholders
+- Inherited organization/enterprise resources and self-hosted runners are retained as references rather than cloned
+- Configuration files are always delivered through a dedicated branch and pull request; dependent enforcement is deferred until merge
+- Imported manifests target only the source repository unless existing same-owner targets are supplied explicitly
+
+### Removed
+
+- Removed the interactive TUI, its disk cache, and the `ratatui`/`crossterm` dependencies
+
+### Fixed
+
+- Optional endpoint failures no longer erase unrelated imported categories
+- GitHub path/ref encoding, pagination, webhook redaction, invitation cancellation, deploy-key replacement ordering, and secret idempotence
+- Ruleset/branch-protection actor identity and status-check app bindings now round-trip without reusing source-local IDs
+- Legacy security reads correctly handle both full repository and direct `security_and_analysis` payloads
+
 ## [0.4.2] - 2026-05-07
 
 ### Fixed
@@ -119,7 +149,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JSON lines audit trail logged to `~/.ward/audit.log`
 - Custom template support via `~/.ward/templates/` directory
 
-[Unreleased]: https://github.com/OriginalMHV/Ward/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/OriginalMHV/Ward/compare/v0.4.2...HEAD
 [0.4.2]: https://github.com/OriginalMHV/Ward/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/OriginalMHV/Ward/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/OriginalMHV/Ward/compare/v0.3.0...v0.4.0

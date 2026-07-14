@@ -3,6 +3,8 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use super::Client;
+use super::pagination;
+use super::response;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Repository {
@@ -32,72 +34,42 @@ struct SearchResponse {
 impl Client {
     /// List all repositories for the configured org, handling pagination.
     pub async fn list_repos(&self) -> Result<Vec<Repository>> {
-        let mut all_repos = Vec::new();
-        let mut page = 1u32;
-
-        loop {
-            let resp = self
-                .get(&format!(
-                    "/orgs/{}/repos?per_page=100&page={page}&type=all",
-                    self.org
-                ))
-                .await?;
-
-            let status = resp.status();
-            if !status.is_success() {
-                let body = resp.text().await.unwrap_or_default();
-                anyhow::bail!("Failed to list repos (HTTP {status}): {body}");
-            }
-
-            let repos: Vec<Repository> = resp
-                .json()
-                .await
-                .context("Failed to parse repo list response")?;
-
-            if repos.is_empty() {
-                break;
-            }
-
-            all_repos.extend(repos);
-            page += 1;
-        }
-
-        Ok(all_repos)
+        pagination::collect_paginated(self, |page| {
+            format!(
+                "/orgs/{}/repos?per_page={}&page={}&type=all",
+                self.org, page.per_page, page.number
+            )
+        })
+        .await
+        .context("Failed to parse repo list response")
     }
 
     /// Search for repos matching a name query within the configured org.
     /// Uses the GitHub search API which is much faster than listing all repos
     /// and filtering client-side.
     async fn search_repos_by_name(&self, name_query: &str) -> Result<Vec<Repository>> {
-        let mut all_repos = Vec::new();
-        let mut page = 1u32;
         // Build query: org:<org>+<name_query>+in:name
         // The `+` in the query string acts as a space/AND for GitHub search.
         let query = format!("org:{}+{}+in:name", self.org, name_query);
+        let mut page = 1u32;
+        let mut all_repos = Vec::new();
 
         loop {
-            let resp = self
-                .get(&format!(
-                    "/search/repositories?q={query}&per_page=100&page={page}"
-                ))
-                .await?;
+            let path = format!(
+                "/search/repositories?q={query}&per_page={}&page={page}",
+                pagination::PAGE_SIZE
+            );
+            let search_result: SearchResponse =
+                response::expect_json(self.get(&path).await?, "GET", &path)
+                    .await
+                    .context("Failed to parse search response")?;
+            let item_count = search_result.items.len();
+            all_repos.extend(search_result.items);
 
-            let status = resp.status();
-            if !status.is_success() {
-                let body = resp.text().await.unwrap_or_default();
-                anyhow::bail!("Failed to search repos (HTTP {status}): {body}");
-            }
-
-            let search_result: SearchResponse = resp
-                .json()
-                .await
-                .context("Failed to parse search response")?;
-
-            if search_result.items.is_empty() {
+            if item_count < pagination::PAGE_SIZE as usize {
                 break;
             }
 
-            all_repos.extend(search_result.items);
             page += 1;
         }
 
@@ -112,10 +84,15 @@ impl Client {
     pub async fn list_repos_for_system(
         &self,
         system_id: &str,
+        match_prefix: bool,
         exclude_patterns: &[String],
         explicit_repos: &[String],
     ) -> Result<Vec<Repository>> {
-        let search_results = self.search_repos_by_name(system_id).await?;
+        let search_results = if match_prefix {
+            self.search_repos_by_name(system_id).await?
+        } else {
+            Vec::new()
+        };
 
         let exclude_regex = if exclude_patterns.is_empty() {
             None
@@ -167,16 +144,9 @@ impl Client {
 
     /// Get a single repository.
     pub async fn get_repo(&self, repo_name: &str) -> Result<Repository> {
-        let resp = self
-            .get(&format!("/repos/{}/{repo_name}", self.org))
-            .await?;
-
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("Failed to get repo {repo_name} (HTTP {status}): {body}");
-        }
-
-        resp.json().await.context("Failed to parse repo response")
+        let path = format!("/repos/{}/{repo_name}", self.org);
+        response::expect_json(self.get(&path).await?, "GET", &path)
+            .await
+            .context("Failed to parse repo response")
     }
 }

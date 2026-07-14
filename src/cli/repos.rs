@@ -43,7 +43,12 @@ async fn list_repos(client: &Client, manifest: &Manifest, system: Option<&str>) 
         let excludes = manifest.exclude_patterns_for_system(sys);
         let explicit = manifest.explicit_repos_for_system(sys);
         client
-            .list_repos_for_system(sys, &excludes, &explicit)
+            .list_repos_for_system(
+                sys,
+                manifest.matches_prefix_for_system(sys),
+                &excludes,
+                &explicit,
+            )
             .await?
     } else {
         client.list_repos().await?

@@ -40,7 +40,14 @@ impl ProtectionCommand {
     ) -> Result<()> {
         match &self.action {
             ProtectionAction::Plan => plan(client, manifest, system, repo).await,
-            ProtectionAction::Apply { yes } => apply(client, manifest, system, repo, *yes).await,
+            ProtectionAction::Apply { yes } => {
+                crate::reconcile::unified::guard_legacy_mutation(
+                    manifest,
+                    crate::reconcile::unified::Category::BranchProtection,
+                    "protection apply",
+                )?;
+                apply(client, manifest, system, repo, *yes).await
+            }
             ProtectionAction::Audit => audit(client, manifest, system, repo).await,
         }
     }
@@ -64,7 +71,12 @@ async fn resolve_repos_with_branches(
     let excludes = manifest.exclude_patterns_for_system(sys);
     let explicit = manifest.explicit_repos_for_system(sys);
     let repos = client
-        .list_repos_for_system(sys, &excludes, &explicit)
+        .list_repos_for_system(
+            sys,
+            manifest.matches_prefix_for_system(sys),
+            &excludes,
+            &explicit,
+        )
         .await?;
     Ok(repos
         .into_iter()

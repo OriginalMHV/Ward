@@ -29,7 +29,12 @@ impl Manifest {
     pub fn system_for_repo(&self, repo_name: &str) -> Option<&str> {
         self.systems
             .iter()
-            .filter(|s| repo_name == s.id || repo_name.starts_with(&format!("{}-", s.id)))
+            .filter(|system| {
+                system.repos.iter().any(|repo| repo == repo_name)
+                    || (system.match_prefix
+                        && (repo_name == system.id
+                            || repo_name.starts_with(&format!("{}-", system.id))))
+            })
             .max_by_key(|s| s.id.len()) // longest match wins
             .map(|s| s.id.as_str())
     }
@@ -78,6 +83,57 @@ impl Manifest {
             .map(|s| s.repos.clone())
             .unwrap_or_default()
     }
+
+    pub fn matches_prefix_for_system(&self, system_id: &str) -> bool {
+        self.systems
+            .iter()
+            .find(|s| s.id == system_id)
+            .is_none_or(|s| s.match_prefix)
+    }
+
+    pub fn v2_schema(&self) -> Option<&ManifestSchema> {
+        self.v2.schema.as_ref()
+    }
+
+    pub fn v2_provenance(&self) -> Option<&ManifestProvenance> {
+        self.v2.provenance.as_ref()
+    }
+
+    pub fn v2_categories(&self) -> &ManifestCategories {
+        &self.v2.categories
+    }
+
+    pub fn v2_coverage(&self) -> &[CoverageEntry] {
+        &self.v2.coverage
+    }
+
+    pub fn v2_actions_category(&self) -> Option<&ActionsCategoryV2> {
+        self.v2.categories.actions.as_ref()
+    }
+
+    pub fn v2_security_category(&self) -> Option<&SecurityCategoryV2> {
+        self.v2.categories.security.as_ref()
+    }
+
+    pub fn v2_repository_category(&self) -> Option<&RepositoryCategoryV2> {
+        self.v2.categories.repository.as_ref()
+    }
+
+    pub fn v2_branch_protection_category(&self) -> Option<&BranchProtectionCategoryV2> {
+        self.v2.categories.branch_protection.as_ref()
+    }
+
+    pub fn v2_environments_category(&self) -> Option<&EnvironmentsCategoryV2> {
+        self.v2.categories.environments.as_ref()
+    }
+
+    pub fn v2_access_category(&self) -> Option<&RepositoryAccessCategoryV2> {
+        self.v2.categories.access.as_ref()
+    }
+
+    pub fn v2_integrations_category(&self) -> Option<&RepositoryIntegrationsCategoryV2> {
+        self.v2.categories.integrations.as_ref()
+    }
 }
 
 impl Default for Manifest {
@@ -86,12 +142,16 @@ impl Default for Manifest {
             org: OrgConfig {
                 name: String::new(),
             },
+            source: None,
             security: SecurityConfig::default(),
+            repository: None,
             templates: TemplateConfig::default(),
             branch_protection: BranchProtectionConfig::default(),
             rulesets: RulesetsConfig::default(),
             systems: Vec::new(),
+            files: Vec::new(),
             policies: Vec::new(),
+            v2: ManifestV2State::default(),
         }
     }
 }

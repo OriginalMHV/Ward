@@ -1,586 +1,1187 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Args;
 use console::style;
 
+use crate::config::manifest::{
+    ActionsCategoryV2, ActorReference, BranchProtectionCategoryV2, CategoryPolicy, CoverageEntry,
+    CoverageOutcome, EnvironmentsCategoryV2, ExternalValueReference, FileEncoding, FilesCategoryV2,
+    LabelConfigV2, ManagedFile, Manifest, ManifestCategories, ManifestCategoryName,
+    ManifestProvenance, ManifestSchema, ManifestV2State, OrgConfig, RepositoryAccessCategoryV2,
+    RepositoryIntegrationsCategoryV2, RepositoryRuleConfig, RepositoryRulesetConfig,
+    RepositoryRulesetV2, RulesetBypassActorConfig, RulesetsCategoryV2, RulesetsConfig,
+    SecurityCategoryV2, SourceConfig, SystemConfig, TemplateConfig,
+};
 use crate::github::Client;
-use crate::github::branch_protection::BranchProtectionState;
-use crate::github::repos::Repository;
-use crate::github::security::SecurityState;
+use crate::reconcile::access_integrations::{collect_access, collect_integrations};
+use crate::reconcile::actions_environments::{
+    IssueSeverity, collect_actions_category, collect_environments_category,
+};
+use crate::reconcile::files::{FilesIssueSeverity, collect_files_category};
+use crate::reconcile::general;
+use crate::reconcile::security_rules::{
+    ReconcileIssueSeverity, collect_branch_protection_category, collect_rulesets_category,
+    collect_security_category,
+};
+
+const DEFAULT_OUTPUT: &str = "ward.toml";
+const DEFAULT_BRANCH: &str = "chore/ward-sync";
 
 #[derive(Args)]
 pub struct ImportCommand {
-    /// GitHub organization to import from
-    #[arg(long, required = true)]
-    org: String,
+    /// Repository to use as the configuration source (OWNER/REPO or GitHub URL)
+    pub source: String,
 
-    /// Output to stdout instead of ward.toml
+    /// Existing target repository. Repeat for multiple targets; defaults to the source.
+    #[arg(long, value_name = "OWNER/REPO")]
+    target: Vec<String>,
+
+    /// Include configuration files matching this glob. Repeatable.
+    #[arg(long, value_name = "GLOB")]
+    include: Vec<String>,
+
+    /// Exclude configuration files matching this glob. Repeatable.
+    #[arg(long, value_name = "GLOB")]
+    exclude: Vec<String>,
+
+    /// Fail instead of recording permission-denied or unavailable coverage.
+    #[arg(long)]
+    strict: bool,
+
+    /// Output path
+    #[arg(long, default_value = DEFAULT_OUTPUT)]
+    output: PathBuf,
+
+    /// Print only the generated configuration to stdout.
     #[arg(long)]
     stdout: bool,
 
-    /// Minimum repos to form a system (default: 2)
-    #[arg(long, default_value_t = 2)]
-    min_group_size: usize,
+    /// Replace an existing output file.
+    #[arg(long)]
+    force: bool,
 
-    /// Max concurrent API calls
+    /// Max concurrent API calls.
     #[arg(long, default_value_t = 5)]
     parallelism: usize,
 }
 
-#[derive(Debug, Clone)]
-struct DetectedSystem {
-    id: String,
-    repos: Vec<String>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryRef {
+    pub owner: String,
+    pub repo: String,
 }
 
-#[derive(Debug, Clone, Default)]
-struct SampledSecurity {
-    secret_scanning: bool,
-    push_protection: bool,
-    dependabot_alerts: bool,
-    dependabot_security_updates: bool,
-    secret_scanning_ai_detection: bool,
+impl RepositoryRef {
+    pub fn full_name(&self) -> String {
+        format!("{}/{}", self.owner, self.repo)
+    }
 }
 
-#[derive(Debug, Clone, Default)]
-struct SampledProtection {
-    enabled: bool,
-    required_approvals: u32,
-    dismiss_stale_reviews: bool,
-    require_code_owner_reviews: bool,
-    require_status_checks: bool,
-    strict_status_checks: bool,
-    enforce_admins: bool,
-    required_linear_history: bool,
-    allow_force_pushes: bool,
-    allow_deletions: bool,
+impl fmt::Display for RepositoryRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.owner, self.repo)
+    }
+}
+
+impl FromStr for RepositoryRef {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        let trimmed = value.trim().trim_end_matches('/');
+        let path = if let Some(path) = trimmed.strip_prefix("https://github.com/") {
+            path
+        } else if let Some(path) = trimmed.strip_prefix("http://github.com/") {
+            path
+        } else if let Some(path) = trimmed.strip_prefix("git@github.com:") {
+            path
+        } else if trimmed.contains("://") {
+            anyhow::bail!("Only github.com repository URLs are supported");
+        } else {
+            trimmed
+        };
+
+        let path = path.trim_matches('/').trim_end_matches(".git");
+        let mut segments = path.split('/');
+        let owner = segments.next().unwrap_or_default();
+        let repo = segments.next().unwrap_or_default();
+
+        if owner.is_empty() || repo.is_empty() || segments.next().is_some() {
+            anyhow::bail!(
+                "Invalid repository '{value}'. Use OWNER/REPO or https://github.com/OWNER/REPO"
+            );
+        }
+
+        Ok(Self {
+            owner: owner.to_owned(),
+            repo: repo.to_owned(),
+        })
+    }
+}
+
+pub struct ImportOptions<'a> {
+    pub source: &'a str,
+    pub targets: &'a [String],
+    pub include: &'a [String],
+    pub exclude: &'a [String],
+    pub strict: bool,
+    pub output: &'a Path,
+    pub stdout: bool,
+    pub force: bool,
+    pub parallelism: usize,
+}
+
+#[derive(Debug)]
+struct Snapshot {
+    manifest: Manifest,
+    warnings: Vec<String>,
+    strict_failures: Vec<String>,
+    counts: SnapshotCounts,
+}
+
+#[derive(Debug, Default)]
+struct SnapshotCounts {
+    files: usize,
+    rulesets: usize,
+    inherited_rulesets: usize,
+    workflows: usize,
+    environments: usize,
+    access_entries: usize,
+    integrations: usize,
 }
 
 impl ImportCommand {
     pub async fn run(self) -> Result<()> {
-        let client = Client::new(&self.org, self.parallelism).await?;
-
-        println!(
-            "\n  {} Fetching repositories for {}...",
-            style("[..]").dim(),
-            style(&self.org).cyan().bold()
-        );
-
-        let repos = client.list_repos().await?;
-        let active: Vec<&Repository> = repos.iter().filter(|r| !r.archived).collect();
-
-        println!(
-            "  {} Found {} repositories ({} active)",
-            style("[ok]").green(),
-            repos.len(),
-            active.len()
-        );
-
-        let active_names: Vec<String> = active.iter().map(|r| r.name.clone()).collect();
-        let systems = detect_systems(&active_names, self.min_group_size);
-
-        println!(
-            "  {} Detected {} systems",
-            style("[ok]").green(),
-            systems.len()
-        );
-        for sys in &systems {
-            println!(
-                "    - {} ({} repos)",
-                style(&sys.id).bold(),
-                sys.repos.len()
-            );
-        }
-
-        let grouped: Vec<&str> = systems
-            .iter()
-            .flat_map(|s| s.repos.iter().map(String::as_str))
-            .collect();
-        let ungrouped: Vec<&str> = active_names
-            .iter()
-            .filter(|n| !grouped.contains(&n.as_str()))
-            .map(String::as_str)
-            .collect();
-
-        println!(
-            "\n  {} Sampling security and branch protection...",
-            style("[..]").dim()
-        );
-
-        let repo_map: HashMap<&str, &Repository> =
-            active.iter().map(|r| (r.name.as_str(), *r)).collect();
-
-        let mut system_security: HashMap<String, SampledSecurity> = HashMap::new();
-        let mut global_protection = SampledProtection::default();
-        let mut sampled_any_protection = false;
-
-        for sys in &systems {
-            let sample: Vec<&str> = sys.repos.iter().take(5).map(String::as_str).collect();
-            let mut sec_states = Vec::new();
-            let mut prot_states = Vec::new();
-
-            for repo_name in &sample {
-                if let Ok(sec) = client.get_security_state(repo_name).await {
-                    sec_states.push(sec);
-                }
-                if let Some(repo) = repo_map.get(repo_name) {
-                    if let Ok(Some(prot)) = client
-                        .get_branch_protection(repo_name, &repo.default_branch)
-                        .await
-                    {
-                        prot_states.push(prot);
-                    }
-                }
-            }
-
-            if !sec_states.is_empty() {
-                system_security.insert(sys.id.clone(), majority_vote_security(&sec_states));
-            }
-
-            if !prot_states.is_empty() && !sampled_any_protection {
-                global_protection = majority_vote_protection(&prot_states);
-                sampled_any_protection = true;
-            }
-        }
-
-        let global_sec = if system_security.is_empty() {
-            SampledSecurity::default()
-        } else {
-            merge_security_samples(system_security.values())
-        };
-
-        let team_map = sample_teams(&client, &systems).await;
-
-        let toml_output = generate_toml(
-            &self.org,
-            &systems,
-            &ungrouped,
-            &global_sec,
-            &global_protection,
-            sampled_any_protection,
-            &team_map,
-        );
-
-        if self.stdout {
-            println!("{toml_output}");
-        } else {
-            let path = "ward.toml";
-            if std::path::Path::new(path).exists() {
-                anyhow::bail!(
-                    "ward.toml already exists. Use --stdout to print instead, or remove the file first."
-                );
-            }
-            std::fs::write(path, &toml_output)?;
-            println!("\n  {} Wrote {}", style("[ok]").green(), style(path).bold());
-        }
-
-        println!(
-            "\n  {} Import complete. Review the generated config and adjust as needed.",
-            style("[ok]").green()
-        );
-
-        Ok(())
-    }
-}
-
-fn detect_systems(repo_names: &[String], min_group_size: usize) -> Vec<DetectedSystem> {
-    let mut groups: HashMap<String, Vec<String>> = HashMap::new();
-
-    for name in repo_names {
-        if let Some(prefix) = name.split('-').next() {
-            if !prefix.is_empty() && prefix != name {
-                groups
-                    .entry(prefix.to_string())
-                    .or_default()
-                    .push(name.clone());
-            }
-        }
-    }
-
-    let mut systems: Vec<DetectedSystem> = groups
-        .into_iter()
-        .filter(|(_, repos)| repos.len() >= min_group_size)
-        .map(|(id, mut repos)| {
-            repos.sort();
-            DetectedSystem { id, repos }
+        import_repository(ImportOptions {
+            source: &self.source,
+            targets: &self.target,
+            include: &self.include,
+            exclude: &self.exclude,
+            strict: self.strict,
+            output: &self.output,
+            stdout: self.stdout,
+            force: self.force,
+            parallelism: self.parallelism,
         })
-        .collect();
-
-    systems.sort_by(|a, b| a.id.cmp(&b.id));
-    systems
-}
-
-fn majority_vote_security(states: &[SecurityState]) -> SampledSecurity {
-    let n = states.len();
-    let threshold = n / 2 + 1;
-
-    SampledSecurity {
-        secret_scanning: states.iter().filter(|s| s.secret_scanning).count() >= threshold,
-        push_protection: states.iter().filter(|s| s.push_protection).count() >= threshold,
-        dependabot_alerts: states.iter().filter(|s| s.dependabot_alerts).count() >= threshold,
-        dependabot_security_updates: states
-            .iter()
-            .filter(|s| s.dependabot_security_updates)
-            .count()
-            >= threshold,
-        secret_scanning_ai_detection: states
-            .iter()
-            .filter(|s| s.secret_scanning_ai_detection)
-            .count()
-            >= threshold,
+        .await
     }
 }
 
-fn majority_vote_protection(states: &[BranchProtectionState]) -> SampledProtection {
-    let n = states.len();
-    let threshold = n / 2 + 1;
+pub async fn import_repository(options: ImportOptions<'_>) -> Result<()> {
+    let source = RepositoryRef::from_str(options.source)?;
+    ensure_output_is_available(&options)?;
 
-    let approvals: Vec<u32> = states
-        .iter()
-        .map(|s| s.required_approving_review_count)
-        .collect();
-    let median_approvals = {
-        let mut sorted = approvals.clone();
-        sorted.sort();
-        sorted[sorted.len() / 2]
+    progress(
+        options.stdout,
+        format!(
+            "{} Reading all documented repository configuration from {}...",
+            style("[..]").dim(),
+            style(source.to_string()).cyan().bold()
+        ),
+    );
+
+    let client = Client::new(&source.owner, options.parallelism).await?;
+    let source_repository = client
+        .get_repo(&source.repo)
+        .await
+        .with_context(|| format!("Failed to read source repository {source}"))?;
+    let targets = resolve_targets(&client, &source, options.targets).await?;
+    let snapshot = snapshot_repository(
+        &client,
+        &source,
+        &source_repository.default_branch,
+        &targets,
+        options.include,
+        options.exclude,
+    )
+    .await?;
+
+    if options.strict && !snapshot.strict_failures.is_empty() {
+        anyhow::bail!(
+            "Strict import failed because {} item(s) could not be collected:\n  - {}",
+            snapshot.strict_failures.len(),
+            snapshot.strict_failures.join("\n  - ")
+        );
+    }
+
+    let output = render_manifest(&snapshot.manifest)?;
+    if options.stdout {
+        print!("{output}");
+    } else {
+        write_manifest(options.output, &output)?;
+        println!(
+            "  {} Wrote {}",
+            style("[ok]").green(),
+            style(options.output.display()).bold()
+        );
+    }
+
+    print_summary(&snapshot, &source, &targets, options.stdout);
+    Ok(())
+}
+
+fn ensure_output_is_available(options: &ImportOptions<'_>) -> Result<()> {
+    if !options.stdout && options.output.exists() && !options.force {
+        anyhow::bail!(
+            "{} already exists. Use --force to replace it or --stdout to preview.",
+            options.output.display()
+        );
+    }
+    Ok(())
+}
+
+async fn resolve_targets(
+    client: &Client,
+    source: &RepositoryRef,
+    requested: &[String],
+) -> Result<Vec<String>> {
+    let raw_targets = if requested.is_empty() {
+        vec![source.repo.clone()]
+    } else {
+        requested.to_vec()
     };
 
-    SampledProtection {
-        enabled: states
-            .iter()
-            .filter(|s| s.required_pull_request_reviews)
-            .count()
-            >= threshold,
-        required_approvals: median_approvals,
-        dismiss_stale_reviews: states.iter().filter(|s| s.dismiss_stale_reviews).count()
-            >= threshold,
-        require_code_owner_reviews: states
-            .iter()
-            .filter(|s| s.require_code_owner_reviews)
-            .count()
-            >= threshold,
-        require_status_checks: states.iter().filter(|s| s.required_status_checks).count()
-            >= threshold,
-        strict_status_checks: states.iter().filter(|s| s.strict_status_checks).count() >= threshold,
-        enforce_admins: states.iter().filter(|s| s.enforce_admins).count() >= threshold,
-        required_linear_history: states.iter().filter(|s| s.required_linear_history).count()
-            >= threshold,
-        allow_force_pushes: states.iter().filter(|s| s.allow_force_pushes).count() >= threshold,
-        allow_deletions: states.iter().filter(|s| s.allow_deletions).count() >= threshold,
+    let mut targets = Vec::new();
+    let mut seen = BTreeSet::new();
+    for raw in raw_targets {
+        let target = parse_target(&raw, &source.owner)?;
+        if target.owner != source.owner {
+            anyhow::bail!(
+                "Target {target} has a different owner. Ward imports only existing repositories under {}.",
+                source.owner
+            );
+        }
+        if !seen.insert(target.repo.clone()) {
+            continue;
+        }
+
+        client.get_repo(&target.repo).await.with_context(|| {
+            format!("Target repository {target} does not exist or is unreadable")
+        })?;
+        targets.push(target.repo);
+    }
+
+    Ok(targets)
+}
+
+fn parse_target(value: &str, default_owner: &str) -> Result<RepositoryRef> {
+    let value = value.trim();
+    if value.contains('/') || value.contains(':') {
+        RepositoryRef::from_str(value)
+    } else if value.is_empty() {
+        anyhow::bail!("Target repository name cannot be empty")
+    } else {
+        Ok(RepositoryRef {
+            owner: default_owner.to_owned(),
+            repo: value.to_owned(),
+        })
     }
 }
 
-fn merge_security_samples<'a>(
-    samples: impl Iterator<Item = &'a SampledSecurity>,
-) -> SampledSecurity {
-    let all: Vec<&SampledSecurity> = samples.collect();
-    let n = all.len();
-    let threshold = n / 2 + 1;
-
-    SampledSecurity {
-        secret_scanning: all.iter().filter(|s| s.secret_scanning).count() >= threshold,
-        push_protection: all.iter().filter(|s| s.push_protection).count() >= threshold,
-        dependabot_alerts: all.iter().filter(|s| s.dependabot_alerts).count() >= threshold,
-        dependabot_security_updates: all.iter().filter(|s| s.dependabot_security_updates).count()
-            >= threshold,
-        secret_scanning_ai_detection: all
-            .iter()
-            .filter(|s| s.secret_scanning_ai_detection)
-            .count()
-            >= threshold,
-    }
-}
-
-async fn sample_teams(
+async fn snapshot_repository(
     client: &Client,
-    systems: &[DetectedSystem],
-) -> HashMap<String, Vec<(String, String)>> {
-    let mut team_map: HashMap<String, Vec<(String, String)>> = HashMap::new();
+    source: &RepositoryRef,
+    default_branch: &str,
+    targets: &[String],
+    include: &[String],
+    exclude: &[String],
+) -> Result<Snapshot> {
+    let access_seed = RepositoryAccessCategoryV2::observe_sensitive();
+    let integrations_seed = RepositoryIntegrationsCategoryV2::observe_sensitive();
+    let files_seed = FilesCategoryV2 {
+        policy: CategoryPolicy::managed(),
+        include: include.to_vec(),
+        exclude: exclude.to_vec(),
+        entries: Vec::new(),
+    };
 
-    for sys in systems {
-        if let Some(repo_name) = sys.repos.first() {
-            if let Ok(teams) = client.list_repo_teams(repo_name).await {
-                let entries: Vec<(String, String)> =
-                    teams.into_iter().map(|t| (t.slug, t.permission)).collect();
-                if !entries.is_empty() {
-                    team_map.insert(sys.id.clone(), entries);
+    let (
+        general_result,
+        security_result,
+        rulesets_result,
+        branch_protection_result,
+        files_result,
+        actions_result,
+        environments_result,
+        access_result,
+        integrations_result,
+        head_oid_result,
+    ) = tokio::join!(
+        general::collect(client, &source.repo),
+        collect_security_category(client, &source.repo, None),
+        collect_rulesets_category(client, &source.repo, None),
+        collect_branch_protection_category(client, &source.repo, None),
+        collect_files_category(
+            client,
+            &source.repo,
+            Some(default_branch),
+            Some(&files_seed)
+        ),
+        collect_actions_category(client, &source.repo, None),
+        collect_environments_category(client, &source.repo, None),
+        collect_access(client, &source.repo, &access_seed),
+        collect_integrations(client, &source.repo, &integrations_seed),
+        client.get_branch_head_sha(&source.repo, default_branch),
+    );
+
+    let mut coverage = Vec::new();
+    let mut warnings = Vec::new();
+    let mut strict_failures = Vec::new();
+
+    let (repository_category, labels, repository_node_id) = match general_result {
+        Ok(state) => {
+            absorb_coverage(&mut coverage, state.coverage.clone());
+            (
+                state.repository,
+                state
+                    .labels
+                    .into_iter()
+                    .map(LabelConfigV2::from)
+                    .collect::<Vec<_>>(),
+                non_empty(state.extensions.repository_id),
+            )
+        }
+        Err(error) => {
+            record_collector_failure(
+                ManifestCategoryName::Repository,
+                "repository/general collector",
+                error,
+                &mut coverage,
+                &mut warnings,
+            );
+            (empty_repository_category(), Vec::new(), None)
+        }
+    };
+
+    let security_category = match security_result {
+        Ok(mut state) => {
+            state.category.policy = CategoryPolicy::observe_sensitive();
+            absorb_coverage(&mut coverage, state.coverage);
+            record_security_issues(
+                "security",
+                &state.issues,
+                &mut warnings,
+                &mut strict_failures,
+            );
+            state.category
+        }
+        Err(error) => {
+            record_collector_failure(
+                ManifestCategoryName::Security,
+                "security collector",
+                error,
+                &mut coverage,
+                &mut warnings,
+            );
+            SecurityCategoryV2::observe_sensitive()
+        }
+    };
+
+    let rulesets_category = match rulesets_result {
+        Ok(mut state) => {
+            state.category.policy = CategoryPolicy::observe_sensitive();
+            absorb_coverage(&mut coverage, state.coverage);
+            record_security_issues(
+                "rulesets",
+                &state.issues,
+                &mut warnings,
+                &mut strict_failures,
+            );
+            state.category
+        }
+        Err(error) => {
+            record_collector_failure(
+                ManifestCategoryName::Rulesets,
+                "rulesets collector",
+                error,
+                &mut coverage,
+                &mut warnings,
+            );
+            observe_rulesets_category()
+        }
+    };
+
+    let branch_protection_category = match branch_protection_result {
+        Ok(mut state) => {
+            state.category.policy = CategoryPolicy::observe_sensitive();
+            absorb_coverage(&mut coverage, state.coverage);
+            record_security_issues(
+                "branch protection",
+                &state.issues,
+                &mut warnings,
+                &mut strict_failures,
+            );
+            state.category
+        }
+        Err(error) => {
+            record_collector_failure(
+                ManifestCategoryName::BranchProtection,
+                "branch-protection collector",
+                error,
+                &mut coverage,
+                &mut warnings,
+            );
+            observe_branch_protection_category()
+        }
+    };
+
+    let files_category = match files_result {
+        Ok(mut state) => {
+            state.category.policy = CategoryPolicy::managed();
+            absorb_coverage(&mut coverage, state.coverage);
+            for issue in state.issues {
+                warnings.push(format!("files: {}", issue.message));
+                if issue.severity == FilesIssueSeverity::Blocker {
+                    strict_failures.push(format!("files: {}", issue.message));
                 }
             }
+            state.category
         }
-    }
+        Err(error) => {
+            record_collector_failure(
+                ManifestCategoryName::Files,
+                "configuration-files collector",
+                error,
+                &mut coverage,
+                &mut warnings,
+            );
+            files_seed
+        }
+    };
 
-    team_map
+    let actions_category = match actions_result {
+        Ok(mut state) => {
+            state.category.policy = CategoryPolicy::observe_sensitive();
+            normalize_actions_placeholders(&mut state.category);
+            absorb_coverage(&mut coverage, state.coverage);
+            record_actions_issues(
+                "actions",
+                &state.issues,
+                &mut warnings,
+                &mut strict_failures,
+            );
+            state.category
+        }
+        Err(error) => {
+            record_collector_failure(
+                ManifestCategoryName::Actions,
+                "Actions collector",
+                error,
+                &mut coverage,
+                &mut warnings,
+            );
+            ActionsCategoryV2::observe_sensitive()
+        }
+    };
+
+    let environments_category = match environments_result {
+        Ok(mut state) => {
+            state.category.policy = CategoryPolicy::observe_sensitive();
+            normalize_environment_placeholders(&mut state.category);
+            absorb_coverage(&mut coverage, state.coverage);
+            record_actions_issues(
+                "environments",
+                &state.issues,
+                &mut warnings,
+                &mut strict_failures,
+            );
+            state.category
+        }
+        Err(error) => {
+            record_collector_failure(
+                ManifestCategoryName::Environments,
+                "environments collector",
+                error,
+                &mut coverage,
+                &mut warnings,
+            );
+            EnvironmentsCategoryV2::observe_sensitive()
+        }
+    };
+
+    let access_category = match access_result {
+        Ok(mut state) => {
+            state.category.policy = CategoryPolicy::observe_sensitive();
+            absorb_coverage(&mut coverage, state.coverage);
+            record_actions_issues("access", &state.issues, &mut warnings, &mut strict_failures);
+            state.category
+        }
+        Err(error) => {
+            record_collector_failure(
+                ManifestCategoryName::Access,
+                "access collector",
+                error,
+                &mut coverage,
+                &mut warnings,
+            );
+            RepositoryAccessCategoryV2::observe_sensitive()
+        }
+    };
+
+    let mut integrations_category = match integrations_result {
+        Ok(mut state) => {
+            state.category.policy = CategoryPolicy::observe_sensitive();
+            normalize_integration_placeholders(&mut state.category);
+            absorb_coverage(&mut coverage, state.coverage);
+            record_actions_issues(
+                "integrations",
+                &state.issues,
+                &mut warnings,
+                &mut strict_failures,
+            );
+            state.category
+        }
+        Err(error) => {
+            record_collector_failure(
+                ManifestCategoryName::Integrations,
+                "integrations collector",
+                error,
+                &mut coverage,
+                &mut warnings,
+            );
+            RepositoryIntegrationsCategoryV2::observe_sensitive()
+        }
+    };
+    integrations_category.labels = labels;
+
+    let default_branch_head_oid = match head_oid_result {
+        Ok(oid) => Some(oid),
+        Err(error) => {
+            record_collector_failure(
+                ManifestCategoryName::Repository,
+                "default-branch head",
+                error,
+                &mut coverage,
+                &mut warnings,
+            );
+            None
+        }
+    };
+
+    coverage.sort_by(|left, right| {
+        category_rank(left.category)
+            .cmp(&category_rank(right.category))
+            .then_with(|| left.endpoint.cmp(&right.endpoint))
+    });
+    warnings.sort();
+    warnings.dedup();
+
+    strict_failures.extend(coverage.iter().filter_map(strict_coverage_failure));
+    strict_failures.sort();
+    strict_failures.dedup();
+
+    let categories = ManifestCategories {
+        security: Some(security_category.clone()),
+        repository: Some(repository_category.clone()),
+        branch_protection: Some(branch_protection_category.clone()),
+        rulesets: Some(rulesets_category.clone()),
+        files: Some(files_category.clone()),
+        actions: Some(actions_category.clone()),
+        environments: Some(environments_category.clone()),
+        access: Some(access_category.clone()),
+        integrations: Some(integrations_category.clone()),
+    };
+
+    let manifest = Manifest {
+        org: OrgConfig {
+            name: source.owner.clone(),
+        },
+        source: Some(SourceConfig {
+            repository: source.full_name(),
+        }),
+        security: security_category.settings.clone().unwrap_or_default(),
+        repository: repository_category.settings.clone(),
+        templates: TemplateConfig {
+            branch: DEFAULT_BRANCH.to_owned(),
+            reviewers: Vec::new(),
+            commit_message_prefix: "chore: ".to_owned(),
+            custom_dir: None,
+            registries: HashMap::new(),
+        },
+        branch_protection: branch_protection_category
+            .default_branch
+            .clone()
+            .unwrap_or_default(),
+        rulesets: RulesetsConfig {
+            branch_protection: None,
+            repository: rulesets_category
+                .repository_rulesets
+                .iter()
+                .map(legacy_ruleset)
+                .collect(),
+        },
+        systems: vec![SystemConfig {
+            id: source.repo.clone(),
+            name: format!("Imported from {source}"),
+            match_prefix: false,
+            exclude: Vec::new(),
+            repos: targets.to_vec(),
+            security: None,
+            teams: access_category.teams.clone(),
+            rulesets: None,
+        }],
+        files: legacy_utf8_files(&files_category),
+        policies: Vec::new(),
+        v2: ManifestV2State {
+            schema: Some(ManifestSchema::v2()),
+            provenance: Some(ManifestProvenance {
+                repository: source.full_name(),
+                default_branch: Some(default_branch.to_owned()),
+                repository_node_id,
+                default_branch_head_oid,
+            }),
+            categories,
+            coverage,
+        },
+    };
+
+    let counts = SnapshotCounts {
+        files: files_category.entries.len(),
+        rulesets: rulesets_category.repository_rulesets.len(),
+        inherited_rulesets: rulesets_category.references.len(),
+        workflows: actions_category.workflows.len(),
+        environments: environments_category.entries.len(),
+        access_entries: access_category.teams.len()
+            + access_category.collaborators.len()
+            + access_category.references.len(),
+        integrations: integrations_category.webhooks.len()
+            + integrations_category.deploy_keys.len()
+            + integrations_category.autolinks.len()
+            + usize::from(integrations_category.pages.is_some())
+            + integrations_category.labels.len(),
+    };
+
+    Ok(Snapshot {
+        manifest,
+        warnings,
+        strict_failures,
+        counts,
+    })
 }
 
-fn generate_toml(
-    org: &str,
-    systems: &[DetectedSystem],
-    ungrouped: &[&str],
-    security: &SampledSecurity,
-    protection: &SampledProtection,
-    has_protection: bool,
-    team_map: &HashMap<String, Vec<(String, String)>>,
-) -> String {
-    let mut out = String::new();
-
-    out.push_str(&format!("# Ward configuration -- imported from {org}\n\n"));
-
-    out.push_str(&format!("[org]\nname = \"{org}\"\n\n"));
-
-    out.push_str("# Security settings (sampled from existing repos)\n");
-    out.push_str("[security]\n");
-    out.push_str(&format!("secret_scanning = {}\n", security.secret_scanning));
-    out.push_str(&format!(
-        "secret_scanning_ai_detection = {}\n",
-        security.secret_scanning_ai_detection
-    ));
-    out.push_str(&format!("push_protection = {}\n", security.push_protection));
-    out.push_str(&format!(
-        "dependabot_alerts = {}\n",
-        security.dependabot_alerts
-    ));
-    out.push_str(&format!(
-        "dependabot_security_updates = {}\n",
-        security.dependabot_security_updates
-    ));
-    out.push('\n');
-
-    if has_protection {
-        out.push_str("# Branch protection (sampled from existing repos)\n");
-        out.push_str("[branch_protection]\n");
-        out.push_str(&format!("enabled = {}\n", protection.enabled));
-        out.push_str(&format!(
-            "required_approvals = {}\n",
-            protection.required_approvals
-        ));
-        out.push_str(&format!(
-            "dismiss_stale_reviews = {}\n",
-            protection.dismiss_stale_reviews
-        ));
-        out.push_str(&format!(
-            "require_code_owner_reviews = {}\n",
-            protection.require_code_owner_reviews
-        ));
-        out.push_str(&format!(
-            "require_status_checks = {}\n",
-            protection.require_status_checks
-        ));
-        out.push_str(&format!(
-            "strict_status_checks = {}\n",
-            protection.strict_status_checks
-        ));
-        out.push_str(&format!("enforce_admins = {}\n", protection.enforce_admins));
-        out.push_str(&format!(
-            "required_linear_history = {}\n",
-            protection.required_linear_history
-        ));
-        out.push_str(&format!(
-            "allow_force_pushes = {}\n",
-            protection.allow_force_pushes
-        ));
-        out.push_str(&format!(
-            "allow_deletions = {}\n",
-            protection.allow_deletions
-        ));
-        out.push('\n');
+fn empty_repository_category() -> crate::config::manifest::RepositoryCategoryV2 {
+    crate::config::manifest::RepositoryCategoryV2 {
+        policy: CategoryPolicy::managed(),
+        settings: None,
+        metadata: None,
+        custom_properties: Vec::new(),
+        immutable_releases: None,
+        references: Vec::new(),
     }
-
-    for sys in systems {
-        out.push_str(&format!("# Detected system: {} repos\n", sys.repos.len()));
-        out.push_str("[[systems]]\n");
-        out.push_str(&format!("id = \"{}\"\n", sys.id));
-        out.push_str(&format!("name = \"{}\"\n", titlecase(&sys.id)));
-
-        if let Some(teams) = team_map.get(&sys.id) {
-            out.push_str("teams = [\n");
-            for (slug, perm) in teams {
-                out.push_str(&format!(
-                    "    {{ slug = \"{slug}\", permission = \"{perm}\" }},\n"
-                ));
-            }
-            out.push_str("]\n");
-        }
-
-        out.push('\n');
-    }
-
-    if !ungrouped.is_empty() {
-        out.push_str("# Ungrouped repositories (did not match any system prefix)\n");
-        for name in ungrouped {
-            out.push_str(&format!("# - {name}\n"));
-        }
-        out.push('\n');
-    }
-
-    out
 }
 
-fn titlecase(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+fn observe_rulesets_category() -> RulesetsCategoryV2 {
+    RulesetsCategoryV2 {
+        policy: CategoryPolicy::observe_sensitive(),
+        references: Vec::new(),
+        repository_rulesets: Vec::new(),
+    }
+}
+
+fn observe_branch_protection_category() -> BranchProtectionCategoryV2 {
+    BranchProtectionCategoryV2 {
+        policy: CategoryPolicy::observe_sensitive(),
+        default_branch: None,
+        default_branch_detailed: None,
+        protected_branches: Vec::new(),
+    }
+}
+
+fn absorb_coverage(target: &mut Vec<CoverageEntry>, entries: Vec<CoverageEntry>) {
+    target.extend(entries);
+}
+
+fn record_collector_failure(
+    category: ManifestCategoryName,
+    collector: &str,
+    error: anyhow::Error,
+    coverage: &mut Vec<CoverageEntry>,
+    warnings: &mut Vec<String>,
+) {
+    let message = error.to_string();
+    coverage.push(CoverageEntry {
+        category,
+        endpoint: collector.to_owned(),
+        outcome: CoverageOutcome::Unavailable,
+        reason: Some(message.clone()),
+        required_permission: None,
+    });
+    warnings.push(format!("{collector}: {message}"));
+}
+
+fn record_security_issues(
+    category: &str,
+    issues: &[crate::reconcile::security_rules::ReconcileIssue],
+    warnings: &mut Vec<String>,
+    strict_failures: &mut Vec<String>,
+) {
+    for issue in issues {
+        let message = format!("{category}: {}", issue.message);
+        warnings.push(message.clone());
+        if issue.severity == ReconcileIssueSeverity::Blocker {
+            strict_failures.push(message);
+        }
+    }
+}
+
+fn record_actions_issues(
+    category: &str,
+    issues: &[crate::reconcile::actions_environments::ReconcileIssue],
+    warnings: &mut Vec<String>,
+    strict_failures: &mut Vec<String>,
+) {
+    for issue in issues {
+        let message = format!("{category}: {}", issue.message);
+        warnings.push(message.clone());
+        if issue.severity == IssueSeverity::Blocker {
+            strict_failures.push(message);
+        }
+    }
+}
+
+fn strict_coverage_failure(entry: &CoverageEntry) -> Option<String> {
+    matches!(
+        entry.outcome,
+        CoverageOutcome::PermissionDenied | CoverageOutcome::Unavailable
+    )
+    .then(|| {
+        format!(
+            "{:?} {}: {}",
+            entry.category,
+            entry.endpoint,
+            entry
+                .reason
+                .as_deref()
+                .unwrap_or("state could not be collected")
+        )
+    })
+}
+
+fn category_rank(category: ManifestCategoryName) -> u8 {
+    match category {
+        ManifestCategoryName::Repository => 0,
+        ManifestCategoryName::Files => 1,
+        ManifestCategoryName::Security => 2,
+        ManifestCategoryName::Actions => 3,
+        ManifestCategoryName::Environments => 4,
+        ManifestCategoryName::Access => 5,
+        ManifestCategoryName::Integrations => 6,
+        ManifestCategoryName::Rulesets => 7,
+        ManifestCategoryName::BranchProtection => 8,
+    }
+}
+
+fn normalize_actions_placeholders(category: &mut ActionsCategoryV2) {
+    normalize_secret_placeholders("WARD_ACTIONS_SECRET", &mut category.secrets);
+    normalize_secret_placeholders("WARD_DEPENDABOT_SECRET", &mut category.dependabot_secrets);
+    normalize_secret_placeholders("WARD_CODESPACES_SECRET", &mut category.codespaces_secrets);
+}
+
+fn normalize_environment_placeholders(category: &mut EnvironmentsCategoryV2) {
+    for environment in &mut category.entries {
+        let prefix = format!("WARD_ENV_{}_SECRET", env_component(&environment.name));
+        normalize_secret_placeholders(&prefix, &mut environment.secrets);
+    }
+}
+
+fn normalize_integration_placeholders(category: &mut RepositoryIntegrationsCategoryV2) {
+    for (index, webhook) in category.webhooks.iter_mut().enumerate() {
+        if let Some(url_from) = webhook.url_from.as_mut() {
+            normalize_external_value(url_from, format!("WARD_WEBHOOK_URL_{}", index + 1));
+        }
+        if let Some(secret) = webhook.secret.as_mut() {
+            normalize_external_value(secret, format!("WARD_WEBHOOK_SECRET_{}", index + 1));
+        }
+    }
+
+    for (index, key) in category.deploy_keys.iter_mut().enumerate() {
+        if let Some(replacement_key) = key.replacement_key.as_mut() {
+            normalize_external_value(
+                replacement_key,
+                format!(
+                    "WARD_DEPLOY_KEY_{}_{}",
+                    env_component(&key.title),
+                    index + 1
+                ),
+            );
+        }
+    }
+}
+
+fn normalize_secret_placeholders(
+    prefix: &str,
+    secrets: &mut [crate::config::manifest::SecretPlaceholderConfig],
+) {
+    for secret in secrets {
+        normalize_external_value(
+            &mut secret.value_from,
+            format!("{prefix}_{}", env_component(&secret.name)),
+        );
+    }
+}
+
+fn normalize_external_value(reference: &mut ExternalValueReference, key: String) {
+    if matches!(reference, ExternalValueReference::Manual { .. }) {
+        *reference = ExternalValueReference::Env { key };
+    }
+}
+
+fn env_component(value: &str) -> String {
+    let mut result = String::with_capacity(value.len());
+    let mut previous_was_separator = false;
+    for character in value.chars() {
+        if character.is_ascii_alphanumeric() {
+            result.push(character.to_ascii_uppercase());
+            previous_was_separator = false;
+        } else if !previous_was_separator && !result.is_empty() {
+            result.push('_');
+            previous_was_separator = true;
+        }
+    }
+
+    let result = result.trim_matches('_');
+    if result.is_empty() {
+        "VALUE".to_owned()
+    } else {
+        result.to_owned()
+    }
+}
+
+fn legacy_ruleset(ruleset: &RepositoryRulesetV2) -> RepositoryRulesetConfig {
+    RepositoryRulesetConfig {
+        name: ruleset.name.clone(),
+        target: ruleset.target.clone(),
+        enforcement: ruleset.enforcement.clone(),
+        conditions_json: ruleset.conditions_json.clone(),
+        rules: ruleset
+            .rules
+            .iter()
+            .map(|rule| RepositoryRuleConfig {
+                rule_type: rule.rule_type.clone(),
+                parameters_json: rule.parameters_json.clone(),
+            })
+            .collect(),
+        bypass_actors: ruleset
+            .bypass_actors
+            .iter()
+            .filter_map(|actor| {
+                let (actor_type, actor_id, team_slug) = match &actor.actor {
+                    ActorReference::OrganizationAdmin => {
+                        ("OrganizationAdmin".to_owned(), None, None)
+                    }
+                    ActorReference::Team { slug } => ("Team".to_owned(), None, Some(slug.clone())),
+                    ActorReference::User { .. }
+                    | ActorReference::App { .. }
+                    | ActorReference::Role { .. } => return None,
+                    ActorReference::Unresolved {
+                        actor_type,
+                        actor_id,
+                    } => (actor_type.clone(), *actor_id, None),
+                };
+                Some(RulesetBypassActorConfig {
+                    actor_type,
+                    actor_id,
+                    team_slug,
+                    bypass_mode: actor.bypass_mode.clone(),
+                })
+            })
+            .collect(),
+    }
+}
+
+fn legacy_utf8_files(category: &FilesCategoryV2) -> Vec<ManagedFile> {
+    category
+        .entries
+        .iter()
+        .filter(|file| file.encoding == FileEncoding::Utf8)
+        .map(|file| ManagedFile {
+            path: file.path.clone(),
+            content: file.content.clone(),
+        })
+        .collect()
+}
+
+fn non_empty(value: String) -> Option<String> {
+    (!value.is_empty()).then_some(value)
+}
+
+fn render_manifest(manifest: &Manifest) -> Result<String> {
+    let body = manifest
+        .to_document_v2()
+        .render()
+        .context("Failed to serialize ward.toml")?;
+    let source = manifest
+        .source
+        .as_ref()
+        .map(|source| source.repository.as_str())
+        .unwrap_or("unknown");
+    Ok(format!(
+        "# Ward configuration imported from {source}\n\
+         # Import is read-only. Run `ward plan` before `ward apply`.\n\
+         # Sensitive categories are observe-only until their policy is changed to managed.\n\n\
+         {body}"
+    ))
+}
+
+fn write_manifest(output: &Path, content: &str) -> Result<()> {
+    if let Some(parent) = output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create {}", parent.display()))?;
+    }
+
+    let temporary = output.with_extension(format!("tmp.{}", std::process::id()));
+    std::fs::write(&temporary, content)
+        .with_context(|| format!("Failed to write {}", temporary.display()))?;
+    std::fs::rename(&temporary, output)
+        .with_context(|| format!("Failed to replace {}", output.display()))?;
+    Ok(())
+}
+
+fn progress(stdout: bool, message: String) {
+    if stdout {
+        eprintln!("\n  {message}");
+    } else {
+        println!("\n  {message}");
+    }
+}
+
+fn print_summary(snapshot: &Snapshot, source: &RepositoryRef, targets: &[String], stdout: bool) {
+    let mut lines = vec![
+        String::new(),
+        format!(
+            "  {} Imported {} documented repository categories from {}",
+            style("[ok]").green(),
+            9,
+            source
+        ),
+        format!(
+            "    files={}, rulesets={} (+{} inherited refs), workflows={}, environments={}",
+            snapshot.counts.files,
+            snapshot.counts.rulesets,
+            snapshot.counts.inherited_rulesets,
+            snapshot.counts.workflows,
+            snapshot.counts.environments
+        ),
+        format!(
+            "    access entries={}, integrations/labels={}",
+            snapshot.counts.access_entries, snapshot.counts.integrations
+        ),
+        format!("    targets={}", targets.join(", ")),
+    ];
+
+    if !snapshot.warnings.is_empty() {
+        lines.push(format!(
+            "  {} {} partial/unsupported item(s) are recorded in [coverage].",
+            style("note:").yellow(),
+            snapshot.warnings.len()
+        ));
+    }
+    lines.push(
+        "  Safe defaults: repository metadata and configuration files are managed; sensitive categories are observe-only."
+            .to_owned(),
+    );
+
+    for line in lines {
+        if stdout {
+            eprintln!("{line}");
+        } else {
+            println!("{line}");
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::manifest::{
+        ActionsSettingsConfig, BranchProtectionConfig, ManagedFileV2, ManagementDisposition,
+        RepositoryCategoryV2, RepositoryMetadataConfig, RepositorySettingsConfig,
+        SecretPlaceholderConfig, SecurityConfig, TeamAccess,
+    };
+    use crate::reconcile::general::GeneralLabel;
 
     #[test]
-    fn test_detect_systems_groups_by_prefix() {
-        let repos = vec![
-            "backend-api".to_string(),
-            "backend-auth".to_string(),
-            "backend-common".to_string(),
-            "frontend-web".to_string(),
-            "frontend-mobile".to_string(),
-            "standalone".to_string(),
-        ];
-
-        let systems = detect_systems(&repos, 2);
-        assert_eq!(systems.len(), 2);
-
-        let be = systems.iter().find(|s| s.id == "backend").unwrap();
-        assert_eq!(be.repos.len(), 3);
-        assert!(be.repos.contains(&"backend-api".to_string()));
-        assert!(be.repos.contains(&"backend-auth".to_string()));
-        assert!(be.repos.contains(&"backend-common".to_string()));
-
-        let fe = systems.iter().find(|s| s.id == "frontend").unwrap();
-        assert_eq!(fe.repos.len(), 2);
+    fn parses_supported_repository_references() {
+        for value in [
+            "acme/platform",
+            "https://github.com/acme/platform.git",
+            "git@github.com:acme/platform.git",
+        ] {
+            let repository = RepositoryRef::from_str(value).unwrap();
+            assert_eq!(repository.full_name(), "acme/platform");
+        }
     }
 
     #[test]
-    fn test_detect_systems_respects_min_group_size() {
-        let repos = vec![
-            "backend-api".to_string(),
-            "backend-auth".to_string(),
-            "frontend-web".to_string(),
-        ];
-
-        let systems_min2 = detect_systems(&repos, 2);
-        assert_eq!(systems_min2.len(), 1);
-        assert_eq!(systems_min2[0].id, "backend");
-
-        let systems_min3 = detect_systems(&repos, 3);
-        assert!(systems_min3.is_empty());
+    fn rejects_unsupported_repository_references() {
+        assert!(RepositoryRef::from_str("https://example.com/acme/platform").is_err());
+        assert!(RepositoryRef::from_str("acme/platform/issues").is_err());
+        assert!(RepositoryRef::from_str("platform").is_err());
     }
 
     #[test]
-    fn test_majority_vote_security() {
-        let states = vec![
-            SecurityState {
-                secret_scanning: true,
-                push_protection: true,
-                dependabot_alerts: true,
-                dependabot_security_updates: false,
-                secret_scanning_ai_detection: false,
-            },
-            SecurityState {
-                secret_scanning: true,
-                push_protection: false,
-                dependabot_alerts: true,
-                dependabot_security_updates: false,
-                secret_scanning_ai_detection: true,
-            },
-            SecurityState {
-                secret_scanning: true,
-                push_protection: true,
-                dependabot_alerts: false,
-                dependabot_security_updates: false,
-                secret_scanning_ai_detection: false,
-            },
-        ];
-
-        let result = majority_vote_security(&states);
-        assert!(result.secret_scanning); // 3/3
-        assert!(result.push_protection); // 2/3
-        assert!(result.dependabot_alerts); // 2/3
-        assert!(!result.dependabot_security_updates); // 0/3
-        assert!(!result.secret_scanning_ai_detection); // 1/3
-    }
-
-    #[test]
-    fn test_generate_toml_output() {
-        let systems = vec![DetectedSystem {
-            id: "backend".to_string(),
-            repos: vec!["backend-api".to_string(), "backend-auth".to_string()],
-        }];
-        let ungrouped: Vec<&str> = vec!["standalone"];
-        let security = SampledSecurity {
-            secret_scanning: true,
-            push_protection: true,
-            dependabot_alerts: true,
-            dependabot_security_updates: false,
-            secret_scanning_ai_detection: false,
-        };
-        let protection = SampledProtection {
-            enabled: true,
-            required_approvals: 1,
-            ..Default::default()
-        };
-        let team_map = HashMap::new();
-
-        let toml = generate_toml(
-            "my-org",
-            &systems,
-            &ungrouped,
-            &security,
-            &protection,
-            true,
-            &team_map,
+    fn target_without_owner_uses_source_owner() {
+        assert_eq!(
+            parse_target("service", "acme").unwrap(),
+            RepositoryRef {
+                owner: "acme".to_owned(),
+                repo: "service".to_owned(),
+            }
         );
-
-        assert!(toml.contains("[org]"));
-        assert!(toml.contains("name = \"my-org\""));
-        assert!(toml.contains("secret_scanning = true"));
-        assert!(toml.contains("dependabot_security_updates = false"));
-        assert!(toml.contains("[[systems]]"));
-        assert!(toml.contains("id = \"backend\""));
-        assert!(toml.contains("enabled = true"));
-        assert!(toml.contains("required_approvals = 1"));
-        assert!(toml.contains("# - standalone"));
     }
 
     #[test]
-    fn test_detect_systems_excludes_single_segment_names() {
-        let repos = vec![
-            "standalone".to_string(),
-            "another".to_string(),
-            "third".to_string(),
-        ];
-        let systems = detect_systems(&repos, 2);
-        assert!(systems.is_empty());
+    fn external_placeholders_become_deterministic_environment_variables() {
+        let mut actions = ActionsCategoryV2 {
+            settings: Some(ActionsSettingsConfig::default()),
+            secrets: vec![SecretPlaceholderConfig {
+                name: "API_TOKEN".to_owned(),
+                value_from: ExternalValueReference::Manual { hint: None },
+            }],
+            ..ActionsCategoryV2::default()
+        };
+
+        normalize_actions_placeholders(&mut actions);
+
+        assert_eq!(
+            actions.secrets[0].value_from,
+            ExternalValueReference::Env {
+                key: "WARD_ACTIONS_SECRET_API_TOKEN".to_owned(),
+            }
+        );
     }
 
     #[test]
-    fn test_majority_vote_protection() {
-        let states = vec![
-            BranchProtectionState {
-                required_pull_request_reviews: true,
-                required_approving_review_count: 2,
-                dismiss_stale_reviews: true,
-                ..Default::default()
-            },
-            BranchProtectionState {
-                required_pull_request_reviews: true,
-                required_approving_review_count: 1,
-                dismiss_stale_reviews: false,
-                ..Default::default()
-            },
-            BranchProtectionState {
-                required_pull_request_reviews: false,
-                required_approving_review_count: 1,
-                dismiss_stale_reviews: true,
-                ..Default::default()
-            },
-        ];
+    fn environment_variable_components_are_shell_safe() {
+        assert_eq!(env_component("production/eu-west"), "PRODUCTION_EU_WEST");
+        assert_eq!(env_component("***"), "VALUE");
+    }
 
-        let result = majority_vote_protection(&states);
-        assert!(result.enabled); // 2/3
-        assert_eq!(result.required_approvals, 1); // median
-        assert!(result.dismiss_stale_reviews); // 2/3
+    #[test]
+    fn strict_mode_only_rejects_missing_readable_state() {
+        let unsupported = CoverageEntry {
+            category: ManifestCategoryName::Repository,
+            endpoint: "commit-comments".to_owned(),
+            outcome: CoverageOutcome::Unsupported,
+            reason: None,
+            required_permission: None,
+        };
+        let denied = CoverageEntry {
+            category: ManifestCategoryName::Actions,
+            endpoint: "actions/secrets".to_owned(),
+            outcome: CoverageOutcome::PermissionDenied,
+            reason: Some("requires Actions secrets read permission".to_owned()),
+            required_permission: None,
+        };
+
+        assert!(strict_coverage_failure(&unsupported).is_none());
+        assert!(strict_coverage_failure(&denied).is_some());
+    }
+
+    #[test]
+    fn rendered_v2_manifest_round_trips_binary_files_and_policies() {
+        let repository = RepositoryCategoryV2 {
+            policy: CategoryPolicy::managed(),
+            settings: Some(RepositorySettingsConfig {
+                has_issues: Some(true),
+                ..RepositorySettingsConfig::default()
+            }),
+            metadata: Some(RepositoryMetadataConfig {
+                description: Some("Reference".to_owned()),
+                ..RepositoryMetadataConfig::default()
+            }),
+            custom_properties: Vec::new(),
+            immutable_releases: None,
+            references: Vec::new(),
+        };
+        let files = FilesCategoryV2 {
+            policy: CategoryPolicy::managed(),
+            include: vec![".github/**".to_owned()],
+            exclude: Vec::new(),
+            entries: vec![ManagedFileV2 {
+                path: ".github/logo.bin".to_owned(),
+                content: "AAEC".to_owned(),
+                encoding: FileEncoding::Base64,
+                mode: "100644".to_owned(),
+                source_sha: Some("abc".to_owned()),
+            }],
+        };
+        let integrations = RepositoryIntegrationsCategoryV2 {
+            policy: CategoryPolicy::observe_sensitive(),
+            labels: vec![LabelConfigV2::from(GeneralLabel {
+                name: "bug".to_owned(),
+                color: Some("ff0000".to_owned()),
+                description: None,
+                default: false,
+            })],
+            ..RepositoryIntegrationsCategoryV2::default()
+        };
+        let manifest = Manifest {
+            org: OrgConfig {
+                name: "acme".to_owned(),
+            },
+            source: Some(SourceConfig {
+                repository: "acme/reference".to_owned(),
+            }),
+            security: SecurityConfig::default(),
+            repository: repository.settings.clone(),
+            templates: TemplateConfig::default(),
+            branch_protection: BranchProtectionConfig::default(),
+            rulesets: RulesetsConfig::default(),
+            systems: vec![SystemConfig {
+                id: "reference".to_owned(),
+                name: "Reference".to_owned(),
+                match_prefix: false,
+                exclude: Vec::new(),
+                repos: vec!["reference".to_owned()],
+                security: None,
+                teams: Vec::<TeamAccess>::new(),
+                rulesets: None,
+            }],
+            files: Vec::new(),
+            policies: Vec::new(),
+            v2: ManifestV2State {
+                schema: Some(ManifestSchema::v2()),
+                provenance: Some(ManifestProvenance {
+                    repository: "acme/reference".to_owned(),
+                    default_branch: Some("main".to_owned()),
+                    repository_node_id: Some("R_123".to_owned()),
+                    default_branch_head_oid: Some("deadbeef".to_owned()),
+                }),
+                categories: ManifestCategories {
+                    repository: Some(repository),
+                    files: Some(files),
+                    integrations: Some(integrations),
+                    ..ManifestCategories::default()
+                },
+                coverage: Vec::new(),
+            },
+        };
+
+        let rendered = render_manifest(&manifest).unwrap();
+        let parsed: Manifest = toml::from_str(&rendered).unwrap();
+
+        let parsed_files = parsed.v2.categories.files.unwrap();
+        assert_eq!(parsed_files.entries[0].encoding, FileEncoding::Base64);
+        assert_eq!(
+            parsed
+                .v2
+                .categories
+                .integrations
+                .unwrap()
+                .policy
+                .disposition,
+            ManagementDisposition::Observe
+        );
+        assert_eq!(
+            parsed.v2.provenance.unwrap().repository_node_id.as_deref(),
+            Some("R_123")
+        );
     }
 }

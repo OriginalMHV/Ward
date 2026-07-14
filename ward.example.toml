@@ -1,96 +1,212 @@
 [org]
 name = "my-github-org"
 
-[security]
-secret_scanning = true
-secret_scanning_ai_detection = true
-push_protection = true
-dependabot_alerts = true
-dependabot_security_updates = true
+[source]
+repository = "my-github-org/reference-service"
 
-# Custom checks shown as extra columns in the TUI security tab.
-# Each check adds a [Y]/[N] column next to the built-in ones.
+[schema]
+version = 2
 
-# [[security.checks]]
-# name = "Dependabot Config"
-# type = "file_exists"
-# path = ".github/dependabot.yml"
-
-# [[security.checks]]
-# name = "CI Pipeline"
-# type = "workflow_exists"
-# path = ".github/workflows/ci.yml"
-
-# [[security.checks]]
-# name = "Managed"
-# type = "topic_contains"
-# topic = "ward-managed"
-
-# [[security.checks]]
-# name = "Branch Protected"
-# type = "branch_protection"
-
-# [[security.checks]]
-# name = "Main Branch"
-# type = "default_branch"
-# expected = "main"
+[provenance]
+repository = "my-github-org/reference-service"
+default_branch = "main"
 
 [templates]
-branch = "chore/ward-setup"
+branch = "chore/ward-sync"
 reviewers = ["alice", "bob"]
 commit_message_prefix = "chore: "
-# custom_dir = "/path/to/custom/templates"
-
-[templates.registries.gradle-artifactory]
-type = "maven-repository"
-url = "https://your-artifactory.example.com/artifactory/maven"
-# jfrog_oidc_provider = "your-oidc-provider-id"
-
-[branch_protection]
-enabled = true
-required_approvals = 1
-dismiss_stale_reviews = true
-require_code_owner_reviews = false
-require_status_checks = true
-strict_status_checks = false
-enforce_admins = false
-required_linear_history = false
-allow_force_pushes = false
-allow_deletions = false
-
-[rulesets.branch_protection]
-enabled = true
-enforcement = "active"
-required_approvals = 1
-dismiss_stale_reviews = true
-require_code_owner_reviews = false
-required_status_checks = ["ci"]
-require_linear_history = false
-block_force_pushes = true
-block_deletions = true
 
 [[systems]]
 id = "backend"
 name = "Backend Services"
-exclude = ["operations?", "workflows", "system"]
-# Explicit repos (in addition to prefix-matched ones)
-# repos = ["standalone-service", "shared-library"]
-teams = [
-    { slug = "developers", permission = "push" },
-    { slug = "devops", permission = "admin" },
-]
+match_prefix = false
+repos = ["backend-api", "backend-worker"]
+exclude = []
 
-[[systems]]
-id = "frontend"
-name = "Frontend Apps"
-exclude = ["operations?", "workflows"]
+[categories.repository.policy]
+disposition = "managed"
+prune = false
+sensitive = false
 
-[[systems]]
-id = "platform"
-name = "Platform & Infra"
-exclude = ["operations?", "workflows"]
+[categories.repository.metadata]
+description = "Managed service"
+homepage = "https://example.com"
+default_branch = "main"
+visibility = "private"
+archived = false
 
-# Policy rules (checked with `ward policy check`)
+[categories.repository.settings]
+has_issues = true
+has_projects = false
+has_wiki = false
+has_discussions = true
+has_pull_requests = true
+allow_squash_merge = true
+allow_merge_commit = false
+allow_rebase_merge = true
+allow_auto_merge = true
+delete_branch_on_merge = true
+allow_update_branch = true
+web_commit_signoff_required = true
+topics = ["managed-by-ward"]
+
+[categories.files]
+include = [".github/**", "renovate.json"]
+exclude = []
+
+[categories.files.policy]
+disposition = "managed"
+prune = false
+sensitive = false
+
+[[categories.files.entries]]
+path = ".github/workflows/ci.yml"
+content = """
+name: CI
+on:
+  pull_request:
+"""
+encoding = "utf-8"
+mode = "100644"
+
+[categories.security]
+advanced_security = true
+code_security = true
+dependabot_alerts = true
+dependabot_security_updates = true
+secret_scanning = true
+secret_scanning_push_protection = true
+secret_scanning_ai_detection = true
+private_vulnerability_reporting = true
+
+[categories.security.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[categories.security.codeql_default_setup]
+state = "configured"
+languages = ["java-kotlin"]
+query_suite = "default"
+
+[categories.rulesets.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[[categories.rulesets.repository_rulesets]]
+name = "Protect main"
+target = "branch"
+enforcement = "active"
+conditions_json = '{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}}'
+
+[[categories.rulesets.repository_rulesets.rules]]
+type = "deletion"
+
+[[categories.rulesets.repository_rulesets.rules]]
+type = "pull_request"
+parameters_json = '{"required_approving_review_count":2}'
+
+[[categories.rulesets.repository_rulesets.bypass_actors]]
+bypass_mode = "pull_request"
+
+[categories.rulesets.repository_rulesets.bypass_actors.actor]
+type = "team"
+slug = "repository-owners"
+
+[categories.branch_protection.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[categories.branch_protection.default_branch]
+enabled = true
+required_approvals = 2
+dismiss_stale_reviews = true
+require_code_owner_reviews = true
+require_status_checks = true
+strict_status_checks = true
+enforce_admins = true
+required_linear_history = true
+allow_force_pushes = false
+allow_deletions = false
+
+[categories.actions.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[categories.actions.settings]
+enabled = true
+allowed_actions = "selected"
+selected_actions = ["actions/checkout@*"]
+requires_pinned_actions = true
+default_workflow_permissions = "read"
+can_approve_pull_request_reviews = false
+artifact_retention_days = 30
+log_retention_days = 30
+
+[[categories.actions.variables]]
+name = "JAVA_VERSION"
+value = "25"
+
+[[categories.actions.secrets]]
+name = "DEPLOY_TOKEN"
+
+[categories.actions.secrets.value_from]
+source = "env"
+key = "WARD_ACTIONS_SECRET_DEPLOY_TOKEN"
+
+[[categories.actions.workflows]]
+path = ".github/workflows/ci.yml"
+enabled = true
+
+[categories.environments.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[[categories.environments.entries]]
+name = "production"
+wait_timer_minutes = 0
+prevent_self_review = true
+
+[[categories.environments.entries.variables]]
+name = "REGION"
+value = "eu-west-1"
+
+[categories.access.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[[categories.access.teams]]
+slug = "developers"
+permission = "push"
+
+[[categories.access.collaborators]]
+permission = "maintain"
+
+[categories.access.collaborators.actor]
+type = "user"
+login = "octocat"
+
+[categories.integrations.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[[categories.integrations.labels]]
+name = "bug"
+color = "d73a4a"
+description = "Something is not working"
+default = true
+
+[[categories.integrations.autolinks]]
+key_prefix = "JIRA-"
+url_template = "https://jira.example.com/browse/<num>"
+is_alphanumeric = false
+
 [[policies]]
 name = "no-public-repos"
 rule = "visibility != 'public'"
@@ -100,8 +216,3 @@ severity = "error"
 name = "require-secret-scanning"
 rule = "security.secret_scanning"
 severity = "error"
-
-[[policies]]
-name = "minimum-approvers"
-rule = "branch_protection.required_approvals >= 1"
-severity = "warning"

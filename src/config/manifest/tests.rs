@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::*;
 
 #[test]
@@ -59,6 +61,27 @@ fn system_lookup() {
     assert_eq!(m.system("be").unwrap().name, "Backend");
     assert_eq!(m.system("fe").unwrap().name, "Frontend");
     assert!(m.system("missing").is_none());
+}
+
+#[test]
+fn explicit_repo_matches_system_when_prefix_matching_is_disabled() {
+    let toml = r#"
+        [org]
+        name = "org"
+
+        [[systems]]
+        id = "reference"
+        name = "Reference"
+        match_prefix = false
+        repos = ["standalone-service"]
+    "#;
+    let manifest: Manifest = toml::from_str(toml).unwrap();
+
+    assert_eq!(
+        manifest.system_for_repo("standalone-service"),
+        Some("reference")
+    );
+    assert_eq!(manifest.system_for_repo("reference-other"), None);
 }
 
 #[test]
@@ -335,146 +358,6 @@ fn manifest_with_rulesets_and_teams() {
     assert_eq!(bp.required_approvals, 1);
     assert!(bp.block_force_pushes);
     assert_eq!(m.systems[0].teams.len(), 1);
-}
-
-#[test]
-fn security_checks_empty_by_default() {
-    let sc: SecurityConfig = toml::from_str("").unwrap();
-    assert!(sc.checks.is_empty());
-}
-
-#[test]
-fn security_checks_file_exists() {
-    let toml_str = r#"
-        [[checks]]
-        name = "Dependabot Config"
-        type = "file_exists"
-        path = ".github/dependabot.yml"
-    "#;
-    let sc: SecurityConfig = toml::from_str(toml_str).unwrap();
-    assert_eq!(sc.checks.len(), 1);
-    assert_eq!(sc.checks[0].name(), "Dependabot Config");
-    assert_eq!(
-        sc.checks[0],
-        SecurityCheck::FileExists {
-            name: "Dependabot Config".into(),
-            path: ".github/dependabot.yml".into(),
-        }
-    );
-}
-
-#[test]
-fn security_checks_workflow_exists() {
-    let toml_str = r#"
-        [[checks]]
-        name = "CI Pipeline"
-        type = "workflow_exists"
-        path = ".github/workflows/ci.yml"
-    "#;
-    let sc: SecurityConfig = toml::from_str(toml_str).unwrap();
-    assert_eq!(sc.checks.len(), 1);
-    assert_eq!(sc.checks[0].name(), "CI Pipeline");
-    assert!(matches!(
-        &sc.checks[0],
-        SecurityCheck::WorkflowExists { path, .. } if path == ".github/workflows/ci.yml"
-    ));
-}
-
-#[test]
-fn security_checks_topic_contains() {
-    let toml_str = r#"
-        [[checks]]
-        name = "Managed"
-        type = "topic_contains"
-        topic = "ward-managed"
-    "#;
-    let sc: SecurityConfig = toml::from_str(toml_str).unwrap();
-    assert_eq!(sc.checks.len(), 1);
-    assert_eq!(sc.checks[0].name(), "Managed");
-    assert!(matches!(
-        &sc.checks[0],
-        SecurityCheck::TopicContains { topic, .. } if topic == "ward-managed"
-    ));
-}
-
-#[test]
-fn security_checks_branch_protection() {
-    let toml_str = r#"
-        [[checks]]
-        name = "Branch Protected"
-        type = "branch_protection"
-    "#;
-    let sc: SecurityConfig = toml::from_str(toml_str).unwrap();
-    assert_eq!(sc.checks.len(), 1);
-    assert_eq!(sc.checks[0].name(), "Branch Protected");
-    assert!(matches!(
-        &sc.checks[0],
-        SecurityCheck::BranchProtection { .. }
-    ));
-}
-
-#[test]
-fn security_checks_default_branch() {
-    let toml_str = r#"
-        [[checks]]
-        name = "Main Branch"
-        type = "default_branch"
-        expected = "main"
-    "#;
-    let sc: SecurityConfig = toml::from_str(toml_str).unwrap();
-    assert_eq!(sc.checks.len(), 1);
-    assert_eq!(sc.checks[0].name(), "Main Branch");
-    assert!(matches!(
-        &sc.checks[0],
-        SecurityCheck::DefaultBranch { expected, .. } if expected == "main"
-    ));
-}
-
-#[test]
-fn security_checks_multiple() {
-    let toml_str = r#"
-        [[checks]]
-        name = "Has CI"
-        type = "workflow_exists"
-        path = ".github/workflows/ci.yml"
-
-        [[checks]]
-        name = "Main Branch"
-        type = "default_branch"
-        expected = "main"
-
-        [[checks]]
-        name = "Tagged"
-        type = "topic_contains"
-        topic = "managed"
-    "#;
-    let sc: SecurityConfig = toml::from_str(toml_str).unwrap();
-    assert_eq!(sc.checks.len(), 3);
-    assert_eq!(sc.checks[0].name(), "Has CI");
-    assert_eq!(sc.checks[1].name(), "Main Branch");
-    assert_eq!(sc.checks[2].name(), "Tagged");
-}
-
-#[test]
-fn manifest_with_security_checks() {
-    let toml_str = r#"
-        [org]
-        name = "org"
-
-        [[security.checks]]
-        name = "Dependabot Config"
-        type = "file_exists"
-        path = ".github/dependabot.yml"
-
-        [[security.checks]]
-        name = "Main Branch"
-        type = "default_branch"
-        expected = "main"
-    "#;
-    let m: Manifest = toml::from_str(toml_str).unwrap();
-    assert_eq!(m.security.checks.len(), 2);
-    assert_eq!(m.security.checks[0].name(), "Dependabot Config");
-    assert_eq!(m.security.checks[1].name(), "Main Branch");
 }
 
 #[test]
@@ -872,4 +755,1058 @@ fn system_for_repo_returns_none_when_no_match() {
     "#;
     let m: Manifest = toml::from_str(toml).unwrap();
     assert_eq!(m.system_for_repo("unrelated-repo"), None);
+}
+
+fn sample_manifest_for_v2() -> Manifest {
+    Manifest {
+        org: OrgConfig {
+            name: "acme".to_owned(),
+        },
+        source: Some(SourceConfig {
+            repository: "acme/reference".to_owned(),
+        }),
+        security: SecurityConfig {
+            secret_scanning: true,
+            secret_scanning_ai_detection: true,
+            push_protection: true,
+            dependabot_alerts: true,
+            dependabot_security_updates: true,
+            codeql_advanced_setup: false,
+        },
+        repository: Some(RepositorySettingsConfig {
+            has_issues: Some(true),
+            has_pull_requests: Some(true),
+            pull_request_creation_policy: Some("all".to_owned()),
+            has_sponsorships_enabled: Some(false),
+            issue_creation_policy: Some("all".to_owned()),
+            use_squash_pr_title_as_default: Some(true),
+            topics: Some(vec!["managed".to_owned()]),
+            ..RepositorySettingsConfig::default()
+        }),
+        templates: TemplateConfig {
+            branch: "chore/ward-sync".to_owned(),
+            reviewers: Vec::new(),
+            commit_message_prefix: "chore: ".to_owned(),
+            custom_dir: None,
+            registries: HashMap::new(),
+        },
+        branch_protection: BranchProtectionConfig::default(),
+        rulesets: RulesetsConfig {
+            branch_protection: None,
+            repository: vec![RepositoryRulesetConfig {
+                name: "Protect main".to_owned(),
+                target: "branch".to_owned(),
+                enforcement: "active".to_owned(),
+                conditions_json: None,
+                rules: Vec::new(),
+                bypass_actors: vec![RulesetBypassActorConfig {
+                    actor_type: "Team".to_owned(),
+                    actor_id: Some(42),
+                    team_slug: Some("platform".to_owned()),
+                    bypass_mode: "always".to_owned(),
+                }],
+            }],
+        },
+        systems: vec![SystemConfig {
+            id: "reference".to_owned(),
+            name: "Reference".to_owned(),
+            match_prefix: false,
+            exclude: Vec::new(),
+            repos: vec!["reference".to_owned()],
+            security: None,
+            teams: vec![TeamAccess {
+                slug: "platform".to_owned(),
+                permission: "push".to_owned(),
+            }],
+            rulesets: None,
+        }],
+        files: vec![ManagedFile {
+            path: ".github/workflows/ci.yml".to_owned(),
+            content: "name: CI\n".to_owned(),
+        }],
+        policies: Vec::new(),
+        v2: ManifestV2State::default(),
+    }
+}
+
+#[test]
+fn manifest_v2_foundation_from_legacy_manifest_sets_safe_category_policies() {
+    let manifest = sample_manifest_for_v2();
+
+    let document = manifest.to_document_v2();
+
+    assert_eq!(document.v2.schema.as_ref().unwrap().version, 2);
+    assert_eq!(
+        document
+            .v2
+            .provenance
+            .as_ref()
+            .map(|provenance| provenance.repository.as_str()),
+        Some("acme/reference")
+    );
+    assert_eq!(
+        document.v2.schema.as_ref().map(|schema| schema.version),
+        Some(2)
+    );
+    assert_eq!(
+        document
+            .v2
+            .categories
+            .security
+            .as_ref()
+            .map(|category| category.policy.disposition),
+        Some(ManagementDisposition::Managed)
+    );
+    assert_eq!(
+        document
+            .v2
+            .categories
+            .access
+            .as_ref()
+            .map(|category| category.policy.disposition),
+        Some(ManagementDisposition::Managed)
+    );
+    assert_eq!(
+        document
+            .v2
+            .categories
+            .access
+            .as_ref()
+            .map(|category| category.teams.as_slice()),
+        Some(
+            [TeamAccess {
+                slug: "platform".to_owned(),
+                permission: "push".to_owned(),
+            }]
+            .as_slice()
+        )
+    );
+    assert!(document.systems[0].teams.is_empty());
+    assert_eq!(
+        document
+            .v2
+            .categories
+            .actions
+            .as_ref()
+            .map(|category| category.policy.disposition),
+        Some(ManagementDisposition::Observe)
+    );
+    assert_eq!(
+        document
+            .v2
+            .categories
+            .actions
+            .as_ref()
+            .map(|category| category.policy.sensitive),
+        Some(true)
+    );
+    assert_eq!(
+        document
+            .v2
+            .categories
+            .rulesets
+            .as_ref()
+            .unwrap()
+            .repository_rulesets[0]
+            .bypass_actors[0]
+            .actor,
+        ActorReference::Team {
+            slug: "platform".to_owned(),
+        }
+    );
+    assert_eq!(
+        document.v2.categories.files.as_ref().unwrap().entries[0].encoding,
+        FileEncoding::Utf8
+    );
+    assert_eq!(
+        document
+            .v2
+            .categories
+            .repository
+            .as_ref()
+            .and_then(|category| category.settings.as_ref())
+            .and_then(|settings| settings.has_issues),
+        Some(true)
+    );
+    assert_eq!(document.v2.coverage.len(), 0);
+}
+
+#[test]
+fn manifest_v2_serde_defaults_keep_new_flags_safe() {
+    let toml = r#"
+        [schema]
+        version = 2
+
+        [org]
+        name = "acme"
+
+        [categories.actions]
+    "#;
+
+    let document: ManifestDocumentV2 = toml::from_str(toml).unwrap();
+    let actions = document.v2.categories.actions.as_ref().unwrap();
+
+    assert_eq!(actions.policy.disposition, ManagementDisposition::Observe);
+    assert!(!actions.policy.prune);
+    assert!(!actions.policy.sensitive);
+    assert!(actions.secrets.is_empty());
+    assert!(
+        actions
+            .settings
+            .as_ref()
+            .is_none_or(|settings| settings.oidc_subject_claim_include_keys.is_empty())
+    );
+}
+
+#[test]
+fn manifest_v2_does_not_flatten_different_system_team_grants() {
+    let mut manifest = sample_manifest_for_v2();
+    let mut second = manifest.systems[0].clone();
+    second.id = "other".to_owned();
+    second.name = "Other".to_owned();
+    second.repos = vec!["other".to_owned()];
+    second.teams = vec![TeamAccess {
+        slug: "other-team".to_owned(),
+        permission: "admin".to_owned(),
+    }];
+    manifest.systems.push(second);
+
+    let document = manifest.to_document_v2();
+
+    assert!(document.v2.categories.access.is_none());
+    assert_eq!(document.systems[0].teams[0].slug, "platform");
+    assert_eq!(document.systems[1].teams[0].slug, "other-team");
+}
+
+#[test]
+fn manifest_v2_round_trips_legacy_semantics_through_load() {
+    let rendered = sample_manifest_for_v2().to_document_v2().render().unwrap();
+    let test_dir = std::path::Path::new("target/config-tests");
+    std::fs::create_dir_all(test_dir).unwrap();
+    let path = test_dir.join("manifest-v2-round-trip.toml");
+    std::fs::write(&path, rendered).unwrap();
+
+    let loaded = Manifest::load(path.to_str()).unwrap();
+
+    std::fs::remove_file(&path).unwrap();
+
+    assert_eq!(loaded.source.as_ref().unwrap().repository, "acme/reference");
+    assert_eq!(loaded.systems[0].repos, vec!["reference"]);
+    assert_eq!(
+        loaded.rulesets.repository[0].bypass_actors[0]
+            .team_slug
+            .as_deref(),
+        Some("platform")
+    );
+    assert_eq!(loaded.files[0].path, ".github/workflows/ci.yml");
+    assert_eq!(loaded.v2_schema().map(|schema| schema.version), Some(2));
+    assert!(loaded.v2_actions_category().is_some());
+}
+
+fn full_manifest_with_v2_state() -> Manifest {
+    let mut manifest = sample_manifest_for_v2();
+    manifest.v2 = ManifestV2State {
+        schema: Some(ManifestSchema::v2()),
+        provenance: Some(ManifestProvenance {
+            repository: "acme/reference".to_owned(),
+            default_branch: Some("main".to_owned()),
+            repository_node_id: Some("R_kgDOExample".to_owned()),
+            default_branch_head_oid: Some("abc123".to_owned()),
+        }),
+        categories: ManifestCategories {
+            security: Some(SecurityCategoryV2 {
+                policy: CategoryPolicy {
+                    disposition: ManagementDisposition::Reference,
+                    prune: false,
+                    sensitive: true,
+                },
+                settings: Some(SecurityConfig {
+                    secret_scanning: true,
+                    secret_scanning_ai_detection: true,
+                    push_protection: true,
+                    dependabot_alerts: true,
+                    dependabot_security_updates: true,
+                    codeql_advanced_setup: false,
+                }),
+                advanced_security: Some(true),
+                code_security: Some(true),
+                dependabot_alerts: Some(true),
+                dependabot_security_updates: Some(true),
+                secret_scanning: Some(true),
+                secret_scanning_push_protection: Some(true),
+                secret_scanning_validity_checks: Some(false),
+                secret_scanning_non_provider_patterns: Some(true),
+                secret_scanning_ai_detection: Some(true),
+                secret_scanning_delegated_alert_dismissal: Some(true),
+                secret_scanning_delegated_bypass: Some(true),
+                secret_scanning_delegated_alert_dismissal_options: Some(
+                    SecurityReviewerOptionsConfigV2 {
+                        reviewers: vec![SecurityReviewerConfigV2 {
+                            actor: ActorReference::Team {
+                                slug: "security-team".to_owned(),
+                            },
+                            mode: Some("always".to_owned()),
+                        }],
+                    },
+                ),
+                secret_scanning_delegated_bypass_options: Some(SecurityReviewerOptionsConfigV2 {
+                    reviewers: vec![SecurityReviewerConfigV2 {
+                        actor: ActorReference::Role {
+                            name: "security_managers".to_owned(),
+                        },
+                        mode: Some("always".to_owned()),
+                    }],
+                }),
+                private_vulnerability_reporting: Some(true),
+                codeql_default_setup: Some(CodeqlDefaultSetupConfig {
+                    state: Some("configured".to_owned()),
+                    languages: vec!["rust".to_owned(), "javascript".to_owned()],
+                    query_suite: Some("security-extended".to_owned()),
+                    runner_type: Some("labeled".to_owned()),
+                    runner_label: Some("ubuntu-latest".to_owned()),
+                    threat_model: Some("remote_and_local".to_owned()),
+                }),
+                configuration_reference: Some(ReferencedResourceConfig {
+                    resource_type: ReferencedResourceType::CodeSecurityConfiguration,
+                    name: "baseline".to_owned(),
+                }),
+                delegated_alert_dismissal_reviewers: vec![ActorReference::Team {
+                    slug: "security-team".to_owned(),
+                }],
+                delegated_bypass_reviewers: vec![ActorReference::Role {
+                    name: "security_managers".to_owned(),
+                }],
+                references: vec![ReferencedResourceConfig {
+                    resource_type: ReferencedResourceType::CodeSecurityConfiguration,
+                    name: "org-baseline".to_owned(),
+                }],
+            }),
+            repository: Some(RepositoryCategoryV2 {
+                policy: CategoryPolicy::managed(),
+                settings: manifest.repository.clone(),
+                metadata: Some(RepositoryMetadataConfig {
+                    description: Some("Reference service".to_owned()),
+                    homepage: Some("https://example.test".to_owned()),
+                    default_branch: Some("main".to_owned()),
+                    visibility: Some("private".to_owned()),
+                    archived: Some(false),
+                    is_template: Some(false),
+                    allow_forking: Some(false),
+                }),
+                custom_properties: vec![CustomPropertyValueConfig {
+                    property_name: "system".to_owned(),
+                    value: serde_json::json!(["party", "billing"]),
+                }],
+                immutable_releases: Some(ImmutableReleasesConfig {
+                    enabled: Some(true),
+                    enforced_by_owner: Some(true),
+                }),
+                references: vec![ReferencedResourceConfig {
+                    resource_type: ReferencedResourceType::Role,
+                    name: "maintainer".to_owned(),
+                }],
+            }),
+            branch_protection: Some(BranchProtectionCategoryV2 {
+                policy: CategoryPolicy::managed(),
+                default_branch: Some(BranchProtectionConfig {
+                    enabled: true,
+                    required_approvals: 2,
+                    dismiss_stale_reviews: true,
+                    require_code_owner_reviews: true,
+                    require_status_checks: true,
+                    strict_status_checks: true,
+                    enforce_admins: true,
+                    required_linear_history: true,
+                    allow_force_pushes: false,
+                    allow_deletions: false,
+                }),
+                default_branch_detailed: Some(DetailedBranchProtectionConfigV2 {
+                    protection: BranchProtectionConfig {
+                        enabled: true,
+                        required_approvals: 2,
+                        dismiss_stale_reviews: true,
+                        require_code_owner_reviews: true,
+                        require_status_checks: true,
+                        strict_status_checks: true,
+                        enforce_admins: true,
+                        required_linear_history: true,
+                        allow_force_pushes: false,
+                        allow_deletions: false,
+                    },
+                    status_check_contexts: vec!["ci".to_owned(), "lint".to_owned()],
+                    status_checks: vec![
+                        BranchStatusCheckConfigV2 {
+                            context: "ci".to_owned(),
+                            app_id: Some(17),
+                            app_slug: None,
+                        },
+                        BranchStatusCheckConfigV2 {
+                            context: "lint".to_owned(),
+                            app_id: None,
+                            app_slug: Some("github-actions".to_owned()),
+                        },
+                    ],
+                    push_restrictions: vec![ActorReference::Team {
+                        slug: "platform".to_owned(),
+                    }],
+                    dismissal_restrictions: vec![ActorReference::User {
+                        login: "alice".to_owned(),
+                    }],
+                    pull_request_bypass_allowances: vec![ActorReference::App {
+                        slug: "release-bot".to_owned(),
+                    }],
+                    require_last_push_approval: Some(true),
+                    block_creations: Some(true),
+                    required_reviewers: Some(serde_json::json!({
+                        "users": ["octocat"],
+                        "teams": ["platform"],
+                    })),
+                    require_conversation_resolution: Some(true),
+                    require_signed_commits: Some(true),
+                    lock_branch: Some(false),
+                    allow_fork_syncing: Some(false),
+                }),
+                protected_branches: vec![ProtectedBranchConfig {
+                    name: "release/*".to_owned(),
+                    protection: BranchProtectionConfig {
+                        enabled: true,
+                        required_approvals: 1,
+                        dismiss_stale_reviews: false,
+                        require_code_owner_reviews: true,
+                        require_status_checks: true,
+                        strict_status_checks: false,
+                        enforce_admins: true,
+                        required_linear_history: true,
+                        allow_force_pushes: false,
+                        allow_deletions: false,
+                    },
+                    status_check_contexts: vec!["ci".to_owned(), "lint".to_owned()],
+                    status_checks: vec![
+                        BranchStatusCheckConfigV2 {
+                            context: "ci".to_owned(),
+                            app_id: Some(17),
+                            app_slug: None,
+                        },
+                        BranchStatusCheckConfigV2 {
+                            context: "lint".to_owned(),
+                            app_id: None,
+                            app_slug: Some("github-actions".to_owned()),
+                        },
+                    ],
+                    push_restrictions: vec![ActorReference::Team {
+                        slug: "release-engineering".to_owned(),
+                    }],
+                    dismissal_restrictions: vec![ActorReference::User {
+                        login: "alice".to_owned(),
+                    }],
+                    pull_request_bypass_allowances: vec![ActorReference::Role {
+                        name: "maintain".to_owned(),
+                    }],
+                    require_last_push_approval: Some(true),
+                    block_creations: Some(false),
+                    required_reviewers: Some(serde_json::json!({
+                        "users": ["octocat"],
+                        "teams": ["release-engineering"],
+                    })),
+                    require_conversation_resolution: Some(true),
+                    require_signed_commits: Some(true),
+                    lock_branch: Some(false),
+                    allow_fork_syncing: Some(false),
+                }],
+            }),
+            rulesets: Some(RulesetsCategoryV2 {
+                policy: CategoryPolicy::managed(),
+                references: vec![RulesetReferenceV2 {
+                    name: "Org baseline".to_owned(),
+                    target: "branch".to_owned(),
+                    enforcement: "active".to_owned(),
+                    source_type: "Organization".to_owned(),
+                    source: "acme".to_owned(),
+                }],
+                repository_rulesets: vec![RepositoryRulesetV2 {
+                    name: "Protect main".to_owned(),
+                    target: "branch".to_owned(),
+                    enforcement: "active".to_owned(),
+                    conditions_json: Some(
+                        r#"{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}}"#.to_owned(),
+                    ),
+                    rules: vec![RepositoryRuleConfig {
+                        rule_type: "deletion".to_owned(),
+                        parameters_json: None,
+                    }],
+                    bypass_actors: vec![RulesetBypassActorV2 {
+                        actor: ActorReference::Team {
+                            slug: "platform".to_owned(),
+                        },
+                        bypass_mode: "always".to_owned(),
+                    }],
+                }],
+            }),
+            files: Some(FilesCategoryV2 {
+                policy: CategoryPolicy {
+                    disposition: ManagementDisposition::Managed,
+                    prune: true,
+                    sensitive: false,
+                },
+                include: vec![".github/**".to_owned(), "CODEOWNERS".to_owned()],
+                exclude: vec![".github/generated/**".to_owned()],
+                entries: vec![
+                    ManagedFileV2 {
+                        path: ".github/workflows/ci.yml".to_owned(),
+                        content: "name: CI\n".to_owned(),
+                        encoding: FileEncoding::Utf8,
+                        mode: "100644".to_owned(),
+                        source_sha: Some("deadbeef".to_owned()),
+                    },
+                    ManagedFileV2 {
+                        path: ".github/logo.png".to_owned(),
+                        content: "iVBORw0KGgo=".to_owned(),
+                        encoding: FileEncoding::Base64,
+                        mode: "100755".to_owned(),
+                        source_sha: Some("feedface".to_owned()),
+                    },
+                ],
+            }),
+            actions: Some(ActionsCategoryV2 {
+                policy: CategoryPolicy::observe_sensitive(),
+                settings: Some(ActionsSettingsConfig {
+                    enabled: Some(true),
+                    allowed_actions: Some("selected".to_owned()),
+                    selected_actions: vec!["actions/checkout@v4".to_owned()],
+                    allow_github_owned_actions: Some(true),
+                    allow_verified_creator_actions: Some(false),
+                    requires_pinned_actions: Some(true),
+                    default_workflow_permissions: Some("read".to_owned()),
+                    can_approve_pull_request_reviews: Some(false),
+                    artifact_retention_days: Some(30),
+                    log_retention_days: Some(14),
+                    private_fork_workflows_enabled: Some(false),
+                    private_fork_workflow_approval: Some("maintainer".to_owned()),
+                    send_write_tokens_to_workflows: Some(false),
+                    send_secrets_and_variables: Some(false),
+                    require_approval_for_fork_pr_workflows: Some(true),
+                    fork_pull_request_workflows_enabled: Some(true),
+                    fork_pull_request_contributor_approval: Some(
+                        "first_time_contributors".to_owned(),
+                    ),
+                    workflow_access_level: Some("organization".to_owned()),
+                    oidc_subject_claim_template: Some("repo:${{ github.repository }}".to_owned()),
+                    oidc_use_default: Some(false),
+                    oidc_use_immutable_subject: Some(true),
+                    oidc_subject_claim_include_keys: vec![
+                        "repository".to_owned(),
+                        "repository_owner".to_owned(),
+                    ],
+                    cache_retention_limit_days: Some(7),
+                    cache_storage_limit_gb: Some(10),
+                }),
+                variables: vec![NamedValueConfig {
+                    name: "RUST_LOG".to_owned(),
+                    value: "info".to_owned(),
+                }],
+                secrets: vec![SecretPlaceholderConfig {
+                    name: "NPM_TOKEN".to_owned(),
+                    value_from: ExternalValueReference::Env {
+                        key: "WARD_NPM_TOKEN".to_owned(),
+                    },
+                }],
+                dependabot_secrets: vec![SecretPlaceholderConfig {
+                    name: "DEPENDABOT_TOKEN".to_owned(),
+                    value_from: ExternalValueReference::Env {
+                        key: "WARD_DEPENDABOT_TOKEN".to_owned(),
+                    },
+                }],
+                codespaces_secrets: vec![SecretPlaceholderConfig {
+                    name: "CODESPACES_TOKEN".to_owned(),
+                    value_from: ExternalValueReference::Env {
+                        key: "WARD_CODESPACES_TOKEN".to_owned(),
+                    },
+                }],
+                workflows: vec![WorkflowStateConfig {
+                    path: ".github/workflows/ci.yml".to_owned(),
+                    enabled: Some(true),
+                }],
+                references: vec![ReferencedResourceConfig {
+                    resource_type: ReferencedResourceType::RunnerGroup,
+                    name: "shared-linux".to_owned(),
+                }],
+            }),
+            environments: Some(EnvironmentsCategoryV2 {
+                policy: CategoryPolicy::observe_sensitive(),
+                entries: vec![EnvironmentConfigV2 {
+                    name: "production".to_owned(),
+                    wait_timer_minutes: Some(30),
+                    prevent_self_review: Some(true),
+                    deployment_policy: Some(EnvironmentDeploymentPolicyConfig {
+                        protected_branches: Some(true),
+                        custom_branch_policies: Some(true),
+                        branch_patterns: vec!["main".to_owned()],
+                        tag_patterns: vec!["v*".to_owned()],
+                    }),
+                    reviewers: vec![EnvironmentReviewerConfig {
+                        actor: ActorReference::Team {
+                            slug: "platform".to_owned(),
+                        },
+                    }],
+                    protection_apps: vec![ReferencedResourceConfig {
+                        resource_type: ReferencedResourceType::ProtectionRule,
+                        name: "change-freeze".to_owned(),
+                    }],
+                    variables: vec![NamedValueConfig {
+                        name: "SPRING_PROFILES_ACTIVE".to_owned(),
+                        value: "prod".to_owned(),
+                    }],
+                    secrets: vec![SecretPlaceholderConfig {
+                        name: "DB_PASSWORD".to_owned(),
+                        value_from: ExternalValueReference::Manual {
+                            hint: Some("Stored in KeyVault".to_owned()),
+                        },
+                    }],
+                }],
+            }),
+            access: Some(RepositoryAccessCategoryV2 {
+                policy: CategoryPolicy::observe_sensitive(),
+                teams: vec![TeamAccess {
+                    slug: "platform".to_owned(),
+                    permission: "maintain".to_owned(),
+                }],
+                collaborators: vec![CollaboratorAccessConfig {
+                    actor: ActorReference::User {
+                        login: "octocat".to_owned(),
+                    },
+                    permission: "push".to_owned(),
+                }],
+                references: vec![ReferencedResourceConfig {
+                    resource_type: ReferencedResourceType::Team,
+                    name: "org-admins".to_owned(),
+                }],
+            }),
+            integrations: Some(RepositoryIntegrationsCategoryV2 {
+                policy: CategoryPolicy::observe_sensitive(),
+                webhooks: vec![WebhookConfigV2 {
+                    url: "https://hooks.example.test/events".to_owned(),
+                    url_from: None,
+                    active: Some(true),
+                    events: vec!["push".to_owned(), "pull_request".to_owned()],
+                    content_type: Some("json".to_owned()),
+                    insecure_ssl: Some(false),
+                    secret: Some(ExternalValueReference::Env {
+                        key: "WARD_WEBHOOK_SECRET".to_owned(),
+                    }),
+                }],
+                deploy_keys: vec![DeployKeyConfigV2 {
+                    title: "readonly".to_owned(),
+                    read_only: Some(true),
+                    fingerprint: Some("aa:bb:cc".to_owned()),
+                    replacement_key: Some(ExternalValueReference::Manual {
+                        hint: Some("Generate a new SSH key".to_owned()),
+                    }),
+                }],
+                pages: Some(PagesConfigV2 {
+                    build_type: Some("workflow".to_owned()),
+                    source_branch: Some("gh-pages".to_owned()),
+                    source_path: Some("/".to_owned()),
+                    cname: Some("ward.example.test".to_owned()),
+                    https_enforced: Some(true),
+                }),
+                autolinks: vec![AutolinkConfigV2 {
+                    key_prefix: "WARD-".to_owned(),
+                    url_template: "https://tracker.example.test/WARD-<num>".to_owned(),
+                    is_alphanumeric: None,
+                }],
+                labels: vec![LabelConfigV2 {
+                    name: "ward".to_owned(),
+                    color: Some("0052cc".to_owned()),
+                    description: Some("Managed by Ward".to_owned()),
+                    default: Some(false),
+                }],
+            }),
+        },
+        coverage: vec![
+            CoverageEntry {
+                category: ManifestCategoryName::Actions,
+                endpoint: "GET /repos/{owner}/{repo}/actions/secrets".to_owned(),
+                outcome: CoverageOutcome::Redacted,
+                reason: Some("GitHub does not return secret values".to_owned()),
+                required_permission: Some("repo".to_owned()),
+            },
+            CoverageEntry {
+                category: ManifestCategoryName::Security,
+                endpoint: "GET /orgs/{org}/code-security/configurations".to_owned(),
+                outcome: CoverageOutcome::PermissionDenied,
+                reason: Some("Missing admin:org".to_owned()),
+                required_permission: Some("admin:org".to_owned()),
+            },
+        ],
+    };
+    manifest
+}
+
+#[test]
+fn manifest_v2_preserves_every_category_policy_coverage_and_provenance() {
+    let manifest = full_manifest_with_v2_state();
+    let rendered = manifest.to_document_v2().render().unwrap();
+    let test_dir = std::path::Path::new("target/config-tests");
+    std::fs::create_dir_all(test_dir).unwrap();
+    let path = test_dir.join("manifest-v2-full-round-trip.toml");
+    std::fs::write(&path, &rendered).unwrap();
+
+    let loaded = Manifest::load(path.to_str()).unwrap();
+    let rerendered = loaded.to_document_v2().render().unwrap();
+
+    std::fs::remove_file(&path).unwrap();
+
+    assert_eq!(rendered, rerendered);
+    assert_eq!(loaded.v2_provenance(), manifest.v2_provenance());
+    assert_eq!(loaded.v2_categories(), manifest.v2_categories());
+    assert_eq!(loaded.v2_coverage(), manifest.v2_coverage());
+    assert_eq!(loaded.v2_schema(), manifest.v2_schema());
+    assert_eq!(
+        loaded
+            .v2_actions_category()
+            .and_then(|category| category.settings.as_ref())
+            .and_then(|settings| settings.artifact_retention_days),
+        Some(30)
+    );
+    assert_eq!(
+        loaded
+            .v2_repository_category()
+            .and_then(|category| category.settings.as_ref())
+            .and_then(|settings| settings.has_pull_requests),
+        Some(true)
+    );
+    assert_eq!(
+        loaded
+            .v2_repository_category()
+            .and_then(|category| category.settings.as_ref())
+            .and_then(|settings| settings.use_squash_pr_title_as_default),
+        Some(true)
+    );
+    assert_eq!(
+        loaded.v2_repository_category().unwrap().custom_properties[0].value,
+        serde_json::json!(["party", "billing"])
+    );
+    assert_eq!(
+        loaded
+            .v2_actions_category()
+            .and_then(|category| category.settings.as_ref())
+            .and_then(|settings| settings.send_write_tokens_to_workflows),
+        Some(false)
+    );
+    assert_eq!(
+        loaded
+            .v2_actions_category()
+            .and_then(|category| category.settings.as_ref())
+            .and_then(|settings| settings.oidc_use_default),
+        Some(false)
+    );
+    assert_eq!(
+        loaded
+            .v2_actions_category()
+            .map(|category| category.dependabot_secrets.len()),
+        Some(1)
+    );
+    assert_eq!(
+        loaded
+            .v2_actions_category()
+            .map(|category| category.codespaces_secrets.len()),
+        Some(1)
+    );
+    assert_eq!(
+        loaded
+            .v2_security_category()
+            .and_then(|category| category.secret_scanning_delegated_bypass),
+        Some(true)
+    );
+    assert_eq!(
+        loaded
+            .v2_security_category()
+            .and_then(|category| {
+                category
+                    .secret_scanning_delegated_bypass_options
+                    .as_ref()
+                    .map(|options| options.reviewers[0].mode.as_deref())
+            })
+            .flatten(),
+        Some("always")
+    );
+    assert_eq!(
+        loaded
+            .v2_branch_protection_category()
+            .and_then(|category| category.default_branch_detailed.as_ref())
+            .map(|branch| branch.status_checks.len()),
+        Some(2)
+    );
+    assert_eq!(
+        loaded
+            .v2_branch_protection_category()
+            .unwrap()
+            .protected_branches[0]
+            .required_reviewers
+            .as_ref(),
+        Some(&serde_json::json!({
+            "users": ["octocat"],
+            "teams": ["release-engineering"],
+        }))
+    );
+    assert_eq!(
+        loaded
+            .v2_categories()
+            .rulesets
+            .as_ref()
+            .map(|category| category.references[0].source_type.as_str()),
+        Some("Organization")
+    );
+    assert_eq!(
+        loaded.v2_environments_category().unwrap().entries[0].protection_apps[0].name,
+        "change-freeze"
+    );
+    assert_eq!(
+        loaded.v2_access_category().unwrap().collaborators[0].permission,
+        "push"
+    );
+    assert_eq!(
+        loaded.v2_integrations_category().unwrap().labels[0].default,
+        Some(false)
+    );
+    assert_eq!(
+        loaded
+            .v2_integrations_category()
+            .unwrap()
+            .pages
+            .as_ref()
+            .and_then(|pages| pages.cname.as_deref()),
+        Some("ward.example.test")
+    );
+}
+
+#[test]
+fn manifest_v2_golden_serialization_is_explicit_and_readable() {
+    let document = full_manifest_with_v2_state().to_document_v2();
+
+    let rendered = document.render().unwrap();
+    assert!(rendered.contains("[schema]"));
+    assert!(rendered.contains("[provenance]"));
+    assert!(rendered.contains("[categories.repository.policy]"));
+    assert!(rendered.contains("[categories.branch_protection.policy]"));
+    assert!(rendered.contains("[categories.branch_protection.default_branch_detailed]"));
+    assert!(rendered.contains("[categories.actions.policy]"));
+    assert!(rendered.contains("advanced_security = true"));
+    assert!(rendered.contains("dependabot_secrets"));
+    assert!(rendered.contains("codespaces_secrets"));
+    assert!(rendered.contains("secret_scanning_delegated_bypass_options"));
+    assert!(rendered.contains("[[categories.rulesets.references]]"));
+    assert!(rendered.contains("[categories.environments.policy]"));
+    assert!(rendered.contains("[categories.integrations.policy]"));
+}
+
+#[test]
+fn manifest_v2_actions_new_fields_default_safely_and_round_trip() {
+    let toml = r#"
+        [schema]
+        version = 2
+
+        [org]
+        name = "acme"
+
+        [categories.actions]
+
+        [categories.actions.settings]
+        enabled = true
+    "#;
+
+    let document: ManifestDocumentV2 = toml::from_str(toml).unwrap();
+    let actions = document.v2.categories.actions.as_ref().unwrap();
+    let settings = actions.settings.as_ref().unwrap();
+
+    assert_eq!(settings.send_write_tokens_to_workflows, None);
+    assert_eq!(settings.send_secrets_and_variables, None);
+    assert_eq!(settings.require_approval_for_fork_pr_workflows, None);
+    assert_eq!(settings.oidc_use_default, None);
+    assert_eq!(settings.oidc_use_immutable_subject, None);
+    assert!(actions.dependabot_secrets.is_empty());
+    assert!(actions.codespaces_secrets.is_empty());
+
+    let rendered = document.render().unwrap();
+    let reparsed: ManifestDocumentV2 = toml::from_str(&rendered).unwrap();
+    let reparsed_actions = reparsed.v2.categories.actions.as_ref().unwrap();
+
+    assert!(reparsed_actions.dependabot_secrets.is_empty());
+    assert!(reparsed_actions.codespaces_secrets.is_empty());
+    assert_eq!(
+        reparsed_actions
+            .settings
+            .as_ref()
+            .unwrap()
+            .oidc_use_immutable_subject,
+        None
+    );
+}
+
+#[test]
+fn manifest_v2_repository_settings_and_custom_property_arrays_round_trip() {
+    let toml = r#"
+        [schema]
+        version = 2
+
+        [org]
+        name = "acme"
+
+        [repository]
+        has_pull_requests = true
+        pull_request_creation_policy = "all"
+        has_sponsorships_enabled = false
+        issue_creation_policy = "all"
+        use_squash_pr_title_as_default = true
+
+        [[categories.repository.custom_properties]]
+        property_name = "owners"
+        value = ["platform", "billing"]
+
+        [[categories.integrations.labels]]
+        name = "bug"
+        color = "d73a4a"
+        description = "Bug"
+        default = true
+    "#;
+
+    let test_dir = std::path::Path::new("target/config-tests");
+    std::fs::create_dir_all(test_dir).unwrap();
+    let path = test_dir.join("manifest-v2-repository-array-round-trip.toml");
+    std::fs::write(&path, toml).unwrap();
+
+    let manifest = Manifest::load(path.to_str()).unwrap();
+
+    assert_eq!(
+        manifest
+            .repository
+            .as_ref()
+            .and_then(|settings| settings.has_pull_requests),
+        Some(true)
+    );
+    assert_eq!(
+        manifest.v2_repository_category().unwrap().custom_properties[0].value,
+        serde_json::json!(["platform", "billing"])
+    );
+    assert_eq!(
+        manifest.v2_integrations_category().unwrap().labels[0].default,
+        Some(true)
+    );
+
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn manifest_v2_string_custom_property_and_new_repository_fields_are_backward_compatible() {
+    let toml = r#"
+        [schema]
+        version = 2
+
+        [org]
+        name = "acme"
+
+        [repository]
+        has_issues = true
+
+        [[categories.repository.custom_properties]]
+        property_name = "team"
+        value = "party"
+    "#;
+
+    let document: ManifestDocumentV2 = toml::from_str(toml).unwrap();
+    let settings = document.repository.as_ref().unwrap();
+
+    assert_eq!(settings.has_issues, Some(true));
+    assert_eq!(settings.has_pull_requests, None);
+    assert_eq!(settings.pull_request_creation_policy, None);
+    assert_eq!(settings.has_sponsorships_enabled, None);
+    assert_eq!(settings.issue_creation_policy, None);
+    assert_eq!(settings.use_squash_pr_title_as_default, None);
+    assert_eq!(
+        document
+            .v2
+            .categories
+            .repository
+            .as_ref()
+            .unwrap()
+            .custom_properties[0]
+            .value,
+        serde_json::json!("party")
+    );
+
+    let rendered = document.render().unwrap();
+    assert!(rendered.contains("value = \"party\""));
+}
+
+#[test]
+fn manifest_v2_security_rules_and_branch_additions_default_safely() {
+    let toml = r#"
+        [schema]
+        version = 2
+
+        [org]
+        name = "acme"
+
+        [categories.security]
+
+        [categories.branch_protection]
+
+        [[categories.branch_protection.protected_branches]]
+        name = "release/*"
+
+        [categories.rulesets]
+    "#;
+
+    let document: ManifestDocumentV2 = toml::from_str(toml).unwrap();
+    let security = document.v2.categories.security.as_ref().unwrap();
+    let branch_protection = document.v2.categories.branch_protection.as_ref().unwrap();
+    let rulesets = document.v2.categories.rulesets.as_ref().unwrap();
+
+    assert_eq!(security.advanced_security, None);
+    assert_eq!(security.code_security, None);
+    assert_eq!(security.secret_scanning_validity_checks, None);
+    assert_eq!(security.secret_scanning_delegated_alert_dismissal, None);
+    assert!(security.secret_scanning_delegated_bypass_options.is_none());
+    assert!(branch_protection.default_branch_detailed.is_none());
+    assert!(
+        branch_protection.protected_branches[0]
+            .status_checks
+            .is_empty()
+    );
+    assert_eq!(
+        branch_protection.protected_branches[0].require_last_push_approval,
+        None
+    );
+    assert_eq!(
+        branch_protection.protected_branches[0].block_creations,
+        None
+    );
+    assert_eq!(
+        branch_protection.protected_branches[0].required_reviewers,
+        None
+    );
+    assert!(rulesets.references.is_empty());
+}
+
+#[test]
+fn checked_in_example_manifest_is_valid_v2_configuration() {
+    let manifest: Manifest = toml::from_str(include_str!("../../../ward.example.toml")).unwrap();
+
+    assert_eq!(manifest.v2_schema().map(|schema| schema.version), Some(2));
+    assert_eq!(manifest.org.name, "my-github-org");
+    assert_eq!(
+        manifest
+            .v2_categories()
+            .files
+            .as_ref()
+            .map(|category| category.entries.len()),
+        Some(1)
+    );
+    assert_eq!(
+        manifest
+            .v2_actions_category()
+            .and_then(|category| category.secrets.first())
+            .map(|secret| secret.name.as_str()),
+        Some("DEPLOY_TOKEN")
+    );
 }

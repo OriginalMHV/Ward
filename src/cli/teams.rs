@@ -44,7 +44,14 @@ impl TeamsCommand {
         match &self.action {
             TeamsAction::List => list(client, manifest, system, repo).await,
             TeamsAction::Plan => plan(client, manifest, system, repo).await,
-            TeamsAction::Apply { yes } => apply(client, manifest, system, repo, *yes).await,
+            TeamsAction::Apply { yes } => {
+                crate::reconcile::unified::guard_legacy_mutation(
+                    manifest,
+                    crate::reconcile::unified::Category::Access,
+                    "teams apply",
+                )?;
+                apply(client, manifest, system, repo, *yes).await
+            }
             TeamsAction::Audit => audit(client, manifest, system, repo).await,
         }
     }
@@ -67,7 +74,12 @@ async fn resolve_repos(
     let excludes = manifest.exclude_patterns_for_system(sys);
     let explicit = manifest.explicit_repos_for_system(sys);
     let repos = client
-        .list_repos_for_system(sys, &excludes, &explicit)
+        .list_repos_for_system(
+            sys,
+            manifest.matches_prefix_for_system(sys),
+            &excludes,
+            &explicit,
+        )
         .await?;
     Ok(repos.into_iter().map(|r| r.name).collect())
 }

@@ -44,12 +44,9 @@ tera = "1"
 rust-embed = "8"
 
 # Output formatting
-tabled = { version = "0.20", features = ["ansi"] }
+tabled = { version = "0.20", default-features = false, features = ["ansi"] }
 console = "0.16"
 indicatif = "0.18"
-# TUI
-ratatui = "0.30"
-crossterm = "0.29"
 
 # Logging & tracing
 tracing = "0.1"
@@ -64,15 +61,18 @@ regex = "1"
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 
-# Cache directory resolution
-dirs = "6"
-
 # Glob pattern matching for repo overrides
 glob-match = "0.2"
 
 # Base64 for Git blob API
 base64 = "0.22"
 toml_edit = "0.25.10"
+
+# LibSodium-compatible sealed-box encryption for GitHub Actions/environment secrets
+crypto_box = { version = "0.9", features = ["seal"] }
+
+# Percent-encoding for environment names in Actions/environments API paths
+percent-encoding = "2.3"
 
 [dev-dependencies]
 assert_cmd = "2"

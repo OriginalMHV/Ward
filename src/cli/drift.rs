@@ -197,7 +197,12 @@ async fn resolve_repos(
     let excludes = manifest.exclude_patterns_for_system(sys);
     let explicit = manifest.explicit_repos_for_system(sys);
     let repos = client
-        .list_repos_for_system(sys, &excludes, &explicit)
+        .list_repos_for_system(
+            sys,
+            manifest.matches_prefix_for_system(sys),
+            &excludes,
+            &explicit,
+        )
         .await?;
     Ok(repos
         .into_iter()
@@ -389,7 +394,6 @@ mod tests {
             dependabot_security_updates: true,
             secret_scanning_ai_detection: true,
             codeql_advanced_setup: false,
-            checks: vec![],
         };
         let actual = SecurityState {
             secret_scanning: false,
@@ -450,7 +454,6 @@ mod tests {
             dependabot_security_updates: true,
             secret_scanning_ai_detection: true,
             codeql_advanced_setup: false,
-            checks: vec![],
         };
         let actual_sec = SecurityState {
             secret_scanning: true,
