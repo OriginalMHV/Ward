@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::Args;
@@ -7,6 +8,7 @@ use dialoguer::{Confirm, Input, MultiSelect};
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use serde::Deserialize;
 
+use crate::cli::import::{ImportOptions, import_repository};
 use crate::config::auth;
 
 const EXAMPLE_MANIFEST: &str = r#"[org]
@@ -34,13 +36,64 @@ const OUTPUT_PATH: &str = "ward.toml";
 
 #[derive(Args)]
 pub struct InitCommand {
+    /// Build ward.toml from an existing repository (OWNER/REPO or GitHub URL)
+    #[arg(long, conflicts_with = "non_interactive")]
+    from: Option<String>,
+
     /// Skip interactive wizard, write default ward.toml
     #[arg(long)]
     non_interactive: bool,
+
+    /// Output path for --from
+    #[arg(long, default_value = OUTPUT_PATH, requires = "from")]
+    output: PathBuf,
+
+    /// Print the generated configuration for --from
+    #[arg(long, requires = "from")]
+    stdout: bool,
+
+    /// Replace an existing output file for --from
+    #[arg(long, requires = "from")]
+    force: bool,
+
+    /// Max concurrent API calls for --from
+    #[arg(long, default_value_t = 5, requires = "from")]
+    parallelism: usize,
+
+    /// Existing target repository for --from. Repeat for multiple targets.
+    #[arg(long, value_name = "OWNER/REPO", requires = "from")]
+    target: Vec<String>,
+
+    /// Include configuration files matching this glob. Repeatable.
+    #[arg(long, value_name = "GLOB", requires = "from")]
+    include: Vec<String>,
+
+    /// Exclude configuration files matching this glob. Repeatable.
+    #[arg(long, value_name = "GLOB", requires = "from")]
+    exclude: Vec<String>,
+
+    /// Fail if any readable source setting is unavailable.
+    #[arg(long, requires = "from")]
+    strict: bool,
 }
 
 impl InitCommand {
     pub async fn run(&self) -> Result<()> {
+        if let Some(source) = &self.from {
+            return import_repository(ImportOptions {
+                source,
+                targets: &self.target,
+                include: &self.include,
+                exclude: &self.exclude,
+                strict: self.strict,
+                output: &self.output,
+                stdout: self.stdout,
+                force: self.force,
+                parallelism: self.parallelism,
+            })
+            .await;
+        }
+
         if self.non_interactive {
             return write_default();
         }

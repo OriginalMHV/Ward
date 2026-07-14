@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use super::Client;
+use super::response;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PullRequest {
@@ -30,7 +31,7 @@ impl Client {
         reviewers: &[String],
     ) -> Result<PullRequest> {
         // Check for existing PR from the same branch
-        if let Some(existing) = self.find_open_pr(repo, head).await? {
+        if let Some(existing) = self.find_open_pull_request(repo, head).await? {
             tracing::info!(
                 "PR already exists for {head} in {repo}: {}",
                 existing.html_url
@@ -45,17 +46,11 @@ impl Client {
             "base": base,
         });
 
-        let resp = self
-            .post_json(&format!("/repos/{}/{repo}/pulls", self.org), &pr_body)
-            .await?;
-
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("Failed to create PR in {repo} (HTTP {status}): {body}");
-        }
-
-        let pr: PullRequest = resp.json().await.context("Failed to parse PR response")?;
+        let path = format!("/repos/{}/{repo}/pulls", self.org);
+        let pr: PullRequest =
+            response::expect_json(self.post_json(&path, &pr_body).await?, "POST", &path)
+                .await
+                .context("Failed to parse PR response")?;
 
         // Request reviewers (best-effort)
         if !reviewers.is_empty() {
@@ -78,19 +73,17 @@ impl Client {
     }
 
     /// Find an open PR from the given branch.
-    async fn find_open_pr(&self, repo: &str, head_branch: &str) -> Result<Option<PullRequest>> {
-        let resp = self
-            .get(&format!(
-                "/repos/{org}/{repo}/pulls?state=open&head={org}:{head_branch}",
-                org = self.org,
-            ))
-            .await?;
-
-        if !resp.status().is_success() {
-            return Ok(None);
-        }
-
-        let prs: Vec<PullRequest> = resp.json().await.unwrap_or_default();
+    pub(crate) async fn find_open_pull_request(
+        &self,
+        repo: &str,
+        head_branch: &str,
+    ) -> Result<Option<PullRequest>> {
+        let path = format!(
+            "/repos/{org}/{repo}/pulls?state=open&head={org}:{head_branch}",
+            org = self.org,
+        );
+        let prs: Vec<PullRequest> =
+            response::expect_json(self.get(&path).await?, "GET", &path).await?;
         Ok(prs.into_iter().next())
     }
 }

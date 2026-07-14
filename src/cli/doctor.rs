@@ -458,6 +458,7 @@ mod tests {
             .push(crate::config::manifest::SystemConfig {
                 id: "backend".to_string(),
                 name: "Backend".to_string(),
+                match_prefix: true,
                 exclude: vec![],
                 repos: vec![],
                 security: None,

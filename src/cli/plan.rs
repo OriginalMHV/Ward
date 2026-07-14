@@ -8,40 +8,84 @@ use crate::config::Manifest;
 use crate::config::manifest::TeamAccess;
 use crate::github::Client;
 use crate::github::repos::Repository;
+use crate::reconcile::unified::{self, UnifiedOptions};
 
 #[derive(Args)]
 pub struct PlanCommand {
-    /// Check all systems (default: requires --system)
+    /// Compatibility flag; v2 already checks all configured systems by default
     #[arg(long)]
     all: bool,
-}
 
-#[derive(Debug, Serialize)]
-struct PlanReport {
-    systems: Vec<SystemPlan>,
-    total_repos: usize,
-    total_actions: usize,
-}
+    /// Limit to one or more categories (repeatable). Valid: repository, files,
+    /// security, rulesets, branch-protection, actions, environments, access,
+    /// integrations.
+    #[arg(long = "category", value_name = "CATEGORY")]
+    categories: Vec<String>,
 
-#[derive(Debug, Serialize)]
-struct SystemPlan {
-    id: String,
-    repo_count: usize,
-    security: CategoryResult,
-    branch_protection: CategoryResult,
-    rulesets: CategoryResult,
-    teams: CategoryResult,
-}
-
-#[derive(Debug, Serialize)]
-struct CategoryResult {
-    compliant: usize,
-    total: usize,
-    issues: Vec<String>,
+    /// Allow planning high-impact repository changes (visibility, archive)
+    #[arg(long)]
+    allow_high_impact: bool,
 }
 
 impl PlanCommand {
     pub async fn run(
+        &self,
+        client: &Client,
+        manifest: &Manifest,
+        system: Option<&str>,
+        repo: Option<&str>,
+        json: bool,
+    ) -> Result<()> {
+        if is_v2_manifest(manifest) {
+            self.run_v2(client, manifest, system, repo, json).await
+        } else {
+            self.run_legacy(client, manifest, system, json).await
+        }
+    }
+
+    async fn run_v2(
+        &self,
+        client: &Client,
+        manifest: &Manifest,
+        system: Option<&str>,
+        repo: Option<&str>,
+        json: bool,
+    ) -> Result<()> {
+        let categories = unified::parse_categories(&self.categories)?;
+        let options = UnifiedOptions {
+            categories,
+            allow_high_impact: self.allow_high_impact,
+        };
+
+        let repos = unified::resolve_target_repos(client, manifest, system, repo).await?;
+        if repos.is_empty() {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&unified::UnifiedReport::from_repos(Vec::new()))
+                        .unwrap_or_default()
+                );
+            } else {
+                println!("  No matching repositories found.");
+            }
+            return Ok(());
+        }
+
+        let report = unified::plan(client, manifest, &repos, &options).await?;
+
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report).unwrap_or_default()
+            );
+        } else {
+            unified::render_report(&report, "Ward Plan");
+        }
+
+        Ok(())
+    }
+
+    async fn run_legacy(
         &self,
         client: &Client,
         manifest: &Manifest,
@@ -60,7 +104,12 @@ impl PlanCommand {
             let excludes = manifest.exclude_patterns_for_system(sys_id);
             let explicit = manifest.explicit_repos_for_system(sys_id);
             let repos = client
-                .list_repos_for_system(sys_id, &excludes, &explicit)
+                .list_repos_for_system(
+                    sys_id,
+                    manifest.matches_prefix_for_system(sys_id),
+                    &excludes,
+                    &explicit,
+                )
                 .await?;
 
             if repos.is_empty() {
@@ -84,6 +133,36 @@ impl PlanCommand {
 
         Ok(())
     }
+}
+
+fn is_v2_manifest(manifest: &Manifest) -> bool {
+    manifest.v2_schema().is_some() || !manifest.v2_categories().is_empty()
+}
+
+#[derive(Debug, Serialize)]
+struct PlanReport {
+    systems: Vec<SystemPlan>,
+    total_repos: usize,
+    total_actions: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct SystemPlan {
+    id: String,
+    repo_count: usize,
+    security: CategoryResult,
+    repository_settings: CategoryResult,
+    branch_protection: CategoryResult,
+    rulesets: CategoryResult,
+    teams: CategoryResult,
+    files: CategoryResult,
+}
+
+#[derive(Debug, Serialize)]
+struct CategoryResult {
+    compliant: usize,
+    total: usize,
+    issues: Vec<String>,
 }
 
 fn resolve_system_ids(manifest: &Manifest, system: Option<&str>, all: bool) -> Result<Vec<String>> {
@@ -131,19 +210,38 @@ async fn check_system(
         total: repos.len(),
         issues: Vec::new(),
     };
+    let mut repository_settings_result = CategoryResult {
+        compliant: 0,
+        total: repos.len(),
+        issues: Vec::new(),
+    };
+    let mut files_result = CategoryResult {
+        compliant: 0,
+        total: repos.len(),
+        issues: Vec::new(),
+    };
 
     let desired_teams: &[TeamAccess] = manifest
         .system(sys_id)
         .map(|s| s.teams.as_slice())
         .unwrap_or(&[]);
 
-    let expected_ruleset = manifest.rulesets.branch_protection.as_ref().and_then(|c| {
-        if c.enabled {
-            Some(c.name.as_deref().unwrap_or("Branch Protection"))
-        } else {
-            None
-        }
-    });
+    let expected_rulesets: Vec<&str> = if manifest.rulesets.repository.is_empty() {
+        manifest
+            .rulesets
+            .branch_protection
+            .as_ref()
+            .filter(|config| config.enabled)
+            .map(|config| vec![config.name.as_deref().unwrap_or("Branch Protection")])
+            .unwrap_or_default()
+    } else {
+        manifest
+            .rulesets
+            .repository
+            .iter()
+            .map(|ruleset| ruleset.name.as_str())
+            .collect()
+    };
 
     for repo in repos {
         // Security
@@ -168,19 +266,35 @@ async fn check_system(
             } else {
                 protection_result.issues.push(repo.name.clone());
             }
+
+            // Repository settings
+            if let Some(desired) = &manifest.repository {
+                match crate::cli::settings::repository_settings_compliant(
+                    client, &repo.name, desired,
+                )
+                .await
+                {
+                    Ok(true) => repository_settings_result.compliant += 1,
+                    _ => repository_settings_result.issues.push(repo.name.clone()),
+                }
+            } else {
+                repository_settings_result.compliant += 1;
+            }
         }
 
         // Rulesets
-        if let Some(expected_name) = expected_ruleset {
-            if let Ok(rulesets) = client.list_rulesets(&repo.name).await {
-                if rulesets.iter().any(|r| r.name == expected_name) {
-                    rulesets_result.compliant += 1;
-                } else {
-                    rulesets_result.issues.push(repo.name.clone());
-                }
-            }
-        } else {
+        if expected_rulesets.is_empty() {
             rulesets_result.compliant += 1;
+        } else if let Ok(rulesets) = client.list_repository_rulesets(&repo.name).await {
+            if expected_rulesets.iter().all(|expected_name| {
+                rulesets
+                    .iter()
+                    .any(|ruleset| ruleset.name == *expected_name)
+            }) {
+                rulesets_result.compliant += 1;
+            } else {
+                rulesets_result.issues.push(repo.name.clone());
+            }
         }
 
         // Teams
@@ -198,23 +312,37 @@ async fn check_system(
                 teams_result.issues.push(repo.name.clone());
             }
         }
+
+        // Managed files
+        if manifest.files.is_empty() {
+            files_result.compliant += 1;
+        } else {
+            match crate::cli::commit::managed_files_compliant(client, &repo.name, manifest).await {
+                Ok(true) => files_result.compliant += 1,
+                _ => files_result.issues.push(repo.name.clone()),
+            }
+        }
     }
 
     Ok(SystemPlan {
         id: sys_id.to_string(),
         repo_count: repos.len(),
         security: security_result,
+        repository_settings: repository_settings_result,
         branch_protection: protection_result,
         rulesets: rulesets_result,
         teams: teams_result,
+        files: files_result,
     })
 }
 
 fn count_actions(plan: &SystemPlan) -> usize {
     plan.security.issues.len()
+        + plan.repository_settings.issues.len()
         + plan.branch_protection.issues.len()
         + plan.rulesets.issues.len()
         + plan.teams.issues.len()
+        + plan.files.issues.len()
 }
 
 fn print_report(report: &PlanReport) {
@@ -231,9 +359,11 @@ fn print_report(report: &PlanReport) {
         );
 
         print_category("Security", &sys.security);
+        print_category("Repository Settings", &sys.repository_settings);
         print_category("Branch Protection", &sys.branch_protection);
         print_category("Rulesets", &sys.rulesets);
         print_category("Teams", &sys.teams);
+        print_category("Managed Files", &sys.files);
     }
 
     println!();
@@ -280,6 +410,11 @@ mod tests {
                 total: 5,
                 issues: vec!["repo-a".to_string(), "repo-b".to_string()],
             },
+            repository_settings: CategoryResult {
+                compliant: 5,
+                total: 5,
+                issues: vec![],
+            },
             branch_protection: CategoryResult {
                 compliant: 5,
                 total: 5,
@@ -291,6 +426,11 @@ mod tests {
                 issues: vec!["repo-c".to_string()],
             },
             teams: CategoryResult {
+                compliant: 5,
+                total: 5,
+                issues: vec![],
+            },
+            files: CategoryResult {
                 compliant: 5,
                 total: 5,
                 issues: vec![],
@@ -313,6 +453,11 @@ mod tests {
                     total: 3,
                     issues: vec![],
                 },
+                repository_settings: CategoryResult {
+                    compliant: 3,
+                    total: 3,
+                    issues: vec![],
+                },
                 branch_protection: CategoryResult {
                     compliant: 2,
                     total: 3,
@@ -324,6 +469,11 @@ mod tests {
                     issues: vec![],
                 },
                 teams: CategoryResult {
+                    compliant: 3,
+                    total: 3,
+                    issues: vec![],
+                },
+                files: CategoryResult {
                     compliant: 3,
                     total: 3,
                     issues: vec![],
@@ -372,5 +522,15 @@ mod tests {
         let manifest = Manifest::default();
         let result = resolve_system_ids(&manifest, None, true);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_is_v2_manifest_detection() {
+        let legacy = Manifest::default();
+        assert!(!is_v2_manifest(&legacy));
+
+        let mut v2 = Manifest::default();
+        v2.v2.schema = Some(crate::config::manifest::ManifestSchema::v2());
+        assert!(is_v2_manifest(&v2));
     }
 }

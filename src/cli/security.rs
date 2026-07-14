@@ -44,6 +44,11 @@ impl SecurityCommand {
         match &self.action {
             SecurityAction::Plan => plan(client, manifest, system, repo).await,
             SecurityAction::Apply { yes, skip_verify } => {
+                crate::reconcile::unified::guard_legacy_mutation(
+                    manifest,
+                    crate::reconcile::unified::Category::Security,
+                    "security apply",
+                )?;
                 apply(client, manifest, system, repo, *yes, *skip_verify).await
             }
             SecurityAction::Audit => audit(client, manifest, system, repo).await,
@@ -68,7 +73,12 @@ async fn resolve_repos(
     let excludes = manifest.exclude_patterns_for_system(sys);
     let explicit = manifest.explicit_repos_for_system(sys);
     let repos = client
-        .list_repos_for_system(sys, &excludes, &explicit)
+        .list_repos_for_system(
+            sys,
+            manifest.matches_prefix_for_system(sys),
+            &excludes,
+            &explicit,
+        )
         .await?;
     Ok(repos.into_iter().map(|r| r.name).collect())
 }

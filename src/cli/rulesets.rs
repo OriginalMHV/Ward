@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Args;
 use console::style;
 use dialoguer::Confirm;
 
 use crate::config::Manifest;
-use crate::config::manifest::{BypassTeam, RulesetBranchProtection};
+use crate::config::manifest::{
+    BypassTeam, RepositoryRulesetConfig, RulesetBranchProtection, RulesetBypassActorConfig,
+};
 use crate::github::Client;
 use crate::github::rulesets::RulesetDetail;
 
@@ -42,7 +44,14 @@ impl RulesetsCommand {
     ) -> Result<()> {
         match &self.action {
             RulesetsAction::Plan => plan(client, manifest, system, repo).await,
-            RulesetsAction::Apply { yes } => apply(client, manifest, system, repo, *yes).await,
+            RulesetsAction::Apply { yes } => {
+                crate::reconcile::unified::guard_legacy_mutation(
+                    manifest,
+                    crate::reconcile::unified::Category::Rulesets,
+                    "rulesets apply",
+                )?;
+                apply(client, manifest, system, repo, *yes).await
+            }
             RulesetsAction::Audit => audit(client, manifest, system, repo).await,
         }
     }
@@ -65,7 +74,12 @@ async fn resolve_repos(
     let excludes = manifest.exclude_patterns_for_system(sys);
     let explicit = manifest.explicit_repos_for_system(sys);
     let repos = client
-        .list_repos_for_system(sys, &excludes, &explicit)
+        .list_repos_for_system(
+            sys,
+            manifest.matches_prefix_for_system(sys),
+            &excludes,
+            &explicit,
+        )
         .await?;
     Ok(repos.into_iter().map(|r| r.name).collect())
 }
@@ -132,6 +146,7 @@ pub fn build_ruleset_json(
 
 struct RulesetPlan {
     repo: String,
+    body: serde_json::Value,
     action: RulesetPlanAction,
 }
 
@@ -146,21 +161,8 @@ async fn build_plans(
     manifest: &Manifest,
     system: Option<&str>,
     repo: Option<&str>,
-) -> Result<(Vec<RulesetPlan>, RulesetBranchProtection)> {
-    let config = match system {
-        Some(sys) => manifest.rulesets_branch_protection_for_system(sys),
-        None => manifest.rulesets.branch_protection.clone(),
-    };
-
-    let config = match config {
-        Some(c) if c.enabled => c,
-        _ => {
-            anyhow::bail!("No rulesets.branch_protection configured or not enabled in ward.toml");
-        }
-    };
-
+) -> Result<Vec<RulesetPlan>> {
     let repos = resolve_repos(client, manifest, system, repo).await?;
-    let expected_name = config.name.as_deref().unwrap_or("Branch Protection");
 
     println!();
     println!(
@@ -173,40 +175,150 @@ async fn build_plans(
     let mut team_id_cache: HashMap<String, u64> = HashMap::new();
 
     for repo_name in &repos {
-        let rulesets = client.list_rulesets(repo_name).await?;
-        let existing = rulesets.iter().find(|r| r.name == expected_name);
+        let rulesets = client.list_repository_rulesets(repo_name).await?;
 
-        let action = match existing {
-            None => RulesetPlanAction::Create {
-                name: expected_name.to_string(),
-            },
-            Some(r) => {
-                let repo_config = config.for_repo(repo_name);
-                let bypass_actors =
-                    resolve_bypass_actors(client, &repo_config.bypass_teams, &mut team_id_cache)
-                        .await?;
-                let expected_body = build_ruleset_json(&repo_config, &bypass_actors);
-
-                let detail = client.get_ruleset(repo_name, r.id).await;
-                match detail {
-                    Ok(d) if ruleset_matches(&d, &expected_body) => RulesetPlanAction::InSync {
-                        name: expected_name.to_string(),
-                    },
-                    _ => RulesetPlanAction::Update {
-                        id: r.id,
-                        name: expected_name.to_string(),
-                    },
-                }
+        if !manifest.rulesets.repository.is_empty() {
+            for config in &manifest.rulesets.repository {
+                let body =
+                    build_repository_ruleset_json(client, config, &mut team_id_cache).await?;
+                plans.push(build_ruleset_plan(client, repo_name, &rulesets, body).await);
             }
-        };
+        } else {
+            let config = match system {
+                Some(sys) => manifest.rulesets_branch_protection_for_system(sys),
+                None => manifest.rulesets.branch_protection.clone(),
+            };
+            let config = match config {
+                Some(config) if config.enabled => config,
+                _ => anyhow::bail!(
+                    "No repository rulesets or enabled rulesets.branch_protection configured in ward.toml"
+                ),
+            };
 
-        plans.push(RulesetPlan {
-            repo: repo_name.clone(),
-            action,
-        });
+            let repo_config = config.for_repo(repo_name);
+            let bypass_actors =
+                resolve_bypass_actors(client, &repo_config.bypass_teams, &mut team_id_cache)
+                    .await?;
+            let body = build_ruleset_json(&repo_config, &bypass_actors);
+            plans.push(build_ruleset_plan(client, repo_name, &rulesets, body).await);
+        }
     }
 
-    Ok((plans, config))
+    Ok(plans)
+}
+
+async fn build_ruleset_plan(
+    client: &Client,
+    repo: &str,
+    existing_rulesets: &[crate::github::rulesets::Ruleset],
+    body: serde_json::Value,
+) -> RulesetPlan {
+    let expected_name = body["name"].as_str().unwrap_or("Ruleset");
+    let existing = existing_rulesets
+        .iter()
+        .find(|ruleset| ruleset.name == expected_name);
+
+    let action = match existing {
+        None => RulesetPlanAction::Create {
+            name: expected_name.to_owned(),
+        },
+        Some(ruleset) => {
+            let detail = client.get_ruleset(repo, ruleset.id).await;
+            match detail {
+                Ok(detail) if ruleset_matches(&detail, &body) => RulesetPlanAction::InSync {
+                    name: expected_name.to_owned(),
+                },
+                _ => RulesetPlanAction::Update {
+                    id: ruleset.id,
+                    name: expected_name.to_owned(),
+                },
+            }
+        }
+    };
+
+    RulesetPlan {
+        repo: repo.to_owned(),
+        body,
+        action,
+    }
+}
+
+async fn build_repository_ruleset_json(
+    client: &Client,
+    config: &RepositoryRulesetConfig,
+    team_id_cache: &mut HashMap<String, u64>,
+) -> Result<serde_json::Value> {
+    let conditions = config
+        .conditions_json
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .with_context(|| format!("Invalid conditions_json for ruleset {}", config.name))?
+        .unwrap_or(serde_json::Value::Null);
+
+    let rules = config
+        .rules
+        .iter()
+        .map(|rule| {
+            let mut body = serde_json::json!({ "type": rule.rule_type });
+            if let Some(parameters) = rule.parameters_json.as_deref() {
+                body["parameters"] = serde_json::from_str(parameters).with_context(|| {
+                    format!(
+                        "Invalid parameters_json for {} rule in ruleset {}",
+                        rule.rule_type, config.name
+                    )
+                })?;
+            }
+            Ok(body)
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let bypass_actors =
+        resolve_repository_bypass_actors(client, &config.bypass_actors, team_id_cache).await?;
+
+    Ok(serde_json::json!({
+        "name": config.name,
+        "target": config.target,
+        "enforcement": config.enforcement,
+        "conditions": conditions,
+        "rules": rules,
+        "bypass_actors": bypass_actors,
+    }))
+}
+
+async fn resolve_repository_bypass_actors(
+    client: &Client,
+    actors: &[RulesetBypassActorConfig],
+    cache: &mut HashMap<String, u64>,
+) -> Result<Vec<serde_json::Value>> {
+    let mut resolved = Vec::with_capacity(actors.len());
+
+    for actor in actors {
+        let actor_id = if actor.actor_type == "Team" {
+            if let Some(slug) = actor.team_slug.as_deref() {
+                match cache.get(slug) {
+                    Some(id) => Some(*id),
+                    None => {
+                        let id = client.get_team_id(slug).await?;
+                        cache.insert(slug.to_owned(), id);
+                        Some(id)
+                    }
+                }
+            } else {
+                actor.actor_id
+            }
+        } else {
+            actor.actor_id
+        };
+
+        resolved.push(serde_json::json!({
+            "actor_id": actor_id,
+            "actor_type": actor.actor_type,
+            "bypass_mode": actor.bypass_mode,
+        }));
+    }
+
+    Ok(resolved)
 }
 
 async fn plan(
@@ -215,7 +327,7 @@ async fn plan(
     system: Option<&str>,
     repo: Option<&str>,
 ) -> Result<()> {
-    let (plans, _config) = build_plans(client, manifest, system, repo).await?;
+    let plans = build_plans(client, manifest, system, repo).await?;
 
     print_plan_table(&plans);
 
@@ -240,7 +352,7 @@ async fn apply(
     repo: Option<&str>,
     yes: bool,
 ) -> Result<()> {
-    let (plans, config) = build_plans(client, manifest, system, repo).await?;
+    let plans = build_plans(client, manifest, system, repo).await?;
 
     let needs_changes: Vec<&RulesetPlan> = plans
         .iter()
@@ -275,7 +387,6 @@ async fn apply(
     println!();
     println!("  {} Applying rulesets...", style("[..]").dim());
 
-    let mut team_id_cache: HashMap<String, u64> = HashMap::new();
     let mut succeeded = 0usize;
     let mut failed: Vec<(String, String)> = Vec::new();
 
@@ -283,12 +394,7 @@ async fn apply(
         match &plan.action {
             RulesetPlanAction::InSync { .. } => {}
             RulesetPlanAction::Create { name } => {
-                let repo_config = config.for_repo(&plan.repo);
-                let bypass_actors =
-                    resolve_bypass_actors(client, &repo_config.bypass_teams, &mut team_id_cache)
-                        .await?;
-                let body = build_ruleset_json(&repo_config, &bypass_actors);
-                match client.create_ruleset(&plan.repo, &body).await {
+                match client.create_ruleset(&plan.repo, &plan.body).await {
                     Ok(_) => {
                         println!(
                             "  {} {}: created {}",
@@ -305,12 +411,7 @@ async fn apply(
                 }
             }
             RulesetPlanAction::Update { id, name } => {
-                let repo_config = config.for_repo(&plan.repo);
-                let bypass_actors =
-                    resolve_bypass_actors(client, &repo_config.bypass_teams, &mut team_id_cache)
-                        .await?;
-                let body = build_ruleset_json(&repo_config, &bypass_actors);
-                match client.update_ruleset(&plan.repo, *id, &body).await {
+                match client.update_ruleset(&plan.repo, *id, &plan.body).await {
                     Ok(()) => {
                         println!(
                             "  {} {}: updated {}",
@@ -399,14 +500,29 @@ async fn audit(
     Ok(())
 }
 
-/// Compare a deployed ruleset against the expected JSON body.
-/// Checks enforcement, rule types + parameters, and bypass actors.
+/// Compare a deployed ruleset against the reproducible GitHub API fields.
 fn ruleset_matches(deployed: &RulesetDetail, expected: &serde_json::Value) -> bool {
+    if deployed.name != expected["name"].as_str().unwrap_or_default()
+        || deployed.target != expected["target"].as_str().unwrap_or("branch")
+    {
+        return false;
+    }
+
     if deployed.enforcement != expected["enforcement"].as_str().unwrap_or("active") {
         return false;
     }
 
-    // Compare rules (types + parameters)
+    let expected_conditions = expected
+        .get("conditions")
+        .unwrap_or(&serde_json::Value::Null);
+    let deployed_conditions = deployed
+        .conditions
+        .as_ref()
+        .unwrap_or(&serde_json::Value::Null);
+    if deployed_conditions != expected_conditions {
+        return false;
+    }
+
     let expected_rules = match expected["rules"].as_array() {
         Some(r) => r,
         None => return false,
@@ -424,16 +540,18 @@ fn ruleset_matches(deployed: &RulesetDetail, expected: &serde_json::Value) -> bo
             Some(r) => r,
             None => return false,
         };
-        // Compare parameters if present
-        if let Some(expected_params) = expected_rule.get("parameters") {
-            match &deployed_rule.parameters {
-                Some(deployed_params) if deployed_params == expected_params => {}
-                _ => return false,
-            }
+        let expected_params = expected_rule
+            .get("parameters")
+            .filter(|parameters| !parameters.is_null());
+        match (deployed_rule.parameters.as_ref(), expected_params) {
+            (Some(deployed_params), Some(expected_params))
+                if deployed_params == expected_params => {}
+            (None, None) => {}
+            (Some(deployed_params), None) if deployed_params.is_null() => {}
+            _ => return false,
         }
     }
 
-    // Compare bypass actors
     let expected_actors = match expected["bypass_actors"].as_array() {
         Some(a) => a,
         None => return deployed.bypass_actors.is_empty(),
@@ -681,5 +799,72 @@ mod tests {
         let json = build_ruleset_json(&config, &[]);
         let actors = json["bypass_actors"].as_array().unwrap();
         assert!(actors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn imported_ruleset_preserves_arbitrary_rules() {
+        let config = RepositoryRulesetConfig {
+            name: "Release tags".to_owned(),
+            target: "tag".to_owned(),
+            enforcement: "active".to_owned(),
+            conditions_json: Some(
+                r#"{"ref_name":{"include":["refs/tags/v*"],"exclude":[]}}"#.to_owned(),
+            ),
+            rules: vec![crate::config::manifest::RepositoryRuleConfig {
+                rule_type: "required_signatures".to_owned(),
+                parameters_json: None,
+            }],
+            bypass_actors: Vec::new(),
+        };
+        let client = Client::new_for_test("acme", "http://unused");
+
+        let body = build_repository_ruleset_json(&client, &config, &mut HashMap::new())
+            .await
+            .unwrap();
+
+        assert_eq!(body["name"], "Release tags");
+        assert_eq!(body["target"], "tag");
+        assert_eq!(body["rules"][0]["type"], "required_signatures");
+        assert_eq!(body["conditions"]["ref_name"]["include"][0], "refs/tags/v*");
+    }
+
+    #[test]
+    fn ruleset_match_checks_conditions_and_target() {
+        let deployed = RulesetDetail {
+            id: 1,
+            name: "Release tags".to_owned(),
+            enforcement: "active".to_owned(),
+            target: "tag".to_owned(),
+            rules: vec![crate::github::rulesets::RulesetRule {
+                rule_type: "required_signatures".to_owned(),
+                parameters: None,
+            }],
+            conditions: Some(serde_json::json!({
+                "ref_name": {
+                    "include": ["refs/tags/v*"],
+                    "exclude": []
+                }
+            })),
+            bypass_actors: Vec::new(),
+        };
+        let expected = serde_json::json!({
+            "name": "Release tags",
+            "target": "tag",
+            "enforcement": "active",
+            "conditions": {
+                "ref_name": {
+                    "include": ["refs/tags/v*"],
+                    "exclude": []
+                }
+            },
+            "rules": [{ "type": "required_signatures" }],
+            "bypass_actors": []
+        });
+
+        assert!(ruleset_matches(&deployed, &expected));
+
+        let mut wrong_target = expected;
+        wrong_target["target"] = serde_json::json!("branch");
+        assert!(!ruleset_matches(&deployed, &wrong_target));
     }
 }

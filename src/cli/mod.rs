@@ -1,3 +1,4 @@
+pub mod apply;
 pub mod audit;
 pub mod commit;
 pub mod config_cmd;
@@ -16,7 +17,6 @@ pub mod settings;
 pub mod setup;
 pub mod teams;
 pub mod template_cmd;
-pub mod tui;
 
 use clap::Parser;
 
@@ -24,7 +24,7 @@ const AFTER_HELP: &str = "\x1b[1mGetting Started:\x1b[0m
   init, setup, doctor, config   Set up Ward and configure repos
 
 \x1b[1mPlan & Apply:\x1b[0m
-  plan                          Preview ALL changes (unified dry-run)
+  plan, apply                   Preview and apply changes across categories
   security, rulesets, commit    Manage specific features
   teams, protection, settings   Access control & repo settings
 
@@ -32,9 +32,9 @@ const AFTER_HELP: &str = "\x1b[1mGetting Started:\x1b[0m
   drift, audit, policy          Detect drift, audit compliance
 
 \x1b[1mAdvanced:\x1b[0m
-  import, rollback, tui         Import state, undo changes, dashboard
+  import, rollback              Import state and undo changes
 
-\x1b[2mNew to Ward? Run: ward doctor → ward setup my-repo\x1b[0m
+\x1b[2mNew to Ward? Run: ward init --from OWNER/REPO → ward plan --all\x1b[0m
 \x1b[2mFull tutorial: https://github.com/OriginalMHV/Ward/blob/main/docs/getting-started.md\x1b[0m";
 
 #[derive(Parser)]
@@ -85,7 +85,7 @@ pub struct Cli {
 #[derive(clap::Subcommand)]
 pub enum Command {
     // --- Getting Started ---
-    /// Interactive setup wizard (creates ward.toml)
+    /// Create ward.toml interactively or from an existing repository
     #[command(display_order = 1)]
     Init(init::InitCommand),
 
@@ -111,32 +111,36 @@ pub enum Command {
     #[command(display_order = 20)]
     Plan(plan::PlanCommand),
 
-    /// Manage security features (Dependabot, secret scanning, CodeQL)
+    /// Apply desired manifest v2 state across categories (plan, apply, verify)
     #[command(display_order = 21)]
+    Apply(apply::ApplyCommand),
+
+    /// Manage security features (Dependabot, secret scanning, CodeQL)
+    #[command(display_order = 22)]
     Security(security::SecurityCommand),
 
     /// Manage repository rulesets (branch protection successor)
-    #[command(display_order = 22)]
+    #[command(display_order = 23)]
     Rulesets(rulesets::RulesetsCommand),
 
     /// Commit files/templates to repositories (no cloning needed)
-    #[command(display_order = 23)]
+    #[command(display_order = 24)]
     Commit(commit::CommitCommand),
 
     /// Manage team access to repositories
-    #[command(display_order = 24)]
+    #[command(display_order = 25)]
     Teams(teams::TeamsCommand),
 
     /// Manage branch protection rules (legacy, prefer rulesets)
-    #[command(display_order = 25)]
+    #[command(display_order = 26)]
     Protection(protection::ProtectionCommand),
 
     /// Manage repository settings and rulesets
-    #[command(display_order = 26)]
+    #[command(display_order = 27)]
     Settings(settings::SettingsCommand),
 
     /// Manage workflow templates
-    #[command(display_order = 27)]
+    #[command(display_order = 28)]
     Template(template_cmd::TemplateCommand),
 
     // --- Monitor ---
@@ -153,17 +157,13 @@ pub enum Command {
     Policy(policy::PolicyCommand),
 
     // --- Advanced ---
-    /// Import existing org state into ward.toml
+    /// Import an existing repository as an exact Ward baseline
     #[command(display_order = 60)]
     Import(import::ImportCommand),
 
     /// Rollback changes using the audit log
     #[command(display_order = 61)]
     Rollback(rollback::RollbackCommand),
-
-    /// Launch interactive terminal UI
-    #[command(display_order = 62)]
-    Tui,
 
     /// Generate shell completions
     #[command(hide = true)]

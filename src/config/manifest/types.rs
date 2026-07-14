@@ -4,12 +4,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::cli::policy::PolicyRule;
 
-#[derive(Debug, PartialEq, Deserialize)]
+use super::v2::ManifestV2State;
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Manifest {
     pub org: OrgConfig,
 
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<SourceConfig>,
+
     #[serde(default)]
     pub security: SecurityConfig,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<RepositorySettingsConfig>,
 
     #[serde(default)]
     pub templates: TemplateConfig,
@@ -20,19 +28,30 @@ pub struct Manifest {
     #[serde(default)]
     pub rulesets: RulesetsConfig,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub systems: Vec<SystemConfig>,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<ManagedFile>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub policies: Vec<PolicyRule>,
+
+    #[serde(flatten)]
+    pub v2: ManifestV2State,
 }
 
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct OrgConfig {
     pub name: String,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct SourceConfig {
+    pub repository: String,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
 pub struct SecurityConfig {
     #[serde(default = "default_true")]
     pub secret_scanning: bool,
@@ -51,37 +70,75 @@ pub struct SecurityConfig {
 
     #[serde(default)]
     pub codeql_advanced_setup: bool,
-
-    /// Custom security checks shown as extra columns in the TUI security tab.
-    #[serde(default)]
-    pub checks: Vec<SecurityCheck>,
 }
 
-/// A user-defined check rendered as an extra column in the TUI security tab.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum SecurityCheck {
-    FileExists { name: String, path: String },
-    WorkflowExists { name: String, path: String },
-    TopicContains { name: String, topic: String },
-    BranchProtection { name: String },
-    DefaultBranch { name: String, expected: String },
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
+pub struct RepositorySettingsConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_issues: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_projects: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_wiki: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_discussions: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_pull_requests: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull_request_creation_policy: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_sponsorships_enabled: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issue_creation_policy: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_squash_merge: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_merge_commit: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_rebase_merge: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_auto_merge: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delete_branch_on_merge: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_update_branch: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub squash_merge_commit_title: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub squash_merge_commit_message: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_commit_title: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_commit_message: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_commit_signoff_required: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_squash_pr_title_as_default: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub topics: Option<Vec<String>>,
 }
 
-impl SecurityCheck {
-    /// Display name used as the column header in the TUI.
-    pub fn name(&self) -> &str {
-        match self {
-            Self::FileExists { name, .. }
-            | Self::WorkflowExists { name, .. }
-            | Self::TopicContains { name, .. }
-            | Self::BranchProtection { name }
-            | Self::DefaultBranch { name, .. } => name,
-        }
-    }
-}
-
-#[derive(Debug, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct TemplateConfig {
     #[serde(default = "default_branch_name")]
     pub branch: String,
@@ -99,7 +156,7 @@ pub struct TemplateConfig {
     pub registries: HashMap<String, RegistryConfig>,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
 pub struct BranchProtectionConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -140,13 +197,16 @@ fn default_active() -> String {
     "active".to_string()
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
 pub struct RulesetsConfig {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch_protection: Option<RulesetBranchProtection>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repository: Vec<RepositoryRulesetConfig>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct RulesetBranchProtection {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -196,7 +256,7 @@ pub struct RulesetBranchProtection {
 /// ```toml
 /// bypass_teams = [{ slug = "my-team", bypass_mode = "pull_request" }]
 /// ```
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum BypassTeam {
     /// Simple form: just a team slug string (defaults to bypass_mode = "always")
@@ -231,7 +291,7 @@ impl BypassTeam {
 
 /// Per-repo overrides within a system or global config.
 /// Repos matching any of the glob patterns get different ruleset settings.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct RepoOverride {
     /// Glob patterns matching repo names (e.g., ["*-operations", "*-system"])
     pub repo_patterns: Vec<String>,
@@ -243,7 +303,7 @@ pub struct RepoOverride {
 
 /// Per-system override for ruleset branch protection.
 /// All fields are optional; only explicitly set fields override the global config.
-#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
 pub struct RulesetBranchProtectionOverride {
     pub enabled: Option<bool>,
     pub name: Option<String>,
@@ -260,7 +320,7 @@ pub struct RulesetBranchProtectionOverride {
 }
 
 /// Per-system rulesets override container.
-#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
 pub struct RulesetsOverrideConfig {
     #[serde(default)]
     pub branch_protection: Option<RulesetBranchProtectionOverride>,
@@ -329,13 +389,52 @@ impl RulesetBranchProtection {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct RepositoryRulesetConfig {
+    pub name: String,
+    pub target: String,
+    pub enforcement: String,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conditions_json: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<RepositoryRuleConfig>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bypass_actors: Vec<RulesetBypassActorConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct RepositoryRuleConfig {
+    #[serde(rename = "type")]
+    pub rule_type: String,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters_json: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct RulesetBypassActorConfig {
+    pub actor_type: String,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_id: Option<u64>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team_slug: Option<String>,
+
+    #[serde(default = "default_bypass_mode")]
+    pub bypass_mode: String,
+}
+
 #[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
 pub struct TeamAccess {
     pub slug: String,
     pub permission: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct RegistryConfig {
     #[serde(rename = "type")]
     pub registry_type: String,
@@ -346,25 +445,34 @@ pub struct RegistryConfig {
     pub audience: Option<String>,
 }
 
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct SystemConfig {
     pub id: String,
     pub name: String,
 
-    #[serde(default)]
+    #[serde(default = "default_true")]
+    pub match_prefix: bool,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude: Vec<String>,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repos: Vec<String>,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security: Option<SecurityConfig>,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub teams: Vec<TeamAccess>,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rulesets: Option<RulesetsOverrideConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct ManagedFile {
+    pub path: String,
+    pub content: String,
 }
 
 pub(crate) fn default_true() -> bool {

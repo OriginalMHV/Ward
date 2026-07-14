@@ -1,6 +1,6 @@
 # Ward - Copilot Instructions
 
-You are working on **Ward**, a Rust CLI/TUI tool for managing GitHub repositories at scale.
+You are working on **Ward**, a Rust CLI for managing GitHub repositories at scale.
 Ward replaces fragile shell scripts with type-safe, verifiable, parallel operations.
 
 ## Project Context
@@ -8,7 +8,6 @@ Ward replaces fragile shell scripts with type-safe, verifiable, parallel operati
 - **Language:** Rust (edition 2024, stable toolchain)
 - **Async runtime:** tokio
 - **CLI framework:** clap (derive macros)
-- **TUI:** ratatui + crossterm
 - **HTTP:** reqwest (with semaphore-based rate limiting)
 - **Templates:** Tera (Jinja2-style), embedded via rust-embed
 - **Error handling:** anyhow (binary), thiserror (library)
@@ -29,8 +28,11 @@ Every mutating command follows the **plan/apply** pattern:
 1. `plan` reads current state from GitHub API, diffs against `ward.toml`, shows changes
 2. `apply` executes the plan, verifies results via API, logs to audit trail
 
+The preferred setup flow is `ward init --from OWNER/REPO`. Import is read-only, preserves exact repository-owned rulesets and UTF-8 `.github` files, and initially targets only the source repository.
+
 Key modules:
 - `src/cli/` - Command handlers (one file per command)
+- `src/cli/import.rs` - Repository snapshot and manifest generation
 - `src/config/` - ward.toml parsing and template loading
 - `src/github/` - GitHub API client and endpoint wrappers
 - `src/engine/` - Planning, execution, verification, audit logging

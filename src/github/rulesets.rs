@@ -2,14 +2,30 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use super::Client;
+use super::pagination;
+use super::response;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct Ruleset {
     pub id: u64,
     pub name: String,
+    #[serde(default)]
+    pub target: String,
+    #[serde(default)]
+    pub source_type: String,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub enforcement: String,
+    #[serde(default)]
+    pub conditions: Option<serde_json::Value>,
+    #[serde(default)]
+    pub rules: Vec<RulesetRule>,
+    #[serde(default)]
+    pub bypass_actors: Vec<serde_json::Value>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct RulesetDetail {
     pub id: u64,
     pub name: String,
@@ -24,7 +40,7 @@ pub struct RulesetDetail {
     pub bypass_actors: Vec<serde_json::Value>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct RulesetRule {
     #[serde(rename = "type")]
     pub rule_type: String,
@@ -32,127 +48,154 @@ pub struct RulesetRule {
     pub parameters: Option<serde_json::Value>,
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct RulesetRepositoryCollaborator {
+    pub id: u64,
+    pub login: String,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct RulesetCustomRepositoryRole {
+    pub id: u64,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct InstalledApp {
+    pub app_id: u64,
+    #[serde(default)]
+    pub app_slug: String,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct GitHubUser {
+    pub id: u64,
+    pub login: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct InstallationsResponse {
+    #[serde(default)]
+    installations: Vec<InstalledApp>,
+}
+
 impl Client {
-    /// List rulesets for a repository.
     pub async fn list_rulesets(&self, repo: &str) -> Result<Vec<Ruleset>> {
-        let resp = self
-            .get(&format!("/repos/{}/{repo}/rulesets", self.org))
-            .await?;
-
-        let status = resp.status();
-        if !status.is_success() {
-            tracing::warn!("Failed to list rulesets for {repo}: HTTP {status}");
-            return Ok(Vec::new());
-        }
-
-        resp.json()
-            .await
-            .context("Failed to parse rulesets response")
+        self.list_rulesets_scoped(repo, true).await
     }
 
-    /// Get details for a specific ruleset.
+    pub async fn list_repository_rulesets(&self, repo: &str) -> Result<Vec<Ruleset>> {
+        self.list_rulesets_scoped(repo, false).await
+    }
+
+    async fn list_rulesets_scoped(
+        &self,
+        repo: &str,
+        includes_parents: bool,
+    ) -> Result<Vec<Ruleset>> {
+        pagination::collect_paginated(self, |page| {
+            format!(
+                "/repos/{}/{repo}/rulesets?per_page={}&page={}&includes_parents={includes_parents}",
+                self.org, page.per_page, page.number
+            )
+        })
+        .await
+        .context("Failed to parse rulesets response")
+    }
+
     pub async fn get_ruleset(&self, repo: &str, ruleset_id: u64) -> Result<RulesetDetail> {
-        let resp = self
-            .get(&format!("/repos/{}/{repo}/rulesets/{ruleset_id}", self.org))
-            .await?;
-
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("Failed to get ruleset {ruleset_id} for {repo} (HTTP {status}): {body}");
-        }
-
-        resp.json()
+        let path = format!("/repos/{}/{repo}/rulesets/{ruleset_id}", self.org);
+        response::expect_json(self.get(&path).await?, "GET", &path)
             .await
             .context("Failed to parse ruleset detail response")
     }
 
-    /// Create a new ruleset for a repository.
     pub async fn create_ruleset(
         &self,
         repo: &str,
         ruleset: &serde_json::Value,
     ) -> Result<RulesetDetail> {
-        let resp = self
-            .post_json(&format!("/repos/{}/{repo}/rulesets", self.org), ruleset)
-            .await?;
-
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("Failed to create ruleset for {repo} (HTTP {status}): {body}");
-        }
-
-        resp.json()
+        let path = format!("/repos/{}/{repo}/rulesets", self.org);
+        response::expect_json(self.post_json(&path, ruleset).await?, "POST", &path)
             .await
             .context("Failed to parse created ruleset response")
     }
 
-    /// Update an existing ruleset.
     pub async fn update_ruleset(
         &self,
         repo: &str,
         ruleset_id: u64,
         ruleset: &serde_json::Value,
     ) -> Result<()> {
-        let resp = self
-            .put_json(
-                &format!("/repos/{}/{repo}/rulesets/{ruleset_id}", self.org),
-                ruleset,
-            )
-            .await?;
-
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!(
-                "Failed to update ruleset {ruleset_id} for {repo} (HTTP {status}): {body}"
-            );
-        }
-
-        Ok(())
+        let path = format!("/repos/{}/{repo}/rulesets/{ruleset_id}", self.org);
+        response::expect_empty(self.put_json(&path, ruleset).await?, "PUT", &path).await
     }
 
-    /// Delete a ruleset from a repository.
     pub async fn delete_ruleset(&self, repo: &str, ruleset_id: u64) -> Result<()> {
-        let resp = self
-            .delete(&format!("/repos/{}/{repo}/rulesets/{ruleset_id}", self.org))
-            .await?;
-
-        let status = resp.status();
-        if !status.is_success() && status.as_u16() != 204 {
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!(
-                "Failed to delete ruleset {ruleset_id} for {repo} (HTTP {status}): {body}"
-            );
-        }
-
-        Ok(())
+        let path = format!("/repos/{}/{repo}/rulesets/{ruleset_id}", self.org);
+        response::expect_empty(self.delete(&path).await?, "DELETE", &path).await
     }
 
-    /// Get a team's numeric ID by its slug.
     pub async fn get_team_id(&self, team_slug: &str) -> Result<u64> {
-        let resp = self
-            .get(&format!("/orgs/{}/teams/{team_slug}", self.org))
-            .await?;
-
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("Failed to get team '{team_slug}' (HTTP {status}): {body}");
+        #[derive(Deserialize)]
+        struct TeamIdResponse {
+            id: u64,
         }
 
-        let json: serde_json::Value = resp.json().await.context("Failed to parse team response")?;
-
-        json["id"]
-            .as_u64()
-            .ok_or_else(|| anyhow::anyhow!("Team '{team_slug}' response missing 'id' field"))
+        let path = format!("/orgs/{}/teams/{team_slug}", self.org);
+        Ok(
+            response::expect_json::<TeamIdResponse>(self.get(&path).await?, "GET", &path)
+                .await
+                .context("Failed to parse team response")?
+                .id,
+        )
     }
 
-    /// Create a Copilot code review ruleset.
+    pub async fn get_user_by_login(&self, login: &str) -> Result<GitHubUser> {
+        let path = format!("/users/{login}");
+        response::expect_json(self.get(&path).await?, "GET", &path)
+            .await
+            .context("Failed to parse user response")
+    }
+
+    pub async fn list_ruleset_repo_collaborators(
+        &self,
+        repo: &str,
+    ) -> Result<Vec<RulesetRepositoryCollaborator>> {
+        pagination::collect_paginated(self, |page| {
+            format!(
+                "/repos/{}/{repo}/collaborators?affiliation=all&per_page={}&page={}",
+                self.org, page.per_page, page.number
+            )
+        })
+        .await
+        .context("Failed to parse repository collaborators response")
+    }
+
+    pub async fn list_ruleset_custom_repository_roles(
+        &self,
+    ) -> Result<Vec<RulesetCustomRepositoryRole>> {
+        let path = format!("/orgs/{}/custom-repository-roles", self.org);
+        response::expect_json(self.get(&path).await?, "GET", &path)
+            .await
+            .context("Failed to parse custom repository roles response")
+    }
+
+    pub async fn list_org_installations(&self) -> Result<Vec<InstalledApp>> {
+        let path = format!("/orgs/{}/installations", self.org);
+        let response: InstallationsResponse =
+            response::expect_json(self.get(&path).await?, "GET", &path)
+                .await
+                .context("Failed to parse organization installations response")?;
+        Ok(response.installations)
+    }
+
     pub async fn create_copilot_review_ruleset(&self, repo: &str) -> Result<()> {
         let existing = self.list_rulesets(repo).await?;
-        if existing.iter().any(|r| r.name == "Copilot Code Review") {
+        if existing
+            .iter()
+            .any(|ruleset| ruleset.name == "Copilot Code Review")
+        {
             tracing::info!("Copilot review ruleset already exists for {repo}");
             return Ok(());
         }
@@ -176,18 +219,7 @@ impl Client {
             "bypass_actors": []
         });
 
-        let resp = self
-            .post_json(&format!("/repos/{}/{repo}/rulesets", self.org), &body)
-            .await?;
-
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!(
-                "Failed to create Copilot review ruleset for {repo} (HTTP {status}): {body}"
-            );
-        }
-
-        Ok(())
+        let path = format!("/repos/{}/{repo}/rulesets", self.org);
+        response::expect_empty(self.post_json(&path, &body).await?, "POST", &path).await
     }
 }

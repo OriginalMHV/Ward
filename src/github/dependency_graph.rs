@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::Client;
+use super::response::{self, ClassifiedResponse};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -105,30 +106,29 @@ struct SbomPackage {
 impl Client {
     /// Audit whether GitHub can currently export dependency graph data as an SBOM.
     pub async fn audit_dependency_graph(&self, repo: &str) -> DependencyGraphAudit {
-        match self
-            .get(&format!("/repos/{}/{repo}/dependency-graph/sbom", self.org))
-            .await
-        {
-            Ok(resp) => match resp.status().as_u16() {
-                200 => match resp.json::<SbomResponse>().await {
-                    Ok(body) => DependencyGraphAudit::available(body.sbom),
-                    Err(err) => DependencyGraphAudit::unknown(format!(
-                        "GitHub returned an SBOM response Ward could not parse: {err}"
-                    )),
-                },
-                404 => DependencyGraphAudit::unavailable(
+        let path = format!("/repos/{}/{repo}/dependency-graph/sbom", self.org);
+        match self.get(&path).await {
+            Ok(resp) => match response::classify_json::<SbomResponse>(resp, "GET", &path).await {
+                Ok(ClassifiedResponse::Success(body)) => DependencyGraphAudit::available(body.sbom),
+                Ok(ClassifiedResponse::NotFound(_)) => DependencyGraphAudit::unavailable(
                     "GitHub could not export an SBOM for this repository",
                 ),
-                403 => DependencyGraphAudit::unknown(
+                Ok(ClassifiedResponse::Forbidden(_)) => DependencyGraphAudit::unknown(
                     "GitHub denied SBOM export; token may be missing Contents read access",
                 ),
-                status => {
-                    let body = resp.text().await.unwrap_or_default();
-                    tracing::warn!("SBOM export for {repo} returned HTTP {status}: {body}");
-                    DependencyGraphAudit::unknown(format!(
-                        "GitHub returned HTTP {status} when Ward tried to export an SBOM"
-                    ))
-                }
+                Ok(ClassifiedResponse::NoContent) => DependencyGraphAudit::unknown(
+                    "GitHub returned no SBOM data for this repository",
+                ),
+                Ok(ClassifiedResponse::Unprocessable(error))
+                | Ok(ClassifiedResponse::Other(error)) => DependencyGraphAudit::unknown(format!(
+                    "GitHub returned {} when Ward tried to export an SBOM",
+                    error
+                        .status()
+                        .map_or_else(|| "an error".to_owned(), |status| format!("HTTP {status}"))
+                )),
+                Err(err) => DependencyGraphAudit::unknown(format!(
+                    "GitHub returned an SBOM response Ward could not parse: {err}"
+                )),
             },
             Err(err) => DependencyGraphAudit::unknown(format!(
                 "Ward could not call GitHub's SBOM export endpoint: {err}"

@@ -1,10 +1,17 @@
+pub mod access;
+pub mod actions;
 pub mod branch_protection;
 pub mod client;
 pub mod commits;
 pub mod contents;
 pub mod dependency_graph;
+pub mod environments;
+pub mod integrations;
+mod metadata;
+mod pagination;
 pub mod pulls;
 pub mod repos;
+mod response;
 pub mod rulesets;
 pub mod security;
 pub mod settings;

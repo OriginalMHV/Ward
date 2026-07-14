@@ -135,13 +135,18 @@ Audited fields: Required PR Reviews, Required Approvals, Dismiss Stale Reviews, 
 
 ## `ward commit`
 
-Deploy config files to repositories without cloning. Uses the Git Trees API for atomic multi-file commits.
+Synchronize imported files or deploy a rendered template without cloning. Uses the Git Trees API for atomic multi-file commits.
 
 ### `ward commit plan`
 
 Preview what files would be committed.
 
 ```bash
+# Preview all [[files]] imported from a reference repository
+ward commit plan --system backend
+ward commit plan --repo my-service
+
+# Preview one built-in template
 ward commit plan --template dependabot --system backend
 ward commit plan --template codeql --system backend
 ward commit plan --template dependency-submission --repo my-service
@@ -149,9 +154,14 @@ ward commit plan --template dependency-submission --repo my-service
 
 ### `ward commit apply`
 
-Commit template files and create pull requests.
+Commit changed files and create pull requests.
 
 ```bash
+# Commit all changed [[files]] in one PR per target repository
+ward commit apply --system backend
+ward commit apply --repo my-service --yes
+
+# Render and commit one built-in template
 ward commit apply --template dependabot --system backend
 ward commit apply --template codeql --system backend --yes
 ward commit apply --template dependency-submission --repo my-service --yes
@@ -159,8 +169,10 @@ ward commit apply --template dependency-submission --repo my-service --yes
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
-| `--template` | string | yes | Template name to deploy |
+| `--template` | string | no | Template name to deploy; omit to synchronize `[[files]]` |
 | `--yes` | bool | -- | Skip confirmation prompt |
+
+When `--template` is omitted, Ward compares every `[[files]]` entry in `ward.toml`, commits all changed files together, and opens one pull request per target repository. Target-only files are not deleted.
 
 Built-in templates: `dependabot`, `codeql`, `dependency-submission`. Ward auto-detects Gradle vs npm projects and selects the appropriate template variant. See [Templates](templates.md) for details.
 
@@ -168,14 +180,17 @@ Built-in templates: `dependabot`, `codeql`, `dependency-submission`. Ward auto-d
 
 ## `ward settings`
 
-Manage repository settings, Copilot code review rulesets, and review instructions.
+Manage `[repository]` settings and optionally configure Copilot code review.
 
 ### `ward settings plan`
 
 Preview what settings would change.
 
 ```bash
+# Plan repository settings and topics from [repository]
 ward settings plan --system backend
+
+# Add explicit Copilot setup checks
 ward settings plan --ruleset copilot-review --system backend
 ward settings plan --copilot-instructions --system backend
 ```
@@ -185,6 +200,10 @@ ward settings plan --copilot-instructions --system backend
 Apply settings and rulesets to repositories.
 
 ```bash
+# Apply repository settings and topics from [repository]
+ward settings apply --system backend
+
+# Optionally apply Copilot setup in the same command
 ward settings apply --ruleset copilot-review --system backend
 ward settings apply --copilot-instructions --system backend
 ward settings apply --ruleset copilot-review --copilot-instructions --system backend --yes
@@ -197,18 +216,20 @@ ward settings apply --copilot-instructions --repo my-service --yes
 | `--copilot-instructions` | Deploy `.github/copilot-instructions.md` |
 | `--yes` | Skip confirmation prompt |
 
+Without Copilot flags, `plan` and `apply` manage only the fields explicitly configured under `[repository]`, including feature toggles, merge policies and commit-message defaults, auto-merge, branch cleanup, update-branch support, web commit signoff, and topics.
+
 Ward auto-detects whether a repo is an application or operations repo (by suffix: `-operation`, `-operations`, `-ops`, `-gitops`) and deploys the appropriate instructions template.
 
 ### `ward settings audit`
 
-Report current state of rulesets and instructions.
+Report current repository-settings compliance plus Copilot review ruleset and instructions state.
 
 ```bash
 ward settings audit --system backend
 ward settings audit --repo my-service
 ```
 
-Shows per-repo: Copilot Code Review ruleset present, copilot-instructions.md present, ops vs app classification.
+Shows per-repo: repository settings compliance, Copilot Code Review ruleset present, copilot-instructions.md present, and ops vs app classification.
 
 ---
 
@@ -268,7 +289,11 @@ ward rulesets audit --system backend
 ward rulesets audit --repo my-service
 ```
 
-Configure rulesets in `ward.toml` under `[rulesets.branch_protection]`. Supports `bypass_teams` with configurable `bypass_mode` (`"always"` or `"pull_request"`), and per-repo pattern overrides via `[[rulesets.branch_protection.overrides]]`. See [Configuration](configuration.md) for all fields.
+Imported exact rulesets are configured under `[[rulesets.repository]]`. They preserve arbitrary conditions, rule parameters, enforcement, and bypass actors. If any exact repository rulesets are present, they take precedence over the simplified `[rulesets.branch_protection]` model.
+
+Ward creates or updates configured rulesets by name. It never deletes target-only rulesets automatically.
+
+The simplified `[rulesets.branch_protection]` form supports `bypass_teams` with configurable `bypass_mode` (`"always"` or `"pull_request"`), and per-repo pattern overrides via `[[rulesets.branch_protection.overrides]]`. See [Configuration](configuration.md) for all fields.
 
 ---
 
@@ -497,18 +522,39 @@ ward template dir
 
 ## `ward init`
 
-Interactive setup wizard for creating a new `ward.toml`.
+Create `ward.toml` from an existing repository, through the setup wizard, or as a minimal scaffold.
 
 ```bash
+ward init --from acme/reference-service
+ward init --from https://github.com/acme/reference-service
+ward init --from acme/reference-service --target api-service --target worker-service
+ward init --from acme/reference-service --include '.github/**' --exclude '.github/workflows/old-*'
+ward init --from acme/reference-service --strict
+ward init --from acme/reference-service --stdout
+ward init --from acme/reference-service --output configs/ward.toml
+ward init --from acme/reference-service --force
+
+# Manual alternatives
 ward init
 ward init --non-interactive
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--non-interactive` | Write a default `ward.toml` without prompts |
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--from <SOURCE>` | -- | Snapshot `OWNER/REPO` or a GitHub URL |
+| `--non-interactive` | `false` | Write a default `ward.toml` without prompts |
+| `--output <PATH>` | `ward.toml` | Output path for `--from` |
+| `--stdout` | `false` | Print the generated config instead of writing it |
+| `--force` | `false` | Replace an existing output file |
+| `--parallelism <N>` | `5` | Max concurrent import API calls |
+| `--target <OWNER/REPO>` | source repository | Existing same-owner target; repeatable |
+| `--include <GLOB>` | built-in config registry | Include matching configuration files; repeatable |
+| `--exclude <GLOB>` | none | Exclude matching configuration files; repeatable |
+| `--strict` | `false` | Fail on permission-denied or unavailable source state |
 
-The wizard walks through:
+`--from` is the recommended setup path. Import is read-only and generates an explicit-only system. Without `--target`, it initially targets only the source repository.
+
+Without `--from`, the wizard walks through:
 
 1. **Authentication** -- checks for a valid GitHub token
 2. **Organization** -- verifies the org and counts repos
@@ -521,22 +567,43 @@ The wizard walks through:
 
 ## `ward import`
 
-Reverse-engineer an existing GitHub org's state into a `ward.toml`. The "terraform import" equivalent for onboarding an existing organization.
+Snapshot all reusable repository state available through documented public GitHub APIs. This is the standalone equivalent of `ward init --from`.
 
 ```bash
-ward import --org my-org
-ward import --org my-org --stdout
-ward import --org my-org --min-group-size 3
+ward import acme/reference-service
+ward import https://github.com/acme/reference-service
+ward import git@github.com:acme/reference-service.git
+ward import acme/reference-service --target api-service --target worker-service
+ward import acme/reference-service --include '.github/**' --include renovate.json
+ward import acme/reference-service --exclude '.github/workflows/experimental-*'
+ward import acme/reference-service --strict
+ward import acme/reference-service --stdout
+ward import acme/reference-service --output configs/ward.toml
+ward import acme/reference-service --force
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--org <ORG>` | string | required | GitHub organization to import from |
+| `<SOURCE>` | string | required | `OWNER/REPO` or GitHub repository URL |
+| `--output <PATH>` | path | `ward.toml` | Output path |
 | `--stdout` | bool | `false` | Print to stdout instead of writing ward.toml |
-| `--min-group-size <N>` | integer | `2` | Minimum repos to form a system |
+| `--force` | bool | `false` | Replace an existing output file |
 | `--parallelism <N>` | integer | `5` | Max concurrent API calls |
+| `--target <OWNER/REPO>` | string | source repository | Existing same-owner target; repeatable |
+| `--include <GLOB>` | string | built-in config registry | Include matching configuration files; repeatable |
+| `--exclude <GLOB>` | string | none | Exclude matching configuration files; repeatable |
+| `--strict` | bool | `false` | Fail on permission-denied or unavailable source state |
 
 How it works:
+
+1. Reads the source repository without modifying it.
+2. Runs independent collectors for General settings, security, rulesets, all protected branches, Actions, environments, access, integrations, labels, and selected configuration files.
+3. Preserves binary files, executable mode, source SHAs, stable actor/app identities, inherited references, and external placeholders.
+4. Writes manifest schema v2 with per-category policy and complete coverage evidence.
+5. Validates every requested target exists under the source owner.
+6. Uses an explicit-only target system; the source is the safe default target.
+
+Collector failures are persisted as `[[coverage]]` entries unless `--strict` is used. Secret values, credentialed webhook URLs, and deploy-key material become external placeholders. Inherited resources remain references. Unsupported Git objects are observed but never silently pruned.
 
 ---
 
@@ -586,39 +653,56 @@ Ward Doctor
 
 Exit codes: `0` all passed, `1` any errors, `2` warnings only.
 
-1. Fetches all non-archived repositories in the org
-2. Groups repos by common name prefixes to auto-detect systems (e.g., `backend-api`, `backend-auth` -> system `backend`)
-3. Samples security state from up to 5 repos per system and takes the majority vote
-4. Samples branch protection from the same repos
-5. Detects team access patterns
-6. Generates a complete `ward.toml` with comments explaining what was detected
-
-Repos that do not match any system prefix are listed as comments at the bottom of the generated file.
-
----
-
 ## `ward plan`
 
-Unified compliance plan across all checks. The "terraform plan" of Ward -- shows the full posture in one command.
+Read-only manifest v2 plan across every repository category.
 
 ```bash
+ward plan --repo backend-api
 ward plan --system backend
-ward plan --all
-ward plan --all --json
+ward plan --category files --category actions
+ward plan --json
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--all` | bool | `false` | Scan all configured systems |
+| `--category <CATEGORY>` | repeatable | all | Limit the plan to selected categories |
+| `--allow-high-impact` | bool | `false` | Allow visibility and archive changes to become actionable |
+| `--all` | bool | `false` | Compatibility flag; all configured systems are already selected when neither `--repo` nor `--system` is set |
 
-For each system, runs:
+The v2 planner covers these categories in safe apply order:
 
-- **Security** drift check
-- **Branch Protection** drift check
-- **Rulesets** audit (checks for expected ruleset)
-- **Teams** audit (checks for configured team access)
+`repository`, `files`, `security`, `actions`, `environments`, `access`,
+`integrations`, `rulesets`, and `branch-protection`.
 
-Output shows per-system compliance counts and lists repos needing changes. The summary line reports total repos scanned and total actions needed.
+Output distinguishes actionable, blocked, warning, and deferred changes. `--json`
+emits the stable unified report shape.
+
+---
+
+## `ward apply`
+
+Apply managed manifest v2 categories to existing repositories. Ward completes
+all read-only plans and dependency preflights before the first mutation, applies
+categories in safe order, and verifies the result.
+
+```bash
+ward plan --system backend
+ward apply --system backend
+ward apply --repo backend-api --category files
+ward apply --system backend --json --yes
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--category <CATEGORY>` | repeatable | all | Limit apply to selected categories |
+| `--allow-high-impact` | bool | `false` | Permit planned visibility and archive changes |
+| `--yes` | bool | `false` | Skip interactive confirmation |
+
+`--json` never authorizes a mutation by itself; JSON apply requires `--yes`.
+Managed files are committed to the configured Ward branch and opened as a pull
+request. Workflow state, Pages, rulesets, and branch-protection changes that
+depend on that pull request are reported as deferred until it merges.
 
 ---
 
@@ -665,11 +749,3 @@ ward completions fish > ~/.config/fish/completions/ward.fish
 ```
 
 ---
-
-## `ward tui`
-
-Launch the interactive terminal dashboard. See [TUI Dashboard](tui.md) for full documentation.
-
-```bash
-ward tui
-```

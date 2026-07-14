@@ -145,7 +145,7 @@ async fn test_list_repos_for_system_with_prefix() {
 
     let client = Client::new_for_test("test-org", &server.uri());
     let repos = client
-        .list_repos_for_system("frontend", &[], &[])
+        .list_repos_for_system("frontend", true, &[], &[])
         .await
         .unwrap();
 
@@ -184,7 +184,10 @@ async fn test_list_repos_for_system_rejects_partial_prefix() {
         .await;
 
     let client = Client::new_for_test("test-org", &server.uri());
-    let repos = client.list_repos_for_system("be", &[], &[]).await.unwrap();
+    let repos = client
+        .list_repos_for_system("be", true, &[], &[])
+        .await
+        .unwrap();
 
     // "backend-service" should NOT match system "be" — only "be-api" and "be-frontend"
     assert_eq!(repos.len(), 2);
@@ -192,4 +195,23 @@ async fn test_list_repos_for_system_rejects_partial_prefix() {
     assert!(names.contains(&"be-api"));
     assert!(names.contains(&"be-frontend"));
     assert!(!names.contains(&"backend-service"));
+}
+
+#[tokio::test]
+async fn explicit_only_system_skips_repository_search() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/reference"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(make_repo_json("reference", false)))
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let repos = client
+        .list_repos_for_system("reference", false, &[], &["reference".to_owned()])
+        .await
+        .unwrap();
+
+    assert_eq!(repos.len(), 1);
+    assert_eq!(repos[0].name, "reference");
 }

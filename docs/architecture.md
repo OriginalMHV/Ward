@@ -1,181 +1,264 @@
 # Architecture
 
-How Ward works under the hood.
+Ward is a typed GitHub API client organized around a versioned `ward.toml` manifest and a plan/apply/verify lifecycle.
 
----
+## Repository-driven flow
 
-## The plan/apply/verify pattern
-
-Every mutating operation in Ward follows three phases:
-
-1. **Plan** (read-only) -- fetch current state from the GitHub API, diff it against the desired state in `ward.toml`, and display what would change. No side effects.
-2. **Apply** (write) -- execute the planned changes, logging each mutation to the audit trail. Prompts for confirmation unless `--yes` is passed.
-3. **Verify** (read-only) -- re-read the state from the API and confirm it matches the desired state. Runs automatically after apply unless `--skip-verify` is used.
-
-This pattern is inspired by Terraform and other infrastructure-as-code tools.
-
----
-
-## Git Trees API for atomic commits
-
-Ward commits files to repositories without cloning. Instead, it uses the Git Trees API to construct commits server-side:
-
-```
-1. Get reference       GET /repos/{owner}/{repo}/git/ref/heads/{branch}
-                       -> returns current SHA
-
-2. Get base tree       GET /repos/{owner}/{repo}/git/commits/{sha}
-                       -> returns tree SHA
-
-3. Create blobs        POST /repos/{owner}/{repo}/git/blobs
-                       -> one per file, UTF-8 encoded
-                       -> returns blob SHAs
-
-4. Create tree         POST /repos/{owner}/{repo}/git/trees
-                       -> references base_tree + new blob SHAs
-                       -> returns new tree SHA
-
-5. Create commit       POST /repos/{owner}/{repo}/git/commits
-                       -> references tree SHA + parent commit SHA
-                       -> returns commit SHA
-
-6. Update reference    PATCH /repos/{owner}/{repo}/git/ref/heads/{branch}
-                       -> points branch to new commit SHA
+```text
+GitHub source repository
+        |
+        v
+independent category collectors
+        |
+        +-- desired state
+        +-- provenance
+        +-- coverage
+        +-- references/placeholders
+        v
+     ward.toml
+        |
+        v
+collect target -> plan all -> apply safely -> verify -> audit
 ```
 
-This approach has several advantages over cloning:
+No repository clone or local Git working tree is required.
 
-- **Atomic** -- the entire commit is constructed and applied in one reference update. No partial states.
-- **No filesystem** -- nothing is written to disk. No temp directories, no git repos, no cleanup.
-- **Fast** -- a few HTTP requests vs. cloning the entire repo history.
-- **Multi-file** -- multiple files can be committed in a single commit by including multiple blobs in the tree.
+## Manifest v2
 
----
+Manifest v2 separates reusable state from how Ward is allowed to manage it.
 
-## Idempotent operations
+```toml
+[schema]
+version = 2
 
-Ward checks the current state before making changes. If a security feature is already enabled, Ward skips it. If a branch protection rule already matches the desired config, Ward reports "no changes needed."
+[categories.security.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+```
 
-This means running `ward security apply` twice in a row is safe -- the second run detects everything is already in place and does nothing.
+Each category stores:
 
----
+- desired repository state
+- a management disposition
+- explicit prune and sensitive gates
+- stable references to externally owned resources
+- placeholders for write-only values
 
-## Rate limiting and concurrency
+The flattened v2 state is backward-compatible with existing legacy sections. Legacy fields remain available for older commands and manifests, while comprehensive reconciliation uses `categories`.
 
-Ward uses a semaphore-based concurrency limiter for GitHub API calls. Every HTTP request acquires a permit before executing and releases it after completion.
+## Import pipeline
 
-The `--parallelism` flag (default: 5) controls the maximum number of concurrent requests. This prevents hitting GitHub's rate limits when operating across many repositories.
+`ward import` and `ward init --from` share one importer.
 
-All API methods (`get`, `put`, `patch_json`, `post_json`, `put_json`, `delete`) go through the same semaphore, so the concurrency limit applies uniformly.
+The source repository metadata is the required baseline. All other collectors run independently:
 
----
+- General repository state and labels
+- security and attached code-security configuration
+- repository and inherited rulesets
+- detailed protection for every protected branch
+- Actions configuration, workflows, values, secrets, references, and runners
+- environments and deployment policies
+- teams, collaborators, invitations, roles, and app references
+- webhooks, deploy keys, Pages, and autolinks
+- binary-safe selected configuration files
+
+One permission failure does not erase unrelated state. Every collector contributes `CoverageEntry` records with outcomes such as:
+
+- `collected`
+- `redacted`
+- `permission_denied`
+- `unsupported`
+- `unavailable`
+- `not_applicable`
+
+`--strict` promotes permission-denied and unavailable source state to an import failure. Redacted values and documented public-API limitations remain representable.
+
+### Provenance
+
+Imported manifests record:
+
+- source `OWNER/REPO`
+- source default branch
+- repository node ID when readable
+- default-branch head OID when readable
+
+The default target is the source repository, which gives a zero-action baseline for managed repository/file state.
+
+### Stable identity
+
+Source-local numeric IDs are not copied blindly.
+
+Ward persists stable identities where available:
+
+- team slug
+- user login
+- GitHub App slug
+- repository-role name
+- ruleset singleton actor type
+- status-check app slug
+
+Apply resolves those identities against the target. Missing or ambiguous resolution blocks that action.
+
+Inherited organization/enterprise state remains a reference rather than being recreated as repository-owned state.
+
+## Planning
+
+Unified planning follows four rules:
+
+1. Collect every selected category before mutation.
+2. Preserve collector failures as blocked category results.
+3. Respect each category's disposition and gates.
+4. Keep machine-readable output structurally complete.
+
+A category result includes:
+
+- disposition
+- actionable, blocked, warning, and deferred counts
+- coverage grouped by outcome
+- human-readable change details
+
+Observe/reference/placeholder categories still report state and coverage but produce no writes.
+
+## Apply ordering
+
+The safe order is:
+
+1. General repository state
+2. Configuration-file branch and pull request
+3. Security
+4. Actions settings, variables, and secrets not dependent on new workflow files
+5. Environments
+6. Access
+7. Integrations not dependent on Pages source
+8. Rulesets
+9. Classic branch protection
+
+High-impact repository visibility/archive changes require an explicit option. Sensitive and prune operations remain blocked unless their category policy enables them.
+
+Failures are accumulated so users receive the complete repository/category result. Ward never turns a blocked or failed write into a success-shaped fallback.
+
+## Configuration-file reconciliation
+
+Files use the recursive Git Trees and blob APIs.
+
+Collection preserves:
+
+- raw bytes using UTF-8 or base64 manifest encoding
+- `100644` and `100755` modes
+- source blob SHA
+- selected include/exclude scope
+
+Ward observes but will not silently mutate or prune:
+
+- symlinks
+- submodules
+- Git LFS payloads
+- unsafe paths
+- unknown modes
+- oversized blobs
+- entries from a truncated tree listing
+
+### Pull-request workflow
+
+```text
+plan default branch
+        |
+ensure dedicated branch
+        |
+re-collect and re-plan branch
+        |
+create blobs -> tree -> commit -> update branch ref
+        |
+create/reuse pull request
+```
+
+Ward refuses to use the default branch as the file mutation branch.
+
+If configuration files are pending in a pull request, dependent workflow-state, Pages, ruleset, and classic branch-protection changes are deferred. They are planned again after merge.
+
+## Secret handling
+
+GitHub exposes secret metadata but not values.
+
+Import stores deterministic external references, normally environment-variable keys. Apply resolves values only at write time, encrypts them using the relevant GitHub public key, and does not place plaintext in the manifest, plan, audit log, or verification result.
+
+Existing same-name secrets are considered present. Ward does not repeatedly rotate unverifiable values.
+
+Credentialed webhook URLs are represented by a redacted identity plus an external URL reference. Deploy keys require replacement material and are created successfully before the old key is removed.
+
+## Verification and idempotency
+
+Each category exposes collect, plan, apply, and verify operations.
+
+After apply, Ward re-collects and re-plans. Verification succeeds only when:
+
+- no actionable changes remain
+- no blockers remain
+- write-only resources converge by observable identity
+
+Repeated apply runs therefore become no-ops.
+
+## GitHub client
+
+All requests share:
+
+- token resolution from `GH_TOKEN`, `GITHUB_TOKEN`, then `gh auth token`
+- API version and package-version User-Agent metadata
+- a bounded Tokio semaphore
+- pagination helpers
+- classified REST errors
+- GraphQL support
+- redacted error messages
+
+`parallelism = 0` is rejected before a semaphore is created.
+
+The client retries only:
+
+- HTTP 429
+- HTTP 502, 503, and 504
+- genuine rate-limit HTTP 403 responses
+
+It respects `Retry-After`, then `x-ratelimit-reset`, then bounded exponential backoff. Ordinary 403, 404, 409, and 422 responses are never retried.
 
 ## Audit logging
 
-Every mutation is logged to `~/.ward/audit.log` as JSON lines (one JSON object per line).
+Mutations are appended as JSON Lines to:
 
-### Entry format
-
-```json
-{
-  "timestamp": "2024-03-21T14:32:00Z",
-  "repo": "backend-my-service",
-  "action": "set_secret_scanning",
-  "status": "success",
-  "before": false,
-  "after": true
-}
+```text
+~/.ward/audit.log
 ```
 
-### Logged actions
-
-| Action | Command |
-|--------|---------|
-| `set_secret_scanning` | `ward security apply` |
-| `set_push_protection` | `ward security apply` |
-| `set_secret_scanning_ai_detection` | `ward security apply` |
-| `enable_dependabot_alerts` | `ward security apply` |
-| `enable_dependabot_security_updates` | `ward security apply` |
-| `update_branch_protection` | `ward protection apply` |
-| `create_copilot_review_ruleset` | `ward settings apply` |
-| `deploy_copilot_instructions` | `ward settings apply` |
-| `commit_template_*` | `ward commit apply` |
-| `add_team_to_repo` | `ward teams apply` |
-| `remove_team_from_repo` | `ward teams apply` |
-
-### Querying the audit log
-
-The log is plain JSON lines, so you can use `jq` for queries:
-
-```bash
-# all changes to a specific repo
-jq 'select(.repo == "backend-my-service")' ~/.ward/audit.log
-
-# all failed operations
-jq 'select(.status == "failure")' ~/.ward/audit.log
-
-# count changes by action type
-jq -s 'group_by(.action) | map({action: .[0].action, count: length})' ~/.ward/audit.log
-```
-
-The audit log is also what powers `ward rollback` -- it reads entries to determine what can be reversed.
-
----
-
-## GitHub API authentication
-
-Ward resolves a GitHub token in this order:
-
-1. `GH_TOKEN` environment variable
-2. `GITHUB_TOKEN` environment variable
-3. `gh auth token` (GitHub CLI output)
-
-Required token scopes: `repo`, `read:org`, `workflow`.
-
----
+Entries contain repository, category/action, status, and structural before/after JSON. Resolved secret plaintext is never logged.
 
 ## Project structure
 
-| Directory | What lives there |
-|-----------|-----------------|
-| `src/main.rs` | Entry point, CLI argument parsing |
-| `src/cli/` | Command definitions and handlers |
-| `src/cli/mod.rs` | Top-level CLI enum with all commands |
-| `src/cli/security.rs` | Security plan/apply/audit |
-| `src/cli/protection.rs` | Branch protection plan/apply/audit |
-| `src/cli/commit.rs` | Template commit plan/apply |
-| `src/cli/settings.rs` | Settings and rulesets plan/apply/audit |
-| `src/cli/drift.rs` | Configuration drift detection |
-| `src/cli/rulesets.rs` | Repository rulesets plan/apply/audit |
-| `src/cli/teams.rs` | Team access plan/apply/audit |
-| `src/cli/rollback.rs` | Audit log rollback |
-| `src/cli/audit.rs` | Full compliance audit |
-| `src/cli/config_cmd.rs` | Config management subcommands |
-| `src/cli/template.rs` | Template management subcommands |
-| `src/cli/init.rs` | Interactive setup wizard |
-| `src/cli/tui/` | Terminal dashboard (ratatui) |
-| `src/config/` | Configuration parsing and types |
-| `src/config/manifest/` | Manifest struct, types, accessors, and parsing |
-| `src/config/auth.rs` | Token resolution |
-| `src/github/` | GitHub API client and types |
-| `src/github/client.rs` | HTTP client with semaphore-based rate limiting |
-| `templates/` | Built-in Tera workflow templates |
-| `tests/` | Integration and unit tests |
+| Path | Responsibility |
+|---|---|
+| `src/main.rs` | command routing and shared client setup |
+| `src/cli/import.rs` | repository parsing, independent collection, manifest assembly |
+| `src/cli/plan.rs` | unified plan presentation |
+| `src/cli/apply.rs` | unified confirmation and apply entry point |
+| `src/config/manifest/` | legacy and v2 schema, parsing, accessors |
+| `src/reconcile/general.rs` | General settings and labels |
+| `src/reconcile/security_rules.rs` | security, rulesets, detailed branch protection |
+| `src/reconcile/actions_environments.rs` | Actions and environments |
+| `src/reconcile/access_integrations.rs` | access and integrations |
+| `src/reconcile/files.rs` | binary-safe configuration files |
+| `src/reconcile/unified.rs` | cross-category planning, ordering, deferral, verification |
+| `src/github/` | typed REST, GraphQL, Git Data, and classification helpers |
+| `src/engine/` | audit log and legacy planning/execution helpers |
+| `tests/` | Wiremock clients, reconciliation, safety, and CLI integration tests |
 
----
-
-## Dependencies
-
-Key crates used by Ward:
+## Key dependencies
 
 | Crate | Purpose |
-|-------|---------|
-| `clap` | CLI argument parsing with derive macros |
-| `tokio` | Async runtime |
-| `reqwest` | HTTP client for GitHub API |
-| `serde` / `serde_json` | JSON serialization |
-| `toml` | TOML config parsing |
-| `tera` | Jinja2-compatible template engine |
-| `ratatui` | Terminal UI framework |
-| `crossterm` | Terminal input handling |
-| `comfy-table` | Table formatting for CLI output |
+|---|---|
+| `clap` | CLI parsing |
+| `tokio` | async runtime and concurrency |
+| `reqwest` | GitHub HTTP client |
+| `serde`, `serde_json`, `toml` | manifest and API serialization |
+| `crypto_box` | sealed-box encryption for secret writes |
+| `dialoguer` | confirmation prompts and setup wizard |
+| `wiremock` | deterministic API integration tests |
+| `tracing` | structured diagnostic logging |

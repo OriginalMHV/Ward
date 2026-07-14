@@ -48,13 +48,30 @@ impl AuditLog {
         before: bool,
         after: bool,
     ) -> Result<()> {
+        self.log_values(
+            repo,
+            action,
+            status,
+            serde_json::Value::Bool(before),
+            serde_json::Value::Bool(after),
+        )
+    }
+
+    pub fn log_values(
+        &self,
+        repo: &str,
+        action: &str,
+        status: &str,
+        before: serde_json::Value,
+        after: serde_json::Value,
+    ) -> Result<()> {
         let entry = AuditEntry {
             timestamp: Utc::now().to_rfc3339(),
             repo: repo.to_string(),
             action: action.to_string(),
             status: status.to_string(),
-            before: serde_json::Value::Bool(before),
-            after: serde_json::Value::Bool(after),
+            before,
+            after,
         };
 
         let line = serde_json::to_string(&entry)?;
@@ -164,6 +181,32 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert!(lines[0].contains("repo1"));
         assert!(lines[1].contains("repo2"));
+    }
+
+    #[test]
+    fn audit_log_writes_structured_before_and_after_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.log");
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .unwrap();
+
+        let log = AuditLog::new_for_test(path.clone(), file);
+        log.log_values(
+            "repo",
+            "update_repository",
+            "success",
+            serde_json::json!({ "visibility": "private" }),
+            serde_json::json!({ "visibility": "internal" }),
+        )
+        .unwrap();
+
+        let content = std::fs::read_to_string(path).unwrap();
+        let entry: AuditEntry = serde_json::from_str(content.trim()).unwrap();
+        assert_eq!(entry.before["visibility"], "private");
+        assert_eq!(entry.after["visibility"], "internal");
     }
 
     #[test]
