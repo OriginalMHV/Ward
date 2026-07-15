@@ -2,26 +2,15 @@
 
 Ward is a typed GitHub API client organized around a versioned `ward.toml` manifest and a plan/apply/verify lifecycle.
 
-## Repository-driven flow
+## Configuration lifecycle
 
 ```text
-GitHub source repository
-        |
-        v
-independent category collectors
-        |
-        +-- desired state
-        +-- provenance
-        +-- coverage
-        +-- references/placeholders
-        v
-     ward.toml
-        |
-        v
-collect target -> plan all -> apply safely -> verify -> audit
+author ward.toml manually ---------+
+                                   +-> collect target -> plan all
+GitHub repository -> import -------+   -> apply safely -> verify -> audit
 ```
 
-No repository clone or local Git working tree is required.
+Both setup paths produce the same desired-state manifest. Import adds provenance and coverage evidence, but creates no ongoing relationship with the source repository. No repository clone or local Git working tree is required.
 
 ## Manifest v2
 
@@ -45,7 +34,7 @@ Each category stores:
 - stable references to externally owned resources
 - placeholders for write-only values
 
-The flattened v2 state is backward-compatible with existing legacy sections. Legacy fields remain available for older commands and manifests, while comprehensive reconciliation uses `categories`.
+Manually authored and imported manifests use the same v2 categories. The flattened v2 state is backward-compatible with existing legacy sections. Legacy fields remain available for older commands and manifests, while comprehensive reconciliation uses `categories`.
 
 ## Import pipeline
 
