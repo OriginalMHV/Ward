@@ -7,9 +7,9 @@ ward config path
 ward config show
 ```
 
-Repository imports generate manifest schema version 2. Legacy sections remain readable for backward compatibility, but comprehensive `ward plan` and `ward apply` use the versioned `categories` state.
+Manifest schema version 2 can be authored directly or generated through repository bootstrap. Legacy sections remain readable for backward compatibility, but comprehensive `ward plan` and `ward apply` use the versioned `categories` state.
 
-## Identity and provenance
+## Identity and optional provenance
 
 ```toml
 [org]
@@ -30,12 +30,12 @@ default_branch_head_oid = "..."
 
 | Table | Purpose |
 |---|---|
-| `[org]` | Owner containing the source and existing target repositories |
-| `[source]` | Backward-compatible source repository reference |
+| `[org]` | Owner containing the existing target repositories |
+| `[source]` | Optional backward-compatible source repository reference |
 | `[schema]` | Manifest format version |
-| `[provenance]` | Source branch and stable source identity captured during import |
+| `[provenance]` | Optional source branch and stable source identity captured during repository bootstrap |
 
-Targets must remain under the configured owner. Ward does not create, rename, transfer, or delete repositories.
+Manually authored manifests need only `[org]`, `[schema]`, targets, and desired categories. Targets must remain under the configured owner. Ward does not create, rename, transfer, or delete repositories.
 
 ## Category policies
 
@@ -54,7 +54,7 @@ sensitive = true
 | `prune` | boolean | Whether target-only collection entries may be removed |
 | `sensitive` | boolean | Enables the category's high-impact mutation gate |
 
-Imported defaults:
+Repository-bootstrap defaults:
 
 | Category | Default |
 |---|---|
@@ -68,7 +68,7 @@ Imported defaults:
 | `access` | observe + sensitive |
 | `integrations` | observe + sensitive |
 
-Changing `disposition` to `managed` is the explicit opt-in for an imported sensitive category. Keep `prune = false` until removal of target-only entries is intentional.
+Changing `disposition` to `managed` is the explicit opt-in for a bootstrapped sensitive category. Manually authored manifests set the same policy fields directly. Keep `prune = false` until removal of target-only entries is intentional.
 
 ## `[categories.repository]`
 
@@ -560,10 +560,10 @@ See `ward policy list` and `ward policy check` for supported expressions.
 
 ## Complete example
 
-The most accurate complete example is generated from a real repository:
+A compact hand-authored example is available at [ward.example.toml](../ward.example.toml).
+
+To generate a complete baseline from observable repository state:
 
 ```bash
 ward import OWNER/REPO --stdout > ward.toml
 ```
-
-See [ward.example.toml](../ward.example.toml) for a compact hand-authored example.

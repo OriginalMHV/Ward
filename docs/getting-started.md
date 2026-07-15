@@ -1,8 +1,11 @@
 # Getting Started with Ward
 
-Ward's recommended setup is repository-driven: import one repository that already has the GitHub configuration you want, review the generated manifest, then apply it to existing repositories under the same owner.
+Ward supports two first-class setup paths:
 
-Import is read-only.
+1. author the desired state directly in `ward.toml`
+2. bootstrap `ward.toml` from a repository that already has the configuration you want
+
+Both produce a normal manifest and use the same plan/apply/verify lifecycle. Repository bootstrap is read-only and creates a static snapshot; the source repository has no special role after the manifest is written.
 
 ## Prerequisites
 
@@ -16,7 +19,25 @@ gh auth status
 
 Ward resolves authentication from `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`.
 
-## 1. Import a reference repository
+## 1. Choose a setup path
+
+### Author `ward.toml` directly
+
+Use the guided setup:
+
+```bash
+ward init
+```
+
+Or create a minimal scaffold without prompts:
+
+```bash
+ward init --non-interactive
+```
+
+Review and extend the result using the [configuration reference](configuration.md). A manual manifest can use every v2 category and does not require source provenance or coverage records.
+
+### Bootstrap from an existing repository
 
 ```bash
 ward import acme/reference-service
@@ -30,7 +51,7 @@ ward import https://github.com/acme/reference-service
 ward import git@github.com:acme/reference-service.git
 ```
 
-`ward init --from` uses the same importer:
+`ward init --from` uses the same bootstrap implementation:
 
 ```bash
 ward init --from acme/reference-service
@@ -72,11 +93,23 @@ Use `--strict` when permission-denied or unavailable source state must fail the 
 
 Expected public-API boundaries such as redacted secret values, unsupported settings, and not-applicable endpoints remain recorded but do not make strict import impossible.
 
-## 2. Choose existing targets
+## 2. Review target repositories
 
-Without `--target`, the generated manifest targets only the source repository. This makes the first plan a zero-drift safety check.
+Every manifest selects existing repositories through `[[systems]]`. Ward does not create, rename, transfer, or delete repositories.
 
-Select existing same-owner targets while importing:
+A manually authored manifest can select repositories by prefix:
+
+```toml
+[[systems]]
+id = "payments"
+name = "Payments Services"
+match_prefix = true
+exclude = ["operations?", "system"]
+```
+
+It can also use an explicit `repos` list.
+
+A repository bootstrap targets only the source repository by default. This makes its first plan a zero-drift safety check. Select other existing same-owner targets during bootstrap:
 
 ```bash
 ward import acme/reference-service \
@@ -84,7 +117,7 @@ ward import acme/reference-service \
   --target worker-service
 ```
 
-Targets can also use `OWNER/REPO`, but the owner must match the source. Ward does not create, rename, transfer, or delete repositories.
+Targets can also use `OWNER/REPO`, but the owner must match the source.
 
 Target selection is stored as an explicit-only system:
 
@@ -96,15 +129,7 @@ match_prefix = false
 repos = ["api-service", "worker-service"]
 ```
 
-You may later replace this with a prefix-based system:
-
-```toml
-[[systems]]
-id = "payments"
-name = "Payments Services"
-match_prefix = true
-exclude = ["operations?", "system"]
-```
+You may edit that system like any manually authored target definition after bootstrap.
 
 Confirm the target set before applying:
 
@@ -112,7 +137,7 @@ Confirm the target set before applying:
 ward repos list --system payments
 ```
 
-## 3. Review the imported policies
+## 3. Review category policies
 
 The manifest stores repository state under versioned categories:
 
@@ -131,14 +156,14 @@ prune = false
 sensitive = true
 ```
 
-The safe defaults are:
+Manually authored manifests set category policies directly. Repository bootstrap starts with conservative defaults:
 
 - repository metadata/settings and configuration files: `managed`
 - security, rulesets, branch protection, Actions, environments, access, and integrations: `observe + sensitive`
 - collection pruning: disabled
 - visibility/archive changes: blocked unless high-impact changes are explicitly allowed
 
-To opt into a sensitive category, change only that category's disposition:
+To opt into a bootstrapped sensitive category, change only that category's disposition:
 
 ```toml
 [categories.actions.policy]
@@ -207,7 +232,7 @@ Transport or permission failures in one category are reported without pretending
 
 ## 6. Merge configuration pull requests
 
-Imported files never go directly to the default branch.
+Managed files never go directly to the default branch.
 
 Ward:
 
@@ -228,7 +253,7 @@ ward apply
 
 ## 7. Supply external values
 
-Secret values are never returned by GitHub. Imported names use environment references:
+Both setup paths use external references for write-only values. GitHub never returns secret values, so repository bootstrap creates those references automatically for imported names:
 
 ```toml
 [[categories.actions.secrets]]
@@ -255,27 +280,11 @@ Equivalent placeholders are generated for:
 
 Existing same-name secrets converge without rotation because GitHub cannot expose their value. New targets remain blocked until the external value is present.
 
-## What the import captures
+## GitHub coverage
 
-See the [README coverage matrix](../README.md#repository-coverage) for the full list. The snapshot includes General settings, security, rules and detailed branch protection, Actions, environments, access, integrations, labels, and binary-safe configuration files.
+See [GitHub Coverage](github-coverage.md) for the complete category matrix, configuration-file selection, coverage outcomes, and public-API boundaries.
 
 Inherited organization or enterprise resources remain stable references. Unsupported public-API settings and redacted values remain explicit coverage entries.
-
-## Manual setup
-
-If no suitable reference repository exists:
-
-```bash
-ward init
-```
-
-For a minimal scaffold without prompts:
-
-```bash
-ward init --non-interactive
-```
-
-Repository import is recommended because it begins with observable working state rather than recreating that state manually.
 
 ## Ongoing maintenance
 
@@ -289,12 +298,14 @@ ward doctor
 The normal lifecycle is:
 
 ```text
-import -> review policies and targets -> plan -> apply -> merge config PR -> plan -> apply deferred state
+create or bootstrap manifest -> review policies and targets -> plan -> apply
+-> merge config PR when present -> plan -> apply deferred state
 ```
 
 ## Next steps
 
 - [Configuration Reference](configuration.md)
+- [GitHub Coverage](github-coverage.md)
 - [Command Reference](commands.md)
 - [Architecture](architecture.md)
 - [CI Integration](ci-integration.md)

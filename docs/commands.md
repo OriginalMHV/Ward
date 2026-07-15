@@ -522,9 +522,14 @@ ward template dir
 
 ## `ward init`
 
-Create `ward.toml` from an existing repository, through the setup wizard, or as a minimal scaffold.
+Create `ward.toml` through the setup wizard, as a minimal scaffold, or by bootstrapping from an existing repository.
 
 ```bash
+# Manual setup
+ward init
+ward init --non-interactive
+
+# Repository bootstrap
 ward init --from acme/reference-service
 ward init --from https://github.com/acme/reference-service
 ward init --from acme/reference-service --target api-service --target worker-service
@@ -533,10 +538,6 @@ ward init --from acme/reference-service --strict
 ward init --from acme/reference-service --stdout
 ward init --from acme/reference-service --output configs/ward.toml
 ward init --from acme/reference-service --force
-
-# Manual alternatives
-ward init
-ward init --non-interactive
 ```
 
 | Flag | Default | Description |
@@ -552,7 +553,7 @@ ward init --non-interactive
 | `--exclude <GLOB>` | none | Exclude matching configuration files; repeatable |
 | `--strict` | `false` | Fail on permission-denied or unavailable source state |
 
-`--from` is the recommended setup path. Import is read-only and generates an explicit-only system. Without `--target`, it initially targets only the source repository.
+Manual setup and `--from` are equal entry points to the same Ward lifecycle. Use manual setup for deliberate policy authoring; use `--from` as a read-only shortcut when an existing repository is the best baseline. The generated manifest is a static snapshot. Without `--target`, it initially targets only the source repository.
 
 Without `--from`, the wizard walks through:
 
