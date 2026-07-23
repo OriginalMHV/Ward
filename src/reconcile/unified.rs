@@ -1207,7 +1207,7 @@ async fn apply_files(
             "Automated managed-file synchronization by Ward.",
             branch,
             default_branch,
-            &manifest.templates.reviewers,
+            &manifest.file_delivery.reviewers,
         )
         .await
     {
@@ -1845,7 +1845,7 @@ fn policy_of_integrations(category: &RepositoryIntegrationsCategoryV2) -> Catego
 const DETAIL_LIMIT: usize = 8;
 
 fn sync_branch(manifest: &Manifest) -> String {
-    let branch = manifest.templates.branch.trim();
+    let branch = manifest.file_delivery.branch.trim();
     if branch.is_empty() {
         "chore/ward-sync".to_owned()
     } else {
@@ -1854,7 +1854,7 @@ fn sync_branch(manifest: &Manifest) -> String {
 }
 
 fn commit_prefix(manifest: &Manifest) -> String {
-    let prefix = manifest.templates.commit_message_prefix.trim_end();
+    let prefix = manifest.file_delivery.commit_message_prefix.trim_end();
     if prefix.is_empty() {
         "chore: ".to_owned()
     } else {

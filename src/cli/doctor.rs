@@ -31,7 +31,6 @@ impl DoctorCommand {
             check_config(config_path),
             check_token(),
             check_gh_cli(),
-            check_templates_dir(),
             check_audit_log(),
         ];
 
@@ -40,7 +39,6 @@ impl DoctorCommand {
         if let Some(ref m) = manifest {
             checks.push(check_org(m));
             checks.push(check_systems(m));
-            checks.push(check_policies(m));
             checks.push(check_api_connectivity(config_path).await);
         }
 
@@ -173,26 +171,6 @@ fn check_gh_cli() -> Check {
     }
 }
 
-fn check_templates_dir() -> Check {
-    let dir = dirs_path("templates");
-    if dir.exists() {
-        let count = std::fs::read_dir(&dir)
-            .map(|entries| entries.filter_map(|e| e.ok()).count())
-            .unwrap_or(0);
-        Check {
-            name: "Custom templates",
-            status: CheckStatus::Pass,
-            detail: format!("{} custom templates in {}", count, dir.display()),
-        }
-    } else {
-        Check {
-            name: "Custom templates",
-            status: CheckStatus::Pass,
-            detail: "no custom templates directory (using built-ins only)".to_string(),
-        }
-    }
-}
-
 fn check_audit_log() -> Check {
     let log = dirs_path("audit.log");
     if log.exists() {
@@ -259,23 +237,6 @@ fn check_systems(manifest: &Manifest) -> Check {
             name: "Systems",
             status: CheckStatus::Pass,
             detail: format!("{count} defined ({})", names.join(", ")),
-        }
-    }
-}
-
-fn check_policies(manifest: &Manifest) -> Check {
-    let count = manifest.policies.len();
-    if count == 0 {
-        Check {
-            name: "Policies",
-            status: CheckStatus::Pass,
-            detail: "none defined (optional)".to_string(),
-        }
-    } else {
-        Check {
-            name: "Policies",
-            status: CheckStatus::Pass,
-            detail: format!("{count} rules configured"),
         }
     }
 }
@@ -468,13 +429,5 @@ mod tests {
         let check = check_systems(&manifest);
         assert!(matches!(check.status, CheckStatus::Pass));
         assert!(check.detail.contains("backend"));
-    }
-
-    #[test]
-    fn test_check_policies_none() {
-        let manifest = Manifest::default();
-        let check = check_policies(&manifest);
-        assert!(matches!(check.status, CheckStatus::Pass));
-        assert!(check.detail.contains("none"));
     }
 }

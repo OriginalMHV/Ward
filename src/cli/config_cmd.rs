@@ -21,9 +21,9 @@ pub enum ConfigAction {
     Edit,
     /// Show configuration file path
     Path,
-    /// Set a configuration value (dot notation: security.push_protection true)
+    /// Set a configuration value using dot notation
     Set {
-        /// Config key in dot notation (e.g., security.push_protection)
+        /// Config key in dot notation (e.g., file_delivery.branch)
         key: String,
         /// Value to set
         value: String,
@@ -61,9 +61,8 @@ const VALID_KEYS: &[(&str, ValueKind)] = &[
     ("branch_protection.required_linear_history", ValueKind::Bool),
     ("branch_protection.allow_force_pushes", ValueKind::Bool),
     ("branch_protection.allow_deletions", ValueKind::Bool),
-    ("templates.branch", ValueKind::Str),
-    ("templates.commit_message_prefix", ValueKind::Str),
-    ("templates.custom_dir", ValueKind::Str),
+    ("file_delivery.branch", ValueKind::Str),
+    ("file_delivery.commit_message_prefix", ValueKind::Str),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -502,7 +501,7 @@ dependabot_security_updates = true
 enabled = true
 required_approvals = 1
 
-[templates]
+[file_delivery]
 branch = "chore/ward-setup"
 commit_message_prefix = "chore: "
 

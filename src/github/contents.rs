@@ -121,18 +121,6 @@ pub struct FileContent {
     pub kind: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct DirectoryEntry {
-    pub name: String,
-    pub path: String,
-    #[serde(rename = "type")]
-    pub kind: String,
-    #[serde(default)]
-    pub sha: Option<String>,
-    #[serde(default)]
-    pub size: Option<u64>,
-}
-
 #[derive(Debug, Clone)]
 pub struct GitTreeEntry {
     pub path: String,
@@ -367,28 +355,6 @@ impl Client {
             .context("File content is not valid UTF-8")
     }
 
-    /// List a directory's entries from the Contents API. Returns `None` if the path doesn't exist.
-    pub async fn list_directory(
-        &self,
-        repo: &str,
-        path: &str,
-        branch: Option<&str>,
-    ) -> Result<Option<Vec<DirectoryEntry>>> {
-        let mut extra_segments = vec!["contents".to_owned()];
-        if !path.is_empty() {
-            extra_segments.extend(split_relative_git_path(path)?);
-        }
-        let mut query = Vec::new();
-        if let Some(branch) = branch {
-            query.push(("ref", branch));
-        }
-        let url = build_repo_api_url(&self.org, repo, &extra_segments, &query)?;
-
-        response::optional_json(self.get(&url).await?, "GET", &url)
-            .await
-            .context("Failed to parse directory listing response")
-    }
-
     /// Inspect the repository tree recursively using the Git Trees API.
     pub async fn read_git_tree_recursive(
         &self,
@@ -605,32 +571,6 @@ impl Client {
                 )
             }
         }
-    }
-
-    /// Look up a single entry in the recursive Git tree.
-    pub async fn get_git_tree_entry(
-        &self,
-        repo: &str,
-        path: &str,
-        branch: Option<&str>,
-    ) -> Result<Option<GitTreeEntry>> {
-        validate_relative_git_path(path)?;
-
-        let Some(tree) = self.list_git_tree_recursive(repo, branch).await? else {
-            return Ok(None);
-        };
-
-        if let Some(entry) = tree.entries.into_iter().find(|entry| entry.path == path) {
-            return Ok(Some(entry));
-        }
-
-        if tree.truncated {
-            anyhow::bail!(
-                "Could not safely resolve {path} in {repo} because the recursive tree response was truncated"
-            );
-        }
-
-        Ok(None)
     }
 
     /// Retrieve raw blob bytes using the Git Blobs API.

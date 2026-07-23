@@ -42,7 +42,7 @@ body:
     attributes:
       label: Ward Version
       description: Output of `ward --version`.
-      placeholder: "ward-cli 0.1.0"
+      placeholder: "ward-cli 0.4.2"
     validations:
       required: true
 

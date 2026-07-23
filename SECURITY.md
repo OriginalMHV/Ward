@@ -26,7 +26,7 @@ https://github.com/OriginalMHV/Ward/security/advisories/new
 - Token leakage (Ward handles GitHub tokens -- these must never be logged or exposed)
 - Arbitrary code execution
 - Path traversal or file access outside expected directories
-- Template injection via Tera templates
+- Unauthorized repository or organization mutations
 - Dependency vulnerabilities (check with `cargo deny check`)
 
 ## What Does Not Count

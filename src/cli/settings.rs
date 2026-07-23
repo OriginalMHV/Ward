@@ -7,10 +7,8 @@ use dialoguer::Confirm;
 
 use crate::config::Manifest;
 use crate::config::manifest::RepositorySettingsConfig;
-use crate::config::templates::load_templates_with_custom_dir;
 use crate::engine::audit_log::AuditLog;
 use crate::github::Client;
-use crate::github::commits::CommitFile;
 use crate::github::settings::RepoSettings;
 
 #[derive(Args)]
@@ -26,10 +24,6 @@ enum SettingsAction {
         /// Ruleset to apply (copilot-review)
         #[arg(long)]
         ruleset: Option<String>,
-
-        /// Deploy copilot review instructions
-        #[arg(long)]
-        copilot_instructions: bool,
     },
 
     /// Apply settings and rulesets
@@ -37,10 +31,6 @@ enum SettingsAction {
         /// Ruleset to apply (copilot-review)
         #[arg(long)]
         ruleset: Option<String>,
-
-        /// Deploy copilot review instructions
-        #[arg(long)]
-        copilot_instructions: bool,
 
         /// Skip confirmation prompt
         #[arg(long)]
@@ -60,59 +50,25 @@ impl SettingsCommand {
         repo: Option<&str>,
     ) -> Result<()> {
         match &self.action {
-            SettingsAction::Plan {
-                ruleset,
-                copilot_instructions,
-            } => {
-                plan(
-                    client,
-                    manifest,
-                    system,
-                    repo,
-                    ruleset.as_deref(),
-                    *copilot_instructions,
-                )
-                .await
+            SettingsAction::Plan { ruleset } => {
+                plan(client, manifest, system, repo, ruleset.as_deref()).await
             }
-            SettingsAction::Apply {
-                ruleset,
-                copilot_instructions,
-                yes,
-            } => {
+            SettingsAction::Apply { ruleset, yes } => {
                 crate::reconcile::unified::guard_legacy_mutation(
                     manifest,
                     crate::reconcile::unified::Category::Repository,
                     "settings apply",
                 )?;
-                apply(
-                    client,
-                    manifest,
-                    system,
-                    repo,
-                    ruleset.as_deref(),
-                    *copilot_instructions,
-                    *yes,
-                )
-                .await
+                apply(client, manifest, system, repo, ruleset.as_deref(), *yes).await
             }
             SettingsAction::Audit => audit(client, manifest, system, repo).await,
         }
     }
 }
 
-/// Detect if a repo is an operations/GitOps repo (vs application repo).
-fn is_ops_repo(repo_name: &str) -> bool {
-    repo_name.ends_with("-operation")
-        || repo_name.ends_with("-operations")
-        || repo_name.ends_with("-ops")
-        || repo_name.ends_with("-gitops")
-}
-
 struct RepoRulesetState {
     repo: String,
     has_copilot_review: bool,
-    has_instructions: bool,
-    is_ops: bool,
     repository_changes: Vec<RepositorySettingChange>,
 }
 
@@ -128,7 +84,6 @@ async fn scan_repo(
     repo: &str,
     desired_repository: Option<&RepositorySettingsConfig>,
     check_copilot_review: bool,
-    check_instructions: bool,
 ) -> Result<RepoRulesetState> {
     let has_copilot_review = if check_copilot_review {
         client
@@ -136,15 +91,6 @@ async fn scan_repo(
             .await?
             .iter()
             .any(|ruleset| ruleset.name == "Copilot Code Review")
-    } else {
-        true
-    };
-
-    let has_instructions = if check_instructions {
-        client
-            .get_file(repo, ".github/copilot-instructions.md", None)
-            .await?
-            .is_some()
     } else {
         true
     };
@@ -160,8 +106,6 @@ async fn scan_repo(
     Ok(RepoRulesetState {
         repo: repo.to_owned(),
         has_copilot_review,
-        has_instructions,
-        is_ops: is_ops_repo(repo),
         repository_changes,
     })
 }
@@ -401,14 +345,12 @@ async fn plan(
     system: Option<&str>,
     repo: Option<&str>,
     ruleset: Option<&str>,
-    copilot_instructions: bool,
 ) -> Result<()> {
     let repos = resolve_repos(client, manifest, system, repo).await?;
     let do_ruleset = ruleset.is_some();
-    let do_instructions = copilot_instructions;
-    if manifest.repository.is_none() && !do_ruleset && !do_instructions {
+    if manifest.repository.is_none() && !do_ruleset {
         anyhow::bail!(
-            "No [repository] settings configured. Use --ruleset or --copilot-instructions for Copilot setup."
+            "No [repository] settings configured. Use --ruleset for Copilot review setup."
         );
     }
 
@@ -421,19 +363,11 @@ async fn plan(
     println!();
 
     let mut ruleset_needed = 0;
-    let mut instructions_needed = 0;
     let mut repository_settings_needed = 0;
     let mut up_to_date = 0;
 
     for repo_name in &repos {
-        let state = scan_repo(
-            client,
-            repo_name,
-            manifest.repository.as_ref(),
-            do_ruleset,
-            do_instructions,
-        )
-        .await?;
+        let state = scan_repo(client, repo_name, manifest.repository.as_ref(), do_ruleset).await?;
         let mut changes: Vec<String> = state
             .repository_changes
             .iter()
@@ -453,15 +387,6 @@ async fn plan(
             ruleset_needed += 1;
         }
 
-        if do_instructions && !state.has_instructions {
-            changes.push(if state.is_ops {
-                "deploy copilot-instructions.md (ops)".to_owned()
-            } else {
-                "deploy copilot-instructions.md (app)".to_owned()
-            });
-            instructions_needed += 1;
-        }
-
         if changes.is_empty() {
             println!("  {} {}", style("[ok]").green(), style(repo_name).dim());
             up_to_date += 1;
@@ -475,14 +400,13 @@ async fn plan(
 
     println!();
     println!(
-        "  Summary: {} need repository settings, {} need ruleset, {} need instructions, {} up to date",
+        "  Summary: {} need repository settings, {} need ruleset, {} up to date",
         style(repository_settings_needed).yellow().bold(),
         style(ruleset_needed).yellow().bold(),
-        style(instructions_needed).yellow().bold(),
         style(up_to_date).green()
     );
 
-    if repository_settings_needed + ruleset_needed + instructions_needed > 0 {
+    if repository_settings_needed + ruleset_needed > 0 {
         println!(
             "\n  Run {} to apply.",
             style("ward settings apply").cyan().bold()
@@ -498,18 +422,15 @@ async fn apply(
     system: Option<&str>,
     repo: Option<&str>,
     ruleset: Option<&str>,
-    copilot_instructions: bool,
     yes: bool,
 ) -> Result<()> {
     let repos = resolve_repos(client, manifest, system, repo).await?;
     let do_ruleset = ruleset.is_some();
-    let do_instructions = copilot_instructions;
-    if manifest.repository.is_none() && !do_ruleset && !do_instructions {
+    if manifest.repository.is_none() && !do_ruleset {
         anyhow::bail!(
-            "No [repository] settings configured. Use --ruleset or --copilot-instructions for Copilot setup."
+            "No [repository] settings configured. Use --ruleset for Copilot review setup."
         );
     }
-    let branch_name = &manifest.templates.branch;
 
     println!();
     println!(
@@ -519,22 +440,13 @@ async fn apply(
     );
 
     // Scan all repos
-    let mut work: Vec<(RepoRulesetState, String)> = Vec::new();
+    let mut work: Vec<RepoRulesetState> = Vec::new();
     for repo_name in &repos {
-        let state = scan_repo(
-            client,
-            repo_name,
-            manifest.repository.as_ref(),
-            do_ruleset,
-            do_instructions,
-        )
-        .await?;
-        let r = client.get_repo(repo_name).await?;
-        let needs_work = !state.repository_changes.is_empty()
-            || (do_ruleset && !state.has_copilot_review)
-            || (do_instructions && !state.has_instructions);
+        let state = scan_repo(client, repo_name, manifest.repository.as_ref(), do_ruleset).await?;
+        let needs_work =
+            !state.repository_changes.is_empty() || (do_ruleset && !state.has_copilot_review);
         if needs_work {
-            work.push((state, r.default_branch));
+            work.push(state);
         }
     }
 
@@ -547,20 +459,13 @@ async fn apply(
         "\n  {} repos need changes:",
         style(work.len()).yellow().bold()
     );
-    for (state, _) in &work {
+    for state in &work {
         let mut actions = Vec::new();
         if !state.repository_changes.is_empty() {
             actions.push("repository settings");
         }
         if do_ruleset && !state.has_copilot_review {
             actions.push("ruleset");
-        }
-        if do_instructions && !state.has_instructions {
-            actions.push(if state.is_ops {
-                "instructions (ops)"
-            } else {
-                "instructions (app)"
-            });
         }
         println!(
             "  {} {} - {}",
@@ -583,17 +488,10 @@ async fn apply(
     }
 
     let audit_log = AuditLog::new()?;
-    let tera = load_templates_with_custom_dir(
-        manifest
-            .templates
-            .custom_dir
-            .as_ref()
-            .map(std::path::Path::new),
-    )?;
     let mut succeeded = 0usize;
     let mut failed: Vec<(String, String)> = Vec::new();
 
-    for (state, default_branch) in &work {
+    for state in &work {
         println!("  {} {} ...", style(">>").magenta(), state.repo);
 
         if !state.repository_changes.is_empty()
@@ -642,57 +540,6 @@ async fn apply(
             }
         }
 
-        // Deploy instructions
-        if do_instructions && !state.has_instructions {
-            let template_name = if state.is_ops {
-                "copilot-review/instructions-ops.md.tera"
-            } else {
-                "copilot-review/instructions-app.md.tera"
-            };
-
-            let ctx = tera::Context::new();
-            match tera.render(template_name, &ctx) {
-                Ok(rendered) => {
-                    match deploy_instructions(
-                        client,
-                        &state.repo,
-                        default_branch,
-                        branch_name,
-                        &rendered,
-                        &manifest.templates.reviewers,
-                        &manifest.templates.commit_message_prefix,
-                    )
-                    .await
-                    {
-                        Ok(pr_url) => {
-                            println!(
-                                "    {} Instructions PR: {}",
-                                style("[ok]").green(),
-                                style(&pr_url).cyan()
-                            );
-                            audit_log.log(
-                                &state.repo,
-                                "deploy_copilot_instructions",
-                                "success",
-                                false,
-                                true,
-                            )?;
-                        }
-                        Err(e) => {
-                            println!("    {} Instructions: {e}", style("[!!]").red());
-                            failed.push((state.repo.clone(), format!("instructions: {e}")));
-                            continue;
-                        }
-                    }
-                }
-                Err(e) => {
-                    println!("    {} Template render: {e}", style("[!!]").red());
-                    failed.push((state.repo.clone(), format!("template: {e}")));
-                    continue;
-                }
-            }
-        }
-
         succeeded += 1;
     }
 
@@ -724,50 +571,6 @@ async fn apply(
     Ok(())
 }
 
-async fn deploy_instructions(
-    client: &Client,
-    repo: &str,
-    default_branch: &str,
-    branch_name: &str,
-    content: &str,
-    reviewers: &[String],
-    commit_prefix: &str,
-) -> Result<String> {
-    client
-        .create_branch(repo, branch_name, default_branch)
-        .await?;
-
-    let files = vec![CommitFile {
-        path: ".github/copilot-instructions.md".to_owned(),
-        content: content.to_owned(),
-    }];
-
-    client
-        .create_commit(
-            repo,
-            branch_name,
-            &format!("{commit_prefix}add Copilot review instructions"),
-            &files,
-        )
-        .await?;
-
-    let pr = client
-        .create_pull_request(
-            repo,
-            &format!("{commit_prefix}add Copilot review instructions"),
-            "## Ward: Copilot review instructions\n\n\
-             Deploys `.github/copilot-instructions.md` for automatic Copilot code review.\n\n\
-             ---\n\
-             *Review the instructions, then merge.*",
-            branch_name,
-            default_branch,
-            reviewers,
-        )
-        .await?;
-
-    Ok(pr.html_url)
-}
-
 async fn audit(
     client: &Client,
     manifest: &Manifest,
@@ -788,19 +591,13 @@ async fn audit(
     use tabled::settings::{Alignment, Modify, Style};
 
     let mut builder = Builder::default();
-    builder.push_record([
-        "Repository",
-        "Type",
-        "Repo Settings",
-        "Review Rule",
-        "Instructions",
-    ]);
+    builder.push_record(["Repository", "Repo Settings", "Review Rule"]);
 
     let mut all_ok = 0;
     let mut issues = 0;
 
     for repo_name in &repos {
-        let state = scan_repo(client, repo_name, manifest.repository.as_ref(), true, true).await?;
+        let state = scan_repo(client, repo_name, manifest.repository.as_ref(), true).await?;
 
         let repository_icon = if state.repository_changes.is_empty() {
             format!("{}", style("[ok]").green())
@@ -812,29 +609,15 @@ async fn audit(
         } else {
             format!("{}", style("[!!]").red())
         };
-        let instr_icon = if state.has_instructions {
-            format!("{}", style("[ok]").green())
-        } else {
-            format!("{}", style("[!!]").red())
-        };
-        let repo_type = if state.is_ops { "ops" } else { "app" };
 
-        let ok = state.repository_changes.is_empty()
-            && state.has_copilot_review
-            && state.has_instructions;
+        let ok = state.repository_changes.is_empty() && state.has_copilot_review;
         if ok {
             all_ok += 1;
         } else {
             issues += 1;
         }
 
-        builder.push_record([
-            repo_name.as_str(),
-            repo_type,
-            &repository_icon,
-            &ruleset_icon,
-            &instr_icon,
-        ]);
+        builder.push_record([repo_name.as_str(), &repository_icon, &ruleset_icon]);
     }
 
     let table = builder
@@ -951,45 +734,5 @@ mod tests {
         let patch = repository_settings_patch(&desired);
         assert_eq!(patch["has_issues"], false);
         assert!(patch.get("topics").is_none());
-    }
-
-    #[test]
-    fn detect_ops_repo_by_operations_suffix() {
-        assert!(is_ops_repo("backend-user-service-operations"));
-    }
-
-    #[test]
-    fn detect_ops_repo_by_operation_singular() {
-        assert!(is_ops_repo("backend-user-service-operation"));
-    }
-
-    #[test]
-    fn detect_ops_repo_by_ops_suffix() {
-        assert!(is_ops_repo("frontend-app-ops"));
-    }
-
-    #[test]
-    fn detect_ops_repo_by_gitops_suffix() {
-        assert!(is_ops_repo("platform-gitops"));
-    }
-
-    #[test]
-    fn detect_ops_repo_with_operation_in_middle() {
-        assert!(!is_ops_repo("my-operation-manager"));
-    }
-
-    #[test]
-    fn detect_ops_repo_by_operation_suffix() {
-        assert!(is_ops_repo("my-service-operation"));
-    }
-
-    #[test]
-    fn regular_repo_not_ops() {
-        assert!(!is_ops_repo("backend-user-service"));
-    }
-
-    #[test]
-    fn regular_repo_with_similar_name() {
-        assert!(!is_ops_repo("backend-optimizer"));
     }
 }

@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use super::*;
 
 #[test]
@@ -25,7 +23,7 @@ fn parse_full_manifest() {
         push_protection = true
         dependabot_alerts = true
         dependabot_security_updates = false
-        [templates]
+        [file_delivery]
         branch = "feat/setup"
         reviewers = ["alice"]
         [[systems]]
@@ -38,8 +36,8 @@ fn parse_full_manifest() {
     assert!(!m.security.secret_scanning);
     assert!(m.security.push_protection);
     assert!(!m.security.dependabot_security_updates);
-    assert_eq!(m.templates.branch, "feat/setup");
-    assert_eq!(m.templates.reviewers, vec!["alice"]);
+    assert_eq!(m.file_delivery.branch, "feat/setup");
+    assert_eq!(m.file_delivery.reviewers, vec!["alice"]);
     assert_eq!(m.systems.len(), 1);
     assert_eq!(m.systems[0].id, "backend");
     assert_eq!(m.systems[0].exclude, vec!["ops", "infra"]);
@@ -200,23 +198,21 @@ fn branch_protection_full_parse() {
 }
 
 #[test]
-fn default_template_config_values() {
+fn default_file_delivery_config_values() {
     // derive(Default) gives empty strings/vecs, not the serde defaults
-    let tc = TemplateConfig::default();
-    assert_eq!(tc.branch, "");
-    assert_eq!(tc.commit_message_prefix, "");
-    assert!(tc.reviewers.is_empty());
-    assert!(tc.registries.is_empty());
+    let fd = FileDeliveryConfig::default();
+    assert_eq!(fd.branch, "");
+    assert_eq!(fd.commit_message_prefix, "");
+    assert!(fd.reviewers.is_empty());
 }
 
 #[test]
-fn serde_template_config_defaults() {
+fn serde_file_delivery_config_defaults() {
     // When deserialized with missing fields, serde uses the custom defaults
-    let tc: TemplateConfig = toml::from_str("").unwrap();
-    assert_eq!(tc.branch, "chore/ward-setup");
-    assert_eq!(tc.commit_message_prefix, "chore: ");
-    assert!(tc.reviewers.is_empty());
-    assert!(tc.registries.is_empty());
+    let fd: FileDeliveryConfig = toml::from_str("").unwrap();
+    assert_eq!(fd.branch, "chore/ward-setup");
+    assert_eq!(fd.commit_message_prefix, "chore: ");
+    assert!(fd.reviewers.is_empty());
 }
 
 #[test]
@@ -783,12 +779,10 @@ fn sample_manifest_for_v2() -> Manifest {
             topics: Some(vec!["managed".to_owned()]),
             ..RepositorySettingsConfig::default()
         }),
-        templates: TemplateConfig {
+        file_delivery: FileDeliveryConfig {
             branch: "chore/ward-sync".to_owned(),
             reviewers: Vec::new(),
             commit_message_prefix: "chore: ".to_owned(),
-            custom_dir: None,
-            registries: HashMap::new(),
         },
         branch_protection: BranchProtectionConfig::default(),
         rulesets: RulesetsConfig {
@@ -824,7 +818,6 @@ fn sample_manifest_for_v2() -> Manifest {
             path: ".github/workflows/ci.yml".to_owned(),
             content: "name: CI\n".to_owned(),
         }],
-        policies: Vec::new(),
         v2: ManifestV2State::default(),
     }
 }
@@ -1000,7 +993,7 @@ fn manifest_v2_round_trips_legacy_semantics_through_load() {
     );
     assert_eq!(loaded.files[0].path, ".github/workflows/ci.yml");
     assert_eq!(loaded.v2_schema().map(|schema| schema.version), Some(2));
-    assert!(loaded.v2_actions_category().is_some());
+    assert!(loaded.v2.categories.actions.as_ref().is_some());
 }
 
 fn full_manifest_with_v2_state() -> Manifest {
@@ -1305,9 +1298,9 @@ fn full_manifest_with_v2_state() -> Manifest {
                     value: "info".to_owned(),
                 }],
                 secrets: vec![SecretPlaceholderConfig {
-                    name: "NPM_TOKEN".to_owned(),
+                    name: "REGISTRY_TOKEN".to_owned(),
                     value_from: ExternalValueReference::Env {
-                        key: "WARD_NPM_TOKEN".to_owned(),
+                        key: "WARD_REGISTRY_TOKEN".to_owned(),
                     },
                 }],
                 dependabot_secrets: vec![SecretPlaceholderConfig {
@@ -1457,70 +1450,107 @@ fn manifest_v2_preserves_every_category_policy_coverage_and_provenance() {
     std::fs::remove_file(&path).unwrap();
 
     assert_eq!(rendered, rerendered);
-    assert_eq!(loaded.v2_provenance(), manifest.v2_provenance());
+    assert_eq!(
+        loaded.v2.provenance.as_ref(),
+        manifest.v2.provenance.as_ref()
+    );
     assert_eq!(loaded.v2_categories(), manifest.v2_categories());
-    assert_eq!(loaded.v2_coverage(), manifest.v2_coverage());
+    assert_eq!(loaded.v2.coverage, manifest.v2.coverage);
     assert_eq!(loaded.v2_schema(), manifest.v2_schema());
     assert_eq!(
         loaded
-            .v2_actions_category()
+            .v2
+            .categories
+            .actions
+            .as_ref()
             .and_then(|category| category.settings.as_ref())
             .and_then(|settings| settings.artifact_retention_days),
         Some(30)
     );
     assert_eq!(
         loaded
-            .v2_repository_category()
+            .v2
+            .categories
+            .repository
+            .as_ref()
             .and_then(|category| category.settings.as_ref())
             .and_then(|settings| settings.has_pull_requests),
         Some(true)
     );
     assert_eq!(
         loaded
-            .v2_repository_category()
+            .v2
+            .categories
+            .repository
+            .as_ref()
             .and_then(|category| category.settings.as_ref())
             .and_then(|settings| settings.use_squash_pr_title_as_default),
         Some(true)
     );
     assert_eq!(
-        loaded.v2_repository_category().unwrap().custom_properties[0].value,
+        loaded
+            .v2
+            .categories
+            .repository
+            .as_ref()
+            .unwrap()
+            .custom_properties[0]
+            .value,
         serde_json::json!(["party", "billing"])
     );
     assert_eq!(
         loaded
-            .v2_actions_category()
+            .v2
+            .categories
+            .actions
+            .as_ref()
             .and_then(|category| category.settings.as_ref())
             .and_then(|settings| settings.send_write_tokens_to_workflows),
         Some(false)
     );
     assert_eq!(
         loaded
-            .v2_actions_category()
+            .v2
+            .categories
+            .actions
+            .as_ref()
             .and_then(|category| category.settings.as_ref())
             .and_then(|settings| settings.oidc_use_default),
         Some(false)
     );
     assert_eq!(
         loaded
-            .v2_actions_category()
+            .v2
+            .categories
+            .actions
+            .as_ref()
             .map(|category| category.dependabot_secrets.len()),
         Some(1)
     );
     assert_eq!(
         loaded
-            .v2_actions_category()
+            .v2
+            .categories
+            .actions
+            .as_ref()
             .map(|category| category.codespaces_secrets.len()),
         Some(1)
     );
     assert_eq!(
         loaded
-            .v2_security_category()
+            .v2
+            .categories
+            .security
+            .as_ref()
             .and_then(|category| category.secret_scanning_delegated_bypass),
         Some(true)
     );
     assert_eq!(
         loaded
-            .v2_security_category()
+            .v2
+            .categories
+            .security
+            .as_ref()
             .and_then(|category| {
                 category
                     .secret_scanning_delegated_bypass_options
@@ -1532,14 +1562,20 @@ fn manifest_v2_preserves_every_category_policy_coverage_and_provenance() {
     );
     assert_eq!(
         loaded
-            .v2_branch_protection_category()
+            .v2
+            .categories
+            .branch_protection
+            .as_ref()
             .and_then(|category| category.default_branch_detailed.as_ref())
             .map(|branch| branch.status_checks.len()),
         Some(2)
     );
     assert_eq!(
         loaded
-            .v2_branch_protection_category()
+            .v2
+            .categories
+            .branch_protection
+            .as_ref()
             .unwrap()
             .protected_branches[0]
             .required_reviewers
@@ -1558,20 +1594,23 @@ fn manifest_v2_preserves_every_category_policy_coverage_and_provenance() {
         Some("Organization")
     );
     assert_eq!(
-        loaded.v2_environments_category().unwrap().entries[0].protection_apps[0].name,
+        loaded.v2.categories.environments.as_ref().unwrap().entries[0].protection_apps[0].name,
         "change-freeze"
     );
     assert_eq!(
-        loaded.v2_access_category().unwrap().collaborators[0].permission,
+        loaded.v2.categories.access.as_ref().unwrap().collaborators[0].permission,
         "push"
     );
     assert_eq!(
-        loaded.v2_integrations_category().unwrap().labels[0].default,
+        loaded.v2.categories.integrations.as_ref().unwrap().labels[0].default,
         Some(false)
     );
     assert_eq!(
         loaded
-            .v2_integrations_category()
+            .v2
+            .categories
+            .integrations
+            .as_ref()
             .unwrap()
             .pages
             .as_ref()
@@ -1685,11 +1724,18 @@ fn manifest_v2_repository_settings_and_custom_property_arrays_round_trip() {
         Some(true)
     );
     assert_eq!(
-        manifest.v2_repository_category().unwrap().custom_properties[0].value,
+        manifest
+            .v2
+            .categories
+            .repository
+            .as_ref()
+            .unwrap()
+            .custom_properties[0]
+            .value,
         serde_json::json!(["platform", "billing"])
     );
     assert_eq!(
-        manifest.v2_integrations_category().unwrap().labels[0].default,
+        manifest.v2.categories.integrations.as_ref().unwrap().labels[0].default,
         Some(true)
     );
 
@@ -1804,7 +1850,10 @@ fn checked_in_example_manifest_is_valid_v2_configuration() {
     );
     assert_eq!(
         manifest
-            .v2_actions_category()
+            .v2
+            .categories
+            .actions
+            .as_ref()
             .and_then(|category| category.secrets.first())
             .map(|secret| secret.name.as_str()),
         Some("DEPLOY_TOKEN")

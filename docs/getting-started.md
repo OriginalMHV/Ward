@@ -237,7 +237,7 @@ Managed files never go directly to the default branch.
 Ward:
 
 1. plans the target's default branch
-2. creates or reuses `templates.branch`
+2. creates or reuses `file_delivery.branch`
 3. re-plans against that branch
 4. creates one atomic Git commit
 5. creates or reuses an open pull request

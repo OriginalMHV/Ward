@@ -135,21 +135,15 @@ Audited fields: Required PR Reviews, Required Approvals, Dismiss Stale Reviews, 
 
 ## `ward commit`
 
-Synchronize imported files or deploy a rendered template without cloning. Uses the Git Trees API for atomic multi-file commits.
+Synchronize managed files without cloning. Uses the Git Trees API for atomic multi-file commits.
 
 ### `ward commit plan`
 
 Preview what files would be committed.
 
 ```bash
-# Preview all [[files]] imported from a reference repository
 ward commit plan --system backend
 ward commit plan --repo my-service
-
-# Preview one built-in template
-ward commit plan --template dependabot --system backend
-ward commit plan --template codeql --system backend
-ward commit plan --template dependency-submission --repo my-service
 ```
 
 ### `ward commit apply`
@@ -157,24 +151,15 @@ ward commit plan --template dependency-submission --repo my-service
 Commit changed files and create pull requests.
 
 ```bash
-# Commit all changed [[files]] in one PR per target repository
 ward commit apply --system backend
 ward commit apply --repo my-service --yes
-
-# Render and commit one built-in template
-ward commit apply --template dependabot --system backend
-ward commit apply --template codeql --system backend --yes
-ward commit apply --template dependency-submission --repo my-service --yes
 ```
 
-| Flag | Type | Required | Description |
-|------|------|----------|-------------|
-| `--template` | string | no | Template name to deploy; omit to synchronize `[[files]]` |
-| `--yes` | bool | -- | Skip confirmation prompt |
+| Flag | Description |
+|------|-------------|
+| `--yes` | Skip confirmation prompt |
 
-When `--template` is omitted, Ward compares every `[[files]]` entry in `ward.toml`, commits all changed files together, and opens one pull request per target repository. Target-only files are not deleted.
-
-Built-in templates: `dependabot`, `codeql`, `dependency-submission`. Ward auto-detects Gradle vs npm projects and selects the appropriate template variant. See [Templates](templates.md) for details.
+Ward compares every `[[files]]` entry in `ward.toml`, commits all changed files together, and opens one pull request per target repository. Target-only files are not deleted.
 
 ---
 
@@ -190,9 +175,8 @@ Preview what settings would change.
 # Plan repository settings and topics from [repository]
 ward settings plan --system backend
 
-# Add explicit Copilot setup checks
+# Include the optional Copilot review ruleset
 ward settings plan --ruleset copilot-review --system backend
-ward settings plan --copilot-instructions --system backend
 ```
 
 ### `ward settings apply`
@@ -203,33 +187,27 @@ Apply settings and rulesets to repositories.
 # Apply repository settings and topics from [repository]
 ward settings apply --system backend
 
-# Optionally apply Copilot setup in the same command
+# Optionally apply the Copilot review ruleset
 ward settings apply --ruleset copilot-review --system backend
-ward settings apply --copilot-instructions --system backend
-ward settings apply --ruleset copilot-review --copilot-instructions --system backend --yes
-ward settings apply --copilot-instructions --repo my-service --yes
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--ruleset <NAME>` | Ruleset to apply (e.g., `copilot-review`) |
-| `--copilot-instructions` | Deploy `.github/copilot-instructions.md` |
 | `--yes` | Skip confirmation prompt |
 
-Without Copilot flags, `plan` and `apply` manage only the fields explicitly configured under `[repository]`, including feature toggles, merge policies and commit-message defaults, auto-merge, branch cleanup, update-branch support, web commit signoff, and topics.
-
-Ward auto-detects whether a repo is an application or operations repo (by suffix: `-operation`, `-operations`, `-ops`, `-gitops`) and deploys the appropriate instructions template.
+Without `--ruleset`, `plan` and `apply` manage only the fields explicitly configured under `[repository]`, including feature toggles, merge policies and commit-message defaults, auto-merge, branch cleanup, update-branch support, web commit signoff, and topics.
 
 ### `ward settings audit`
 
-Report current repository-settings compliance plus Copilot review ruleset and instructions state.
+Report current repository-settings compliance plus Copilot review ruleset state.
 
 ```bash
 ward settings audit --system backend
 ward settings audit --repo my-service
 ```
 
-Shows per-repo: repository settings compliance, Copilot Code Review ruleset present, copilot-instructions.md present, and ops vs app classification.
+Shows per-repo repository settings compliance and whether the Copilot Code Review ruleset is present.
 
 ---
 
@@ -345,34 +323,9 @@ ward teams audit --system backend
 
 ---
 
-## `ward rollback`
-
-Reverse previously applied changes using the audit log.
-
-```bash
-ward rollback --last 10                         # show recent audit entries
-ward rollback --last 5 --dry-run                # preview what would be reversed
-ward rollback --last 5 --yes                    # reverse last 5 changes
-ward rollback --repo my-service --last 3        # scoped to one repo
-ward rollback --repo my-service --last 3 --yes  # scoped + skip prompt
-```
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--last` | integer | `10` | Number of recent audit entries to consider |
-| `--repo` | string | -- | Filter to a specific repository |
-| `--dry-run` | bool | -- | Show what would be reversed without applying |
-| `--yes` | bool | -- | Skip confirmation prompt |
-
-Reversible actions: `set_secret_scanning`, `set_push_protection`, `set_secret_scanning_ai_detection`.
-
-Not reversible (skipped): `enable_dependabot_alerts`, `enable_dependabot_security_updates`, `create_copilot_review_ruleset`, `deploy_copilot_instructions`, `update_branch_protection`.
-
----
-
 ## `ward audit`
 
-Full compliance audit with version inventory, alert counts, security posture, and dependency graph / SBOM availability.
+Full compliance audit with alert counts, security posture, and dependency graph / SBOM availability.
 
 ```bash
 ward audit --system backend
@@ -387,7 +340,7 @@ ward audit --system backend --format table
 
 Use the global `--system <ID>` or `--repo <NAME>` scope flags to choose the repositories to audit.
 
-Per-repo data: repository name, system ID when auditing a system, project type, language, detected runtime/framework metadata across supported ecosystems (for example Java, Node, .NET, Go, Rust, Spring Boot, or Next.js when Ward can infer them), security feature state, key config files present (such as dependabot and codeql), rulesets, copilot instructions, alert counts by severity (critical, high, medium, low), and a `dependency_graph` section with:
+Per-repo data includes repository identity, security feature state, key GitHub configuration files, Copilot review state, alert counts by severity, and a `dependency_graph` section with:
 
 - status: `available`, `empty`, `unavailable`, or `unknown`
 - reason: human-readable explanation of the SBOM export result
@@ -435,9 +388,8 @@ ward config set security.push_protection true
 ward config set security.codeql_advanced_setup false
 ward config set branch_protection.required_approvals 2
 ward config set branch_protection.dismiss_stale_reviews true
-ward config set templates.branch "chore/ward-update"
-ward config set templates.commit_message_prefix "ci: "
-ward config set templates.custom_dir "~/.ward/templates"
+ward config set file_delivery.branch "chore/ward-update"
+ward config set file_delivery.commit_message_prefix "ci: "
 ```
 
 Valid key paths:
@@ -447,7 +399,7 @@ Valid key paths:
 | `org.` | `name` |
 | `security.` | `secret_scanning`, `secret_scanning_ai_detection`, `push_protection`, `dependabot_alerts`, `dependabot_security_updates`, `codeql_advanced_setup` |
 | `branch_protection.` | `enabled`, `required_approvals`, `dismiss_stale_reviews`, `require_code_owner_reviews`, `require_status_checks`, `strict_status_checks`, `enforce_admins`, `required_linear_history`, `allow_force_pushes`, `allow_deletions` |
-| `templates.` | `branch`, `commit_message_prefix`, `custom_dir` |
+| `file_delivery.` | `branch`, `commit_message_prefix` |
 
 ### `ward config add-system`
 
@@ -467,58 +419,6 @@ Remove a system by ID.
 ward config remove-system backend
 ward config remove-system backend --yes
 ```
-
----
-
-## `ward template`
-
-Manage workflow templates (built-in and custom). See [Templates](templates.md) for full documentation.
-
-### `ward template list`
-
-List all available templates with their source (built-in, custom, override).
-
-```bash
-ward template list
-```
-
-### `ward template show`
-
-View the content of a template.
-
-```bash
-ward template show codeql/gradle.yml.tera
-ward template show dependabot/npm.yml.tera
-```
-
-### `ward template export`
-
-Export built-in templates to the custom templates directory for customization.
-
-```bash
-ward template export                              # export all built-ins
-ward template export dependabot/gradle.yml.tera   # export a single template
-```
-
-Templates are exported to `~/.ward/templates/`.
-
-### `ward template create`
-
-Create a new custom template with a starter scaffold.
-
-```bash
-ward template create my-team/custom-workflow.yml.tera
-```
-
-### `ward template dir`
-
-Show the custom templates directory path. Creates the directory if it doesn't exist.
-
-```bash
-ward template dir
-```
-
----
 
 ## `ward init`
 
@@ -562,7 +462,7 @@ Without `--from`, the wizard walks through:
 3. **Security settings** -- prompts for each security feature
 4. **Branch protection** -- enable and configure protection rules
 5. **Systems discovery** -- scans repos and auto-detects name prefixes (requires at least 2 repos per prefix)
-6. **Templates** -- branch name, reviewers, commit prefix
+6. **File delivery** -- branch name, reviewers, commit prefix
 
 ---
 
@@ -610,7 +510,7 @@ Collector failures are persisted as `[[coverage]]` entries unless `--strict` is 
 
 ## `ward doctor`
 
-Diagnose your Ward setup. Checks configuration, authentication, GitHub CLI availability, template directories, audit log state, and API connectivity. Useful after initial setup or when something feels off.
+Diagnose your Ward setup. Checks configuration, authentication, GitHub CLI availability, audit log state, and API connectivity. Useful after initial setup or when something feels off.
 
 ```bash
 ward doctor
@@ -624,11 +524,9 @@ Doctor runs **before** loading the full manifest, so it can diagnose a missing o
 | Configuration | `ward.toml` exists, is valid TOML, and parses correctly |
 | GitHub token | Found via `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token` |
 | GitHub CLI | `gh` is installed, shows version |
-| Custom templates | `~/.ward/templates/` directory exists, counts templates |
 | Audit log | `~/.ward/audit.log` exists, shows size, warns if > 10 MB |
 | Organization | Org name is configured and non-empty |
 | Systems | Lists defined systems and their IDs |
-| Policies | Counts defined policy rules |
 | API connectivity | Authenticates to GitHub, shows rate limit remaining, verifies org access |
 
 Example output:
@@ -640,14 +538,12 @@ Ward Doctor
   [ok] Configuration       ward.toml found and valid
   [ok] GitHub token        gho_pb7r... via gh auth token
   [ok] GitHub CLI          gh version 2.87.3 (2026-02-23)
-  [ok] Custom templates    0 custom templates in ~/.ward/templates
   [ok] Audit log           not yet created (will be on first apply)
   [ok] Organization        MyOrg
   [ok] Systems             3 defined (backend, frontend, infra)
-  [ok] Policies            none defined (optional)
   [ok] API connectivity    authenticated to MyOrg (rate limit: 4993 remaining)
 
-  9 passed, 0 warnings, 0 errors
+  7 passed, 0 warnings, 0 errors
 
   Everything looks good.
 ```
@@ -704,40 +600,6 @@ ward apply --system backend --json --yes
 Managed files are committed to the configured Ward branch and opened as a pull
 request. Workflow state, Pages, rulesets, and branch-protection changes that
 depend on that pull request are reported as deferred until it merges.
-
----
-
-## `ward policy`
-
-Policy engine for defining and enforcing org-wide rules. Think OPA-lite for GitHub.
-
-### `ward policy list`
-
-List all configured policies from `ward.toml`.
-
-```bash
-ward policy list
-ward policy list --json
-```
-
-### `ward policy check`
-
-Check all repos against configured policies.
-
-```bash
-ward policy check
-ward policy check --system backend
-ward policy check --repo my-service
-ward policy check --json
-```
-
-Exit codes:
-- `0` -- all repos comply with all policies
-- `1` -- at least one "error" severity violation found
-
-Policies are defined in `ward.toml` as `[[policies]]` entries. See [Configuration](configuration.md#policies) for the policy rule syntax.
-
----
 
 ## `ward completions`
 

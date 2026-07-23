@@ -22,13 +22,13 @@ Requires Rust >= 1.85 and a GitHub token for integration tests.
 ## Before Submitting
 
 ```bash
-cargo fmt
-cargo clippy --tests -- -D warnings
-cargo test
+cargo fmt -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test --all-targets
 cargo deny check
 ```
 
-All 250+ tests must pass. `cargo deny check` validates license and advisory compliance.
+All checks must pass. `cargo deny check` validates license and advisory compliance.
 
 For a deeper understanding of how Ward is structured, see the [Architecture](docs/architecture.md) guide.
 
@@ -57,7 +57,6 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 | `src/cli/` | Command definitions and handlers |
 | `src/config/` | Configuration parsing and types |
 | `src/github/` | GitHub API client and types |
-| `templates/` | Built-in workflow templates (Tera) |
 | `tests/` | Integration and unit tests |
 
 ## Questions?

@@ -831,7 +831,7 @@ fn parse_commit_command(args: &[&str]) -> (CommitCommand, Option<String>, Option
 }
 
 #[tokio::test]
-async fn commit_apply_template_is_blocked_by_v2_files_guard() {
+async fn commit_apply_is_blocked_by_v2_files_guard() {
     let mut manifest = Manifest::default();
     manifest.org.name = "test-org".to_owned();
     manifest.v2.schema = Some(ManifestSchema::v2());
@@ -842,16 +842,8 @@ async fn commit_apply_template_is_blocked_by_v2_files_guard() {
         entries: Vec::new(),
     });
 
-    let (command, system, repo) = parse_commit_command(&[
-        "ward",
-        "commit",
-        "apply",
-        "--yes",
-        "--repo",
-        "target",
-        "--template",
-        "dependabot",
-    ]);
+    let (command, system, repo) =
+        parse_commit_command(&["ward", "commit", "apply", "--yes", "--repo", "target"]);
 
     // The guard runs before any HTTP call, so the client is never contacted.
     let client = Client::new_for_test("test-org", "http://127.0.0.1:0");
@@ -924,7 +916,7 @@ async fn commit_apply_managed_files_returns_error_and_reports_all_failures() {
 
     let mut manifest = Manifest::default();
     manifest.org.name = "test-org".to_owned();
-    manifest.templates.branch = "chore/ward-sync".to_owned();
+    manifest.file_delivery.branch = "chore/ward-sync".to_owned();
     manifest.files = vec![ManagedFile {
         path: ".github/managed.yml".to_owned(),
         content: "version: 1\n".to_owned(),

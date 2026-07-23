@@ -98,11 +98,6 @@ pub struct SecurityState {
     pub push_protection: bool,
 }
 
-#[derive(Debug, Deserialize)]
-struct RepositoryIdResponse {
-    id: u64,
-}
-
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct RepositorySecurityBaseline {
     #[serde(default)]
@@ -153,14 +148,6 @@ impl Client {
         response::expect_json(self.get(&path).await?, "GET", &path)
             .await
             .context("Failed to parse repository security baseline response")
-    }
-
-    pub async fn get_repository_security_and_analysis(
-        &self,
-        repo: &str,
-    ) -> Result<Option<SecurityAndAnalysisState>> {
-        self.get_repository_security_and_analysis_with_repo_data(repo, None)
-            .await
     }
 
     pub async fn get_repository_security_and_analysis_with_repo_data(
@@ -216,14 +203,6 @@ impl Client {
         }
     }
 
-    pub async fn get_private_vulnerability_reporting_status(&self, repo: &str) -> Result<bool> {
-        Ok(matches!(
-            self.read_private_vulnerability_reporting_status(repo)
-                .await?,
-            ReadOutcome::Available(true)
-        ))
-    }
-
     pub async fn set_private_vulnerability_reporting(
         &self,
         repo: &str,
@@ -246,13 +225,6 @@ impl Client {
         classify_read(self.get(&path).await?, "GET", &path, false)
             .await
             .context("Failed to parse CodeQL default setup response")
-    }
-
-    pub async fn get_codeql_default_setup(
-        &self,
-        repo: &str,
-    ) -> Result<Option<CodeqlDefaultSetupState>> {
-        Ok(self.read_codeql_default_setup(repo).await?.available())
     }
 
     pub async fn update_codeql_default_setup(
@@ -289,16 +261,6 @@ impl Client {
             .context("Failed to parse repository code security configuration response")
     }
 
-    pub async fn get_repository_code_security_configuration(
-        &self,
-        repo: &str,
-    ) -> Result<Option<RepositoryCodeSecurityConfiguration>> {
-        Ok(self
-            .read_repository_code_security_configuration(repo)
-            .await?
-            .available())
-    }
-
     pub async fn attach_code_security_configuration(
         &self,
         configuration_id: u64,
@@ -329,16 +291,6 @@ impl Client {
             .await
             .with_context(|| format!("DELETE {url} failed"))?;
         response::expect_empty(response, "DELETE", &path).await
-    }
-
-    pub async fn get_repository_numeric_id(&self, repo: &str) -> Result<u64> {
-        let path = format!("/repos/{}/{repo}", self.org);
-        Ok(
-            response::expect_json::<RepositoryIdResponse>(self.get(&path).await?, "GET", &path)
-                .await
-                .context("Failed to parse repository id response")?
-                .id,
-        )
     }
 
     /// Read the current security state of a repository.

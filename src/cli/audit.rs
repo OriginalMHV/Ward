@@ -2,12 +2,9 @@ use anyhow::Result;
 use clap::Args;
 use console::style;
 use serde::Serialize;
-use serde_json::Value;
 
 use crate::config::Manifest;
-use crate::detection::versions;
 use crate::github::Client;
-use crate::github::contents::DirectoryEntry;
 use crate::github::dependency_graph::{DependencyGraphAudit, DependencyGraphStatus};
 use crate::github::repos::Repository;
 
@@ -30,32 +27,11 @@ struct RepoAudit {
     name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     system_id: Option<String>,
-    project_type: String,
-    language: Option<String>,
     description: Option<String>,
     default_branch: String,
-    versions: VersionInfo,
     security: SecurityAudit,
     dependency_graph: DependencyGraphAudit,
     settings: SettingsAudit,
-}
-
-#[derive(Debug, Default, Serialize)]
-struct VersionInfo {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    java: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    node: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    dotnet: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    go: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    rust: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    kotlin: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    frameworks: Vec<String>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -160,7 +136,6 @@ async fn audit_repo(
     let security_state = client
         .get_security_state_with_repo_data(repo, repo_info.security_and_analysis.as_ref())
         .await?;
-    let (project_type, version_info) = detect_project_metadata(client, repo, repo_info).await?;
 
     let has_dependabot_config = client
         .get_file(repo, ".github/dependabot.yml", None)
@@ -184,11 +159,8 @@ async fn audit_repo(
     Ok(RepoAudit {
         name: repo.to_owned(),
         system_id: system_id.map(str::to_owned),
-        project_type,
-        language: repo_info.language.clone(),
         description: repo_info.description.clone(),
         default_branch: repo_info.default_branch.clone(),
-        versions: version_info,
         security: SecurityAudit {
             dependabot_alerts: security_state.dependabot_alerts,
             dependabot_security_updates: security_state.dependabot_security_updates,
@@ -205,171 +177,6 @@ async fn audit_repo(
             has_copilot_instructions,
         },
     })
-}
-
-async fn detect_project_metadata(
-    client: &Client,
-    repo: &str,
-    repo_info: &Repository,
-) -> Result<(String, VersionInfo)> {
-    let root_entries = client
-        .list_directory(repo, "", None)
-        .await?
-        .unwrap_or_default();
-
-    if has_root_entry(&root_entries, "build.gradle.kts") {
-        return Ok((
-            "gradle".to_owned(),
-            detect_gradle_metadata(client, repo, "build.gradle.kts").await?,
-        ));
-    }
-
-    if has_root_entry(&root_entries, "build.gradle") {
-        return Ok((
-            "gradle".to_owned(),
-            detect_gradle_metadata(client, repo, "build.gradle").await?,
-        ));
-    }
-
-    if has_dotnet_files(&root_entries)
-        || matches!(repo_info.language.as_deref(), Some("C#") | Some("F#"))
-    {
-        return Ok((
-            "dotnet".to_owned(),
-            detect_dotnet_metadata(client, repo, &root_entries).await?,
-        ));
-    }
-
-    if has_root_entry(&root_entries, "package.json") {
-        return Ok(("npm".to_owned(), detect_npm_metadata(client, repo).await?));
-    }
-
-    if has_root_entry(&root_entries, "go.mod") {
-        return Ok(("go".to_owned(), detect_go_metadata(client, repo).await?));
-    }
-
-    if has_root_entry(&root_entries, "Cargo.toml")
-        || has_root_entry(&root_entries, "rust-toolchain.toml")
-        || has_root_entry(&root_entries, "rust-toolchain")
-    {
-        return Ok((
-            "cargo".to_owned(),
-            detect_cargo_metadata(client, repo, &root_entries).await?,
-        ));
-    }
-
-    Ok(("unknown".to_owned(), VersionInfo::default()))
-}
-
-fn has_root_entry(entries: &[DirectoryEntry], name: &str) -> bool {
-    entries.iter().any(|entry| entry.name == name)
-}
-
-fn has_dotnet_files(entries: &[DirectoryEntry]) -> bool {
-    has_root_entry(entries, "global.json")
-        || entries
-            .iter()
-            .any(|entry| entry.name.ends_with(".csproj") || entry.name.ends_with(".sln"))
-}
-
-async fn detect_gradle_metadata(client: &Client, repo: &str, path: &str) -> Result<VersionInfo> {
-    let mut version_info = VersionInfo::default();
-    if let Some(content) = client.get_file(repo, path, None).await? {
-        let text = Client::decode_content(&content).unwrap_or_default();
-        if let Some(v) = versions::extract_java_version(&text) {
-            version_info.java = Some(v.to_string());
-        }
-        if let Some(spring_boot) = extract_spring_boot_version(&text) {
-            version_info
-                .frameworks
-                .push(format!("spring-boot {spring_boot}"));
-        } else if text.contains("org.springframework.boot") {
-            version_info.frameworks.push("spring-boot".to_owned());
-        }
-        if text.contains("kotlin") {
-            version_info.kotlin = Some("detected".to_owned());
-        }
-    }
-    Ok(version_info)
-}
-
-async fn detect_npm_metadata(client: &Client, repo: &str) -> Result<VersionInfo> {
-    let mut version_info = VersionInfo::default();
-    if let Some(content) = client.get_file(repo, "package.json", None).await? {
-        let text = Client::decode_content(&content).unwrap_or_default();
-        version_info.node = versions::extract_node_version(&text);
-        if let Some(next_version) = extract_package_json_dependency_version(&text, "next") {
-            version_info
-                .frameworks
-                .push(format!("next.js {next_version}"));
-        }
-    }
-    Ok(version_info)
-}
-
-async fn detect_dotnet_metadata(
-    client: &Client,
-    repo: &str,
-    root_entries: &[DirectoryEntry],
-) -> Result<VersionInfo> {
-    let mut version_info = VersionInfo::default();
-
-    if let Some(content) = client.get_file(repo, "global.json", None).await? {
-        let text = Client::decode_content(&content).unwrap_or_default();
-        version_info.dotnet = extract_dotnet_sdk_version(&text);
-    }
-
-    if version_info.dotnet.is_none()
-        && let Some(project_path) = root_entries
-            .iter()
-            .find(|entry| entry.name.ends_with(".csproj"))
-            .map(|entry| entry.path.as_str())
-        && let Some(content) = client.get_file(repo, project_path, None).await?
-    {
-        let text = Client::decode_content(&content).unwrap_or_default();
-        version_info.dotnet = extract_target_framework(&text);
-    }
-
-    Ok(version_info)
-}
-
-async fn detect_go_metadata(client: &Client, repo: &str) -> Result<VersionInfo> {
-    let mut version_info = VersionInfo::default();
-    if let Some(content) = client.get_file(repo, "go.mod", None).await? {
-        let text = Client::decode_content(&content).unwrap_or_default();
-        version_info.go = extract_go_version(&text);
-    }
-    Ok(version_info)
-}
-
-async fn detect_cargo_metadata(
-    client: &Client,
-    repo: &str,
-    root_entries: &[DirectoryEntry],
-) -> Result<VersionInfo> {
-    let mut version_info = VersionInfo::default();
-
-    if let Some(content) = client.get_file(repo, "rust-toolchain.toml", None).await? {
-        let text = Client::decode_content(&content).unwrap_or_default();
-        version_info.rust = extract_rust_toolchain_version(&text);
-    }
-
-    if version_info.rust.is_none()
-        && let Some(content) = client.get_file(repo, "rust-toolchain", None).await?
-    {
-        let text = Client::decode_content(&content).unwrap_or_default();
-        version_info.rust = extract_plain_toolchain(&text);
-    }
-
-    if version_info.rust.is_none()
-        && has_root_entry(root_entries, "Cargo.toml")
-        && let Some(content) = client.get_file(repo, "Cargo.toml", None).await?
-    {
-        let text = Client::decode_content(&content).unwrap_or_default();
-        version_info.rust = extract_rust_version_from_cargo(&text);
-    }
-
-    Ok(version_info)
 }
 
 async fn get_alert_counts(client: &Client, repo: &str) -> Result<AlertCounts> {
@@ -426,119 +233,6 @@ async fn get_alert_counts(client: &Client, repo: &str) -> Result<AlertCounts> {
     Ok(counts)
 }
 
-fn extract_spring_boot_version(content: &str) -> Option<String> {
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.contains("org.springframework.boot") && trimmed.contains("version") {
-            return extract_quoted_version(trimmed);
-        }
-        if trimmed.contains("springBootVersion") {
-            return extract_quoted_version(trimmed);
-        }
-    }
-    None
-}
-
-fn extract_package_json_dependency_version(content: &str, package: &str) -> Option<String> {
-    let package_json: Value = serde_json::from_str(content).ok()?;
-    for key in ["dependencies", "devDependencies", "peerDependencies"] {
-        if let Some(version) = package_json
-            .get(key)
-            .and_then(|deps| deps.get(package))
-            .and_then(Value::as_str)
-        {
-            return Some(version.to_owned());
-        }
-    }
-    None
-}
-
-fn extract_dotnet_sdk_version(content: &str) -> Option<String> {
-    let global_json: Value = serde_json::from_str(content).ok()?;
-    global_json
-        .get("sdk")
-        .and_then(|sdk| sdk.get("version"))
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-}
-
-fn extract_target_framework(content: &str) -> Option<String> {
-    extract_xml_tag(content, "TargetFramework").or_else(|| {
-        extract_xml_tag(content, "TargetFrameworks").and_then(|frameworks| {
-            frameworks
-                .split(';')
-                .next()
-                .map(str::trim)
-                .map(str::to_owned)
-        })
-    })
-}
-
-fn extract_go_version(content: &str) -> Option<String> {
-    content.lines().map(str::trim).find_map(|line| {
-        line.strip_prefix("go ")
-            .map(|version| version.trim().to_owned())
-    })
-}
-
-fn extract_rust_toolchain_version(content: &str) -> Option<String> {
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("channel") {
-            return extract_quoted_version(trimmed);
-        }
-    }
-    None
-}
-
-fn extract_plain_toolchain(content: &str) -> Option<String> {
-    content
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(str::to_owned)
-}
-
-fn extract_rust_version_from_cargo(content: &str) -> Option<String> {
-    content.lines().find_map(|line| {
-        let trimmed = line.trim();
-        if trimmed.starts_with("rust-version") {
-            extract_quoted_version(trimmed)
-        } else {
-            None
-        }
-    })
-}
-
-fn extract_xml_tag(content: &str, tag: &str) -> Option<String> {
-    let open = format!("<{tag}>");
-    let close = format!("</{tag}>");
-    let start = content.find(&open)? + open.len();
-    let end = content[start..].find(&close)? + start;
-    Some(content[start..end].trim().to_owned())
-}
-
-fn extract_quoted_version(s: &str) -> Option<String> {
-    let mut in_quote = false;
-    let mut version = String::new();
-    for ch in s.chars() {
-        if ch == '"' || ch == '\'' {
-            if in_quote
-                && !version.is_empty()
-                && version.contains('.')
-                && version.chars().all(|c| c.is_ascii_digit() || c == '.')
-            {
-                return Some(version);
-            }
-            in_quote = !in_quote;
-            version.clear();
-        } else if in_quote {
-            version.push(ch);
-        }
-    }
-    None
-}
-
 fn print_table(audits: &[RepoAudit]) {
     use tabled::builder::Builder;
     use tabled::settings::object::{Columns, Rows};
@@ -547,9 +241,6 @@ fn print_table(audits: &[RepoAudit]) {
     let mut builder = Builder::default();
     builder.push_record([
         "Repository",
-        "Type",
-        "Runtime",
-        "Framework",
         "Dep.A",
         "SecSc",
         "Push",
@@ -573,9 +264,6 @@ fn print_table(audits: &[RepoAudit]) {
     };
 
     for a in audits {
-        let runtime = truncate_cell(&runtime_summary(&a.versions), 16);
-        let framework = truncate_cell(&framework_summary(&a.versions), 20);
-
         let alert_total = a.security.alert_counts.critical
             + a.security.alert_counts.high
             + a.security.alert_counts.medium
@@ -614,9 +302,6 @@ fn print_table(audits: &[RepoAudit]) {
 
         builder.push_record([
             a.name.clone(),
-            a.project_type.clone(),
-            runtime,
-            framework,
             icon(a.security.dependabot_alerts),
             icon(a.security.secret_scanning),
             icon(a.security.push_protection),
@@ -658,41 +343,11 @@ fn print_table(audits: &[RepoAudit]) {
     );
 }
 
-fn runtime_summary(versions: &VersionInfo) -> String {
-    if let Some(java) = &versions.java {
-        format!("Java {java}")
-    } else if let Some(node) = &versions.node {
-        format!("Node {node}")
-    } else if let Some(dotnet) = &versions.dotnet {
-        format!(".NET {dotnet}")
-    } else if let Some(go) = &versions.go {
-        format!("Go {go}")
-    } else if let Some(rust) = &versions.rust {
-        format!("Rust {rust}")
-    } else {
-        "-".to_owned()
-    }
-}
-
-fn framework_summary(versions: &VersionInfo) -> String {
-    if versions.frameworks.is_empty() {
-        "-".to_owned()
-    } else {
-        versions.frameworks.join(", ")
-    }
-}
-
-fn truncate_cell(value: &str, width: usize) -> String {
-    if value.len() <= width {
-        value.to_owned()
-    } else {
-        format!("{}...", &value[..width.saturating_sub(3)])
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use tabled::builder::Builder;
+    use tabled::settings::object::Columns;
+    use tabled::settings::{Alignment, Modify, Style};
 
     fn strip_ansi(s: &str) -> String {
         let re = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
@@ -700,122 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_spring_boot_version() {
-        assert_eq!(
-            extract_spring_boot_version(r#"id("org.springframework.boot") version "3.5.6""#),
-            Some("3.5.6".to_owned())
-        );
-    }
-
-    #[test]
-    fn test_extract_spring_boot_variable() {
-        assert_eq!(
-            extract_spring_boot_version(r#"val springBootVersion = "3.4.1""#),
-            Some("3.4.1".to_owned())
-        );
-    }
-
-    #[test]
-    fn test_no_spring_boot() {
-        assert_eq!(
-            extract_spring_boot_version("plugins { id(\"java\") }"),
-            None
-        );
-    }
-
-    #[test]
-    fn test_extract_next_version() {
-        assert_eq!(
-            extract_package_json_dependency_version(
-                r#"{"dependencies":{"next":"^14.2.3"},"devDependencies":{"typescript":"5.4.0"}}"#,
-                "next"
-            ),
-            Some("^14.2.3".to_owned())
-        );
-    }
-
-    #[test]
-    fn test_extract_dotnet_sdk_version() {
-        assert_eq!(
-            extract_dotnet_sdk_version(r#"{"sdk":{"version":"8.0.204"}}"#),
-            Some("8.0.204".to_owned())
-        );
-    }
-
-    #[test]
-    fn test_extract_target_framework() {
-        assert_eq!(
-            extract_target_framework(
-                r#"<Project><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>"#
-            ),
-            Some("net8.0".to_owned())
-        );
-    }
-
-    #[test]
-    fn test_extract_go_version() {
-        assert_eq!(
-            extract_go_version("module example.com/ward\n\ngo 1.22.2\n"),
-            Some("1.22.2".to_owned())
-        );
-    }
-
-    #[test]
-    fn test_extract_rust_toolchain_version() {
-        assert_eq!(
-            extract_rust_toolchain_version(
-                "[toolchain]\nchannel = \"1.78.0\"\ncomponents = [\"clippy\"]"
-            ),
-            Some("1.78.0".to_owned())
-        );
-    }
-
-    #[test]
-    fn test_runtime_summary_prefers_detected_runtime() {
-        let versions = VersionInfo {
-            dotnet: Some("net8.0".to_owned()),
-            ..VersionInfo::default()
-        };
-        assert_eq!(runtime_summary(&versions), ".NET net8.0");
-    }
-
-    #[test]
-    fn test_framework_summary_joins_multiple_frameworks() {
-        let versions = VersionInfo {
-            frameworks: vec!["spring-boot 3.5.6".to_owned(), "next.js ^14.2.3".to_owned()],
-            ..VersionInfo::default()
-        };
-        assert_eq!(
-            framework_summary(&versions),
-            "spring-boot 3.5.6, next.js ^14.2.3"
-        );
-    }
-
-    #[test]
-    fn test_truncate_cell_within_limit() {
-        assert_eq!(truncate_cell("short", 10), "short");
-        assert_eq!(truncate_cell("exactly10!", 10), "exactly10!");
-    }
-
-    #[test]
-    fn test_truncate_cell_exceeds_limit() {
-        assert_eq!(truncate_cell("this is too long", 10), "this is...");
-        assert_eq!(truncate_cell("abcdefghijklmnop", 8), "abcde...");
-    }
-
-    #[test]
-    fn test_truncate_cell_edge_cases() {
-        assert_eq!(truncate_cell("abc", 3), "abc");
-        assert_eq!(truncate_cell("abcd", 3), "...");
-        assert_eq!(truncate_cell("", 5), "");
-    }
-
-    #[test]
     fn test_table_columns_align_with_ansi_codes() {
-        use tabled::builder::Builder;
-        use tabled::settings::object::Columns;
-        use tabled::settings::{Alignment, Modify, Style};
-
         let ok = format!("{}", console::style("[ok]").green());
         let fail = format!("{}", console::style("[!!]").red());
 
@@ -852,9 +392,6 @@ mod tests {
 
     #[test]
     fn test_table_handles_empty_data() {
-        use tabled::builder::Builder;
-        use tabled::settings::Style;
-
         let mut builder = Builder::default();
         builder.push_record(["Name", "Status"]);
         // No data rows
@@ -866,10 +403,6 @@ mod tests {
 
     #[test]
     fn test_table_handles_long_repo_names() {
-        use tabled::builder::Builder;
-        use tabled::settings::object::Columns;
-        use tabled::settings::{Alignment, Modify, Style};
-
         let long_name = "s07439-party-customer-service-operations-extremely-long-name";
         let ok = format!("{}", console::style("[ok]").green());
 

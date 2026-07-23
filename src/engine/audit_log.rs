@@ -1,6 +1,6 @@
 use std::fs::{self, OpenOptions};
-use std::io::{BufRead, Write};
-use std::path::{Path, PathBuf};
+use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use anyhow::{Context, Result};
@@ -91,34 +91,6 @@ impl AuditLog {
     pub fn path(&self) -> &PathBuf {
         &self.path
     }
-}
-
-pub fn default_log_path() -> Result<PathBuf> {
-    Ok(dirs_path()?.join("audit.log"))
-}
-
-pub fn read_entries(path: &Path) -> Result<Vec<AuditEntry>> {
-    let file = fs::File::open(path)
-        .with_context(|| format!("Failed to open audit log: {}", path.display()))?;
-
-    let reader = std::io::BufReader::new(file);
-    let mut entries = Vec::new();
-
-    for line in reader.lines() {
-        let line = line?;
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        match serde_json::from_str::<AuditEntry>(trimmed) {
-            Ok(entry) => entries.push(entry),
-            Err(e) => {
-                tracing::warn!("Skipping malformed audit entry: {e}");
-            }
-        }
-    }
-
-    Ok(entries)
 }
 
 fn dirs_path() -> Result<PathBuf> {
@@ -232,52 +204,5 @@ mod tests {
         assert_eq!(entry["before"], false);
         assert_eq!(entry["after"], true);
         assert!(!entry["timestamp"].as_str().unwrap().is_empty());
-    }
-
-    #[test]
-    fn read_entries_parses_log_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("audit.log");
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .unwrap();
-
-        let log = AuditLog::new_for_test(path.clone(), file);
-        log.log("repo-a", "set_secret_scanning", "success", false, true)
-            .unwrap();
-        log.log("repo-b", "enable_dependabot_alerts", "success", false, true)
-            .unwrap();
-        log.log("repo-c", "set_push_protection", "failure", false, true)
-            .unwrap();
-
-        let entries = read_entries(&path).unwrap();
-        assert_eq!(entries.len(), 3);
-        assert_eq!(entries[0].repo, "repo-a");
-        assert_eq!(entries[1].action, "enable_dependabot_alerts");
-        assert_eq!(entries[2].status, "failure");
-    }
-
-    #[test]
-    fn read_entries_skips_empty_lines() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("audit.log");
-
-        let entry = r#"{"timestamp":"2024-01-01T00:00:00Z","repo":"r","action":"a","status":"success","before":false,"after":true}"#;
-        std::fs::write(&path, format!("\n{entry}\n\n{entry}\n")).unwrap();
-
-        let entries = read_entries(&path).unwrap();
-        assert_eq!(entries.len(), 2);
-    }
-
-    #[test]
-    fn read_entries_returns_empty_for_empty_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("audit.log");
-        std::fs::write(&path, "").unwrap();
-
-        let entries = read_entries(&path).unwrap();
-        assert!(entries.is_empty());
     }
 }

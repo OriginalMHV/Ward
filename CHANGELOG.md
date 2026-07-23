@@ -25,10 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Inherited organization/enterprise resources and self-hosted runners are retained as references rather than cloned
 - Configuration files are always delivered through a dedicated branch and pull request; dependent enforcement is deferred until merge
 - Imported manifests target only the source repository unless existing same-owner targets are supplied explicitly
+- Generic managed-file delivery settings moved from `[templates]` to `[file_delivery]`
 
 ### Removed
 
 - Removed the interactive TUI, its disk cache, and the `ratatui`/`crossterm` dependencies
+- Removed built-in/custom templates, ecosystem detection, and target-project version inference
+- Removed the unsafe `rollback`, redundant `setup`, template-management, and custom policy DSL commands
+- Removed dead dependencies, GitHub API wrappers, output modules, and audit-log rollback readers
 
 ### Fixed
 
