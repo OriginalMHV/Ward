@@ -17,7 +17,16 @@ impl Manifest {
         let content =
             std::fs::read_to_string(path).with_context(|| format!("Failed to read {path}"))?;
 
-        toml::from_str(&content).with_context(|| format!("Failed to parse {path}"))
+        let manifest: Self =
+            toml::from_str(&content).with_context(|| format!("Failed to parse {path}"))?;
+        let current = ManifestSchema::current().version;
+        if manifest.schema.version != current {
+            anyhow::bail!(
+                "Unsupported Ward manifest schema version {}; expected {current}",
+                manifest.schema.version
+            );
+        }
+        Ok(manifest)
     }
 
     pub fn system(&self, id: &str) -> Option<&SystemConfig> {
@@ -37,35 +46,6 @@ impl Manifest {
             })
             .max_by_key(|s| s.id.len()) // longest match wins
             .map(|s| s.id.as_str())
-    }
-
-    pub fn security_for_system(&self, system_id: &str) -> &SecurityConfig {
-        self.systems
-            .iter()
-            .find(|s| s.id == system_id)
-            .and_then(|s| s.security.as_ref())
-            .unwrap_or(&self.security)
-    }
-
-    /// Returns the merged rulesets branch protection config for a system.
-    /// Per-system override fields take precedence; unset fields fall back to global.
-    pub fn rulesets_branch_protection_for_system(
-        &self,
-        system_id: &str,
-    ) -> Option<RulesetBranchProtection> {
-        let global = self.rulesets.branch_protection.as_ref()?;
-
-        let system_override = self
-            .systems
-            .iter()
-            .find(|s| s.id == system_id)
-            .and_then(|s| s.rulesets.as_ref())
-            .and_then(|r| r.branch_protection.as_ref());
-
-        match system_override {
-            Some(over) => Some(global.merge_with(over)),
-            None => Some(global.clone()),
-        }
     }
 
     pub fn exclude_patterns_for_system(&self, system_id: &str) -> Vec<String> {
@@ -91,12 +71,48 @@ impl Manifest {
             .is_none_or(|s| s.match_prefix)
     }
 
-    pub fn v2_schema(&self) -> Option<&ManifestSchema> {
-        self.v2.schema.as_ref()
+    pub fn categories_for_repo(&self, repo_name: &str) -> ManifestCategories {
+        let mut categories = self.categories.clone();
+        let Some(system) = self
+            .system_for_repo(repo_name)
+            .and_then(|system_id| self.system(system_id))
+        else {
+            return categories;
+        };
+
+        let overrides = &system.categories;
+        if overrides.security.is_some() {
+            categories.security = overrides.security.clone();
+        }
+        if overrides.repository.is_some() {
+            categories.repository = overrides.repository.clone();
+        }
+        if overrides.branch_protection.is_some() {
+            categories.branch_protection = overrides.branch_protection.clone();
+        }
+        if overrides.rulesets.is_some() {
+            categories.rulesets = overrides.rulesets.clone();
+        }
+        if overrides.files.is_some() {
+            categories.files = overrides.files.clone();
+        }
+        if overrides.actions.is_some() {
+            categories.actions = overrides.actions.clone();
+        }
+        if overrides.environments.is_some() {
+            categories.environments = overrides.environments.clone();
+        }
+        if overrides.access.is_some() {
+            categories.access = overrides.access.clone();
+        }
+        if overrides.integrations.is_some() {
+            categories.integrations = overrides.integrations.clone();
+        }
+        categories
     }
 
-    pub fn v2_categories(&self) -> &ManifestCategories {
-        &self.v2.categories
+    pub fn categories(&self) -> &ManifestCategories {
+        &self.categories
     }
 }
 
@@ -106,15 +122,12 @@ impl Default for Manifest {
             org: OrgConfig {
                 name: String::new(),
             },
-            source: None,
-            security: SecurityConfig::default(),
-            repository: None,
             file_delivery: FileDeliveryConfig::default(),
-            branch_protection: BranchProtectionConfig::default(),
-            rulesets: RulesetsConfig::default(),
             systems: Vec::new(),
-            files: Vec::new(),
-            v2: ManifestV2State::default(),
+            schema: ManifestSchema::current(),
+            provenance: None,
+            categories: ManifestCategories::default(),
+            coverage: Vec::new(),
         }
     }
 }

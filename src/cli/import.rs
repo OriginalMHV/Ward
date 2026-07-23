@@ -8,13 +8,11 @@ use clap::Args;
 use console::style;
 
 use crate::config::manifest::{
-    ActionsCategoryV2, ActorReference, BranchProtectionCategoryV2, CategoryPolicy, CoverageEntry,
-    CoverageOutcome, EnvironmentsCategoryV2, ExternalValueReference, FileDeliveryConfig,
-    FileEncoding, FilesCategoryV2, LabelConfigV2, ManagedFile, Manifest, ManifestCategories,
-    ManifestCategoryName, ManifestProvenance, ManifestSchema, ManifestV2State, OrgConfig,
-    RepositoryAccessCategoryV2, RepositoryIntegrationsCategoryV2, RepositoryRuleConfig,
-    RepositoryRulesetConfig, RepositoryRulesetV2, RulesetBypassActorConfig, RulesetsCategoryV2,
-    RulesetsConfig, SecurityCategoryV2, SourceConfig, SystemConfig,
+    ActionsCategoryV2, BranchProtectionCategoryV2, CategoryPolicy, CoverageEntry, CoverageOutcome,
+    EnvironmentsCategoryV2, ExternalValueReference, FileDeliveryConfig, FilesCategoryV2,
+    LabelConfigV2, Manifest, ManifestCategories, ManifestCategoryName, ManifestProvenance,
+    ManifestSchema, OrgConfig, RepositoryAccessCategoryV2, RepositoryIntegrationsCategoryV2,
+    RulesetsCategoryV2, SecurityCategoryV2, SystemConfig,
 };
 use crate::github::Client;
 use crate::reconcile::access_integrations::{collect_access, collect_integrations};
@@ -589,27 +587,10 @@ async fn snapshot_repository(
         org: OrgConfig {
             name: source.owner.clone(),
         },
-        source: Some(SourceConfig {
-            repository: source.full_name(),
-        }),
-        security: security_category.settings.clone().unwrap_or_default(),
-        repository: repository_category.settings.clone(),
         file_delivery: FileDeliveryConfig {
             branch: DEFAULT_BRANCH.to_owned(),
             reviewers: Vec::new(),
             commit_message_prefix: "chore: ".to_owned(),
-        },
-        branch_protection: branch_protection_category
-            .default_branch
-            .clone()
-            .unwrap_or_default(),
-        rulesets: RulesetsConfig {
-            branch_protection: None,
-            repository: rulesets_category
-                .repository_rulesets
-                .iter()
-                .map(legacy_ruleset)
-                .collect(),
         },
         systems: vec![SystemConfig {
             id: source.repo.clone(),
@@ -617,22 +598,17 @@ async fn snapshot_repository(
             match_prefix: false,
             exclude: Vec::new(),
             repos: targets.to_vec(),
-            security: None,
-            teams: access_category.teams.clone(),
-            rulesets: None,
+            categories: ManifestCategories::default(),
         }],
-        files: legacy_utf8_files(&files_category),
-        v2: ManifestV2State {
-            schema: Some(ManifestSchema::v2()),
-            provenance: Some(ManifestProvenance {
-                repository: source.full_name(),
-                default_branch: Some(default_branch.to_owned()),
-                repository_node_id,
-                default_branch_head_oid,
-            }),
-            categories,
-            coverage,
-        },
+        schema: ManifestSchema::current(),
+        provenance: Some(ManifestProvenance {
+            repository: source.full_name(),
+            default_branch: Some(default_branch.to_owned()),
+            repository_node_id,
+            default_branch_head_oid,
+        }),
+        categories,
+        coverage,
     };
 
     let counts = SnapshotCounts {
@@ -847,71 +823,17 @@ fn env_component(value: &str) -> String {
     }
 }
 
-fn legacy_ruleset(ruleset: &RepositoryRulesetV2) -> RepositoryRulesetConfig {
-    RepositoryRulesetConfig {
-        name: ruleset.name.clone(),
-        target: ruleset.target.clone(),
-        enforcement: ruleset.enforcement.clone(),
-        conditions_json: ruleset.conditions_json.clone(),
-        rules: ruleset
-            .rules
-            .iter()
-            .map(|rule| RepositoryRuleConfig {
-                rule_type: rule.rule_type.clone(),
-                parameters_json: rule.parameters_json.clone(),
-            })
-            .collect(),
-        bypass_actors: ruleset
-            .bypass_actors
-            .iter()
-            .filter_map(|actor| {
-                let (actor_type, actor_id, team_slug) = match &actor.actor {
-                    ActorReference::OrganizationAdmin => {
-                        ("OrganizationAdmin".to_owned(), None, None)
-                    }
-                    ActorReference::Team { slug } => ("Team".to_owned(), None, Some(slug.clone())),
-                    ActorReference::User { .. }
-                    | ActorReference::App { .. }
-                    | ActorReference::Role { .. } => return None,
-                    ActorReference::Unresolved {
-                        actor_type,
-                        actor_id,
-                    } => (actor_type.clone(), *actor_id, None),
-                };
-                Some(RulesetBypassActorConfig {
-                    actor_type,
-                    actor_id,
-                    team_slug,
-                    bypass_mode: actor.bypass_mode.clone(),
-                })
-            })
-            .collect(),
-    }
-}
-
-fn legacy_utf8_files(category: &FilesCategoryV2) -> Vec<ManagedFile> {
-    category
-        .entries
-        .iter()
-        .filter(|file| file.encoding == FileEncoding::Utf8)
-        .map(|file| ManagedFile {
-            path: file.path.clone(),
-            content: file.content.clone(),
-        })
-        .collect()
-}
-
 fn non_empty(value: String) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 
 fn render_manifest(manifest: &Manifest) -> Result<String> {
     let body = manifest
-        .to_document_v2()
+        .to_document()
         .render()
         .context("Failed to serialize ward.toml")?;
     let source = manifest
-        .source
+        .provenance
         .as_ref()
         .map(|source| source.repository.as_str())
         .unwrap_or("unknown");
@@ -997,9 +919,9 @@ fn print_summary(snapshot: &Snapshot, source: &RepositoryRef, targets: &[String]
 mod tests {
     use super::*;
     use crate::config::manifest::{
-        ActionsSettingsConfig, BranchProtectionConfig, ManagedFileV2, ManagementDisposition,
+        ActionsSettingsConfig, FileEncoding, ManagedFileV2, ManagementDisposition,
         RepositoryCategoryV2, RepositoryMetadataConfig, RepositorySettingsConfig,
-        SecretPlaceholderConfig, SecurityConfig, TeamAccess,
+        SecretPlaceholderConfig,
     };
     use crate::reconcile::general::GeneralLabel;
 
@@ -1082,7 +1004,7 @@ mod tests {
     }
 
     #[test]
-    fn rendered_v2_manifest_round_trips_binary_files() {
+    fn rendered_manifest_round_trips_binary_files() {
         let repository = RepositoryCategoryV2 {
             policy: CategoryPolicy::managed(),
             settings: Some(RepositorySettingsConfig {
@@ -1123,60 +1045,42 @@ mod tests {
             org: OrgConfig {
                 name: "acme".to_owned(),
             },
-            source: Some(SourceConfig {
-                repository: "acme/reference".to_owned(),
-            }),
-            security: SecurityConfig::default(),
-            repository: repository.settings.clone(),
             file_delivery: FileDeliveryConfig::default(),
-            branch_protection: BranchProtectionConfig::default(),
-            rulesets: RulesetsConfig::default(),
             systems: vec![SystemConfig {
                 id: "reference".to_owned(),
                 name: "Reference".to_owned(),
                 match_prefix: false,
                 exclude: Vec::new(),
                 repos: vec!["reference".to_owned()],
-                security: None,
-                teams: Vec::<TeamAccess>::new(),
-                rulesets: None,
+                categories: ManifestCategories::default(),
             }],
-            files: Vec::new(),
-            v2: ManifestV2State {
-                schema: Some(ManifestSchema::v2()),
-                provenance: Some(ManifestProvenance {
-                    repository: "acme/reference".to_owned(),
-                    default_branch: Some("main".to_owned()),
-                    repository_node_id: Some("R_123".to_owned()),
-                    default_branch_head_oid: Some("deadbeef".to_owned()),
-                }),
-                categories: ManifestCategories {
-                    repository: Some(repository),
-                    files: Some(files),
-                    integrations: Some(integrations),
-                    ..ManifestCategories::default()
-                },
-                coverage: Vec::new(),
+            schema: ManifestSchema::current(),
+            provenance: Some(ManifestProvenance {
+                repository: "acme/reference".to_owned(),
+                default_branch: Some("main".to_owned()),
+                repository_node_id: Some("R_123".to_owned()),
+                default_branch_head_oid: Some("deadbeef".to_owned()),
+            }),
+            categories: ManifestCategories {
+                repository: Some(repository),
+                files: Some(files),
+                integrations: Some(integrations),
+                ..ManifestCategories::default()
             },
+            coverage: Vec::new(),
         };
 
         let rendered = render_manifest(&manifest).unwrap();
         let parsed: Manifest = toml::from_str(&rendered).unwrap();
 
-        let parsed_files = parsed.v2.categories.files.unwrap();
+        let parsed_files = parsed.categories.files.unwrap();
         assert_eq!(parsed_files.entries[0].encoding, FileEncoding::Base64);
         assert_eq!(
-            parsed
-                .v2
-                .categories
-                .integrations
-                .unwrap()
-                .policy
-                .disposition,
+            parsed.categories.integrations.unwrap().policy.disposition,
             ManagementDisposition::Observe
         );
         assert_eq!(
-            parsed.v2.provenance.unwrap().repository_node_id.as_deref(),
+            parsed.provenance.unwrap().repository_node_id.as_deref(),
             Some("R_123")
         );
     }

@@ -35,7 +35,7 @@ Or create a minimal scaffold without prompts:
 ward init --non-interactive
 ```
 
-Review and extend the result using the [configuration reference](configuration.md). A manual manifest can use every v2 category and does not require source provenance or coverage records.
+Review and extend the result using the [configuration reference](configuration.md). A manual Ward manifest can use every category and does not require source provenance or coverage records.
 
 ### Bootstrap from an existing repository
 

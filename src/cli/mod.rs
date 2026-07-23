@@ -103,7 +103,7 @@ pub enum Command {
     #[command(display_order = 20)]
     Plan(plan::PlanCommand),
 
-    /// Apply desired manifest v2 state across categories (plan, apply, verify)
+    /// Apply desired manifest state across categories (plan, apply, verify)
     #[command(display_order = 21)]
     Apply(apply::ApplyCommand),
 

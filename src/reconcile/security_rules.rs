@@ -24,7 +24,7 @@ use crate::github::security::{
     RepositorySecurityBaseline, SecurityAndAnalysisState,
 };
 
-const SECURITY_ATTACHED_CONFIGURATION_PATH: &str = "v2.categories.security.configuration_reference";
+const SECURITY_ATTACHED_CONFIGURATION_PATH: &str = "categories.security.configuration_reference";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReconcileIssueSeverity {
@@ -543,21 +543,6 @@ pub async fn collect_security_category(
         repository_id,
         category: SecurityCategoryV2 {
             policy,
-            settings: Some(crate::config::manifest::SecurityConfig {
-                secret_scanning: bool_field(&analysis.secret_scanning).unwrap_or(false),
-                secret_scanning_ai_detection: bool_field(&analysis.secret_scanning_ai_detection)
-                    .unwrap_or(false),
-                push_protection: bool_field(&analysis.secret_scanning_push_protection)
-                    .unwrap_or(false),
-                dependabot_alerts: dependabot_alerts.unwrap_or(false),
-                dependabot_security_updates: dependabot_security_updates_endpoint
-                    .or_else(|| bool_field(&analysis.dependabot_security_updates))
-                    .unwrap_or(false),
-                codeql_advanced_setup: codeql_default_setup
-                    .as_ref()
-                    .and_then(|state| state.state.as_deref())
-                    .is_some_and(|state| state == "configured"),
-            }),
             advanced_security: bool_field(&analysis.advanced_security),
             code_security: bool_field(&analysis.code_security),
             dependabot_alerts,
@@ -680,8 +665,7 @@ pub fn plan_security_category(
             ));
         }
 
-        if desired.settings.is_some()
-            || desired.private_vulnerability_reporting.is_some()
+        if desired.private_vulnerability_reporting.is_some()
             || desired.codeql_default_setup.is_some()
             || !desired.delegated_alert_dismissal_reviewers.is_empty()
             || !desired.delegated_bypass_reviewers.is_empty()
@@ -728,24 +712,17 @@ pub fn plan_security_category(
             ),
             (
                 "secret_scanning",
-                desired
-                    .secret_scanning
-                    .or(desired.settings.as_ref().map(|value| value.secret_scanning)),
+                desired.secret_scanning,
                 actual.category.secret_scanning,
             ),
             (
                 "secret_scanning_push_protection",
-                desired
-                    .secret_scanning_push_protection
-                    .or(desired.settings.as_ref().map(|value| value.push_protection)),
+                desired.secret_scanning_push_protection,
                 actual.category.secret_scanning_push_protection,
             ),
             (
                 "secret_scanning_ai_detection",
-                desired.secret_scanning_ai_detection.or(desired
-                    .settings
-                    .as_ref()
-                    .map(|value| value.secret_scanning_ai_detection)),
+                desired.secret_scanning_ai_detection,
                 actual.category.secret_scanning_ai_detection,
             ),
             (
@@ -856,21 +833,13 @@ pub fn plan_security_category(
             }
         }
 
-        let desired_dependabot_alerts = desired.dependabot_alerts.or(desired
-            .settings
-            .as_ref()
-            .map(|value| value.dependabot_alerts));
-        if let Some(value) = desired_dependabot_alerts
+        if let Some(value) = desired.dependabot_alerts
             && actual.category.dependabot_alerts != Some(value)
         {
             dependabot_alerts = Some(value);
         }
 
-        let desired_dependabot_security_updates = desired.dependabot_security_updates.or(desired
-            .settings
-            .as_ref()
-            .map(|value| value.dependabot_security_updates));
-        if let Some(value) = desired_dependabot_security_updates
+        if let Some(value) = desired.dependabot_security_updates
             && actual.category.dependabot_security_updates != Some(value)
         {
             dependabot_security_updates = Some(value);
@@ -893,19 +862,6 @@ pub fn plan_security_category(
                 codeql_default_setup = Some(desired_codeql.clone());
             }
         }
-
-        if desired
-            .settings
-            .as_ref()
-            .is_some_and(|value| !value.codeql_advanced_setup)
-            && desired.codeql_default_setup.is_none()
-        {
-            issues.push(warning_issue(
-                Some("settings.codeql_advanced_setup".to_owned()),
-                "security-legacy-codeql-field-ignored",
-                "Legacy settings.codeql_advanced_setup=false is preserved for backwards compatibility but ignored for v2 reconciliation.".to_owned(),
-            ));
-        }
     }
 
     let has_requested_change = !patch.is_empty()
@@ -917,7 +873,7 @@ pub fn plan_security_category(
         || detach_configuration;
     if has_requested_change && !desired.policy.sensitive {
         issues.push(blocker_issue(
-            Some("v2.categories.security.policy.sensitive".to_owned()),
+            Some("categories.security.policy.sensitive".to_owned()),
             "security-sensitive-gate",
             "Managing repository security settings requires policy.sensitive = true".to_owned(),
         ));
@@ -1271,7 +1227,7 @@ pub fn plan_rulesets_category(
         != normalize_ruleset_references(&actual.category.references)
     {
         issues.push(blocker_issue(
-            Some("v2.categories.rulesets.references".to_owned()),
+            Some("categories.rulesets.references".to_owned()),
             "rulesets-inherited-reference-drift",
             "Inherited ruleset references differ from the live repository state and are reference-only at repository scope.".to_owned(),
         ));
@@ -1313,7 +1269,7 @@ pub fn plan_rulesets_category(
 
     if !actual.inherited_rulesets.is_empty() {
         issues.push(warning_issue(
-            Some("v2.categories.rulesets.references".to_owned()),
+            Some("categories.rulesets.references".to_owned()),
             "rulesets-inherited-reference-only",
             "Inherited rulesets are recorded as references only and will never be mutated by repository reconciliation.".to_owned(),
         ));
@@ -1325,7 +1281,7 @@ pub fn plan_rulesets_category(
         && !desired.policy.sensitive
     {
         issues.push(blocker_issue(
-            Some("v2.categories.rulesets.policy.sensitive".to_owned()),
+            Some("categories.rulesets.policy.sensitive".to_owned()),
             "rulesets-sensitive-gate",
             "Managing repository rulesets requires policy.sensitive = true".to_owned(),
         ));
@@ -1683,7 +1639,7 @@ pub fn plan_branch_protection_category(
         && !desired.policy.sensitive
     {
         issues.push(blocker_issue(
-            Some("v2.categories.branch_protection.policy.sensitive".to_owned()),
+            Some("categories.branch_protection.policy.sensitive".to_owned()),
             "branch-protection-sensitive-gate",
             "Managing legacy branch protection requires policy.sensitive = true".to_owned(),
         ));

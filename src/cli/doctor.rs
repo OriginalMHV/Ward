@@ -422,9 +422,7 @@ mod tests {
                 match_prefix: true,
                 exclude: vec![],
                 repos: vec![],
-                security: None,
-                teams: vec![],
-                rulesets: None,
+                categories: crate::config::manifest::ManifestCategories::default(),
             });
         let check = check_systems(&manifest);
         assert!(matches!(check.status, CheckStatus::Pass));

@@ -12,9 +12,9 @@ GitHub repository -> import -------+   -> apply safely -> verify -> audit
 
 Both setup paths produce the same desired-state manifest. Import adds provenance and coverage evidence, but creates no ongoing relationship with the source repository. No repository clone or local Git working tree is required.
 
-## Manifest v2
+## Ward manifest
 
-Manifest v2 separates reusable state from how Ward is allowed to manage it.
+The Ward manifest separates reusable state from how Ward is allowed to manage it.
 
 ```toml
 [schema]
@@ -34,7 +34,7 @@ Each category stores:
 - stable references to externally owned resources
 - placeholders for write-only values
 
-Manually authored and imported manifests use the same v2 categories. The flattened v2 state is backward-compatible with existing legacy sections. Legacy fields remain available for older commands and manifests, while comprehensive reconciliation uses `categories`.
+Manually authored and imported manifests use the same categories. Focused commands such as `security`, `commit`, `rulesets`, `protection`, `settings`, and `teams` are exact-scope views over that same desired state.
 
 ## Import pipeline
 
@@ -228,7 +228,7 @@ Entries contain repository, category/action, status, and structural before/after
 | `src/cli/import.rs` | repository parsing, independent collection, manifest assembly |
 | `src/cli/plan.rs` | unified plan presentation |
 | `src/cli/apply.rs` | unified confirmation and apply entry point |
-| `src/config/manifest/` | legacy and v2 schema, parsing, accessors |
+| `src/config/manifest/` | manifest schema, parsing, accessors |
 | `src/reconcile/general.rs` | General settings and labels |
 | `src/reconcile/security_rules.rs` | security, rulesets, detailed branch protection |
 | `src/reconcile/actions_environments.rs` | Actions and environments |

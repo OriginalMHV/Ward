@@ -159,20 +159,20 @@ ward commit apply --repo my-service --yes
 |------|-------------|
 | `--yes` | Skip confirmation prompt |
 
-Ward compares every `[[files]]` entry in `ward.toml`, commits all changed files together, and opens one pull request per target repository. Target-only files are not deleted.
+Ward compares every `[[categories.files.entries]]` entry, commits all changed files together, and opens one pull request per target repository. Target-only files are deleted only when the files category enables pruning.
 
 ---
 
 ## `ward settings`
 
-Manage `[repository]` settings and optionally configure Copilot code review.
+Manage `[categories.repository.settings]` and optionally configure Copilot code review.
 
 ### `ward settings plan`
 
 Preview what settings would change.
 
 ```bash
-# Plan repository settings and topics from [repository]
+# Plan repository settings and topics
 ward settings plan --system backend
 
 # Include the optional Copilot review ruleset
@@ -184,7 +184,7 @@ ward settings plan --ruleset copilot-review --system backend
 Apply settings and rulesets to repositories.
 
 ```bash
-# Apply repository settings and topics from [repository]
+# Apply repository settings and topics
 ward settings apply --system backend
 
 # Optionally apply the Copilot review ruleset
@@ -196,7 +196,7 @@ ward settings apply --ruleset copilot-review --system backend
 | `--ruleset <NAME>` | Ruleset to apply (e.g., `copilot-review`) |
 | `--yes` | Skip confirmation prompt |
 
-Without `--ruleset`, `plan` and `apply` manage only the fields explicitly configured under `[repository]`, including feature toggles, merge policies and commit-message defaults, auto-merge, branch cleanup, update-branch support, web commit signoff, and topics.
+Without `--ruleset`, `plan` and `apply` manage only fields under `[categories.repository.settings]`, including feature toggles, merge policies and commit-message defaults, auto-merge, branch cleanup, update-branch support, web commit signoff, and topics.
 
 ### `ward settings audit`
 
@@ -227,7 +227,7 @@ Exit codes:
 - `0` -- all repos in sync with `ward.toml`
 - `1` -- drift detected
 
-Checks security settings (secret scanning, push protection, Dependabot alerts, Dependabot security updates, AI detection) and branch protection rules (approvals, dismiss stale reviews, code owner reviews, status checks, strict checks, enforce admins, linear history, force pushes, deletions).
+Checks every configured category by default. Use repeatable `--category <CATEGORY>` filters to narrow the drift gate.
 
 ---
 
@@ -246,7 +246,7 @@ ward rulesets plan --repo my-service
 
 ### `ward rulesets apply`
 
-Create or update rulesets on repositories. When repo pattern overrides are configured, each repository gets its resolved config (matching override fields take precedence over the base config). Team ID lookups are cached to avoid redundant API calls.
+Create, update, or prune repository-owned rulesets according to `[categories.rulesets]`. Stable actor references such as team slugs and app slugs are resolved for each target repository.
 
 ```bash
 ward rulesets apply --system backend
@@ -267,17 +267,14 @@ ward rulesets audit --system backend
 ward rulesets audit --repo my-service
 ```
 
-Imported exact rulesets are configured under `[[rulesets.repository]]`. They preserve arbitrary conditions, rule parameters, enforcement, and bypass actors. If any exact repository rulesets are present, they take precedence over the simplified `[rulesets.branch_protection]` model.
-
-Ward creates or updates configured rulesets by name. It never deletes target-only rulesets automatically.
-
-The simplified `[rulesets.branch_protection]` form supports `bypass_teams` with configurable `bypass_mode` (`"always"` or `"pull_request"`), and per-repo pattern overrides via `[[rulesets.branch_protection.overrides]]`. See [Configuration](configuration.md) for all fields.
+Exact rulesets are configured under `[[categories.rulesets.repository_rulesets]]`. They preserve arbitrary conditions, rule parameters, enforcement, and bypass actors. Target-only rulesets are deleted only when the category enables pruning.
 
 ---
 
 ## `ward teams`
 
-Manage team access across repositories in a system. Requires team configuration in `ward.toml` under `[[systems]]`.
+Manage only the team portion of `[categories.access]`. Team configuration may be global or replaced per system under `[systems.categories.access]`.
+Team changes require `disposition = "managed"` and `sensitive = true`; target-only teams are removed only when `prune = true`.
 
 ### `ward teams list`
 
@@ -294,10 +291,10 @@ Preview team access changes.
 
 ```bash
 ward teams plan --system backend
-ward teams plan --system backend --repo my-service
+ward teams plan --repo my-service
 ```
 
-`--system` is required because team configuration is per-system.
+Use either `--system` or `--repo`.
 
 ### `ward teams apply`
 
@@ -306,7 +303,7 @@ Apply team access to repositories.
 ```bash
 ward teams apply --system backend
 ward teams apply --system backend --yes
-ward teams apply --system backend --repo my-service --yes
+ward teams apply --repo my-service --yes
 ```
 
 | Flag | Description |
@@ -384,22 +381,23 @@ Set a configuration value using dot notation.
 
 ```bash
 ward config set org.name "my-org"
-ward config set security.push_protection true
-ward config set security.codeql_advanced_setup false
-ward config set branch_protection.required_approvals 2
-ward config set branch_protection.dismiss_stale_reviews true
+ward config set categories.security.secret_scanning_push_protection true
+ward config set categories.branch_protection.default_branch.required_approvals 2
+ward config set categories.branch_protection.default_branch.dismiss_stale_reviews true
 ward config set file_delivery.branch "chore/ward-update"
 ward config set file_delivery.commit_message_prefix "ci: "
 ```
 
-Valid key paths:
+Valid key paths are limited to commonly adjusted canonical manifest fields:
 
 | Prefix | Keys |
 |--------|------|
 | `org.` | `name` |
-| `security.` | `secret_scanning`, `secret_scanning_ai_detection`, `push_protection`, `dependabot_alerts`, `dependabot_security_updates`, `codeql_advanced_setup` |
-| `branch_protection.` | `enabled`, `required_approvals`, `dismiss_stale_reviews`, `require_code_owner_reviews`, `require_status_checks`, `strict_status_checks`, `enforce_admins`, `required_linear_history`, `allow_force_pushes`, `allow_deletions` |
+| `categories.security.` | `secret_scanning`, `secret_scanning_push_protection`, `secret_scanning_ai_detection`, `dependabot_alerts`, `dependabot_security_updates` |
+| `categories.branch_protection.default_branch.` | `enabled`, `required_approvals`, `dismiss_stale_reviews` |
 | `file_delivery.` | `branch`, `commit_message_prefix` |
+
+The selected category must already be present in the Ward manifest. Use `ward init` to create the initial categories, then edit more advanced category state directly.
 
 ### `ward config add-system`
 
@@ -500,7 +498,7 @@ How it works:
 1. Reads the source repository without modifying it.
 2. Runs independent collectors for General settings, security, rulesets, all protected branches, Actions, environments, access, integrations, labels, and selected configuration files.
 3. Preserves binary files, executable mode, source SHAs, stable actor/app identities, inherited references, and external placeholders.
-4. Writes manifest schema v2 with per-category policy and complete coverage evidence.
+4. Writes a Ward manifest with per-category policy and complete coverage evidence.
 5. Validates every requested target exists under the source owner.
 6. Uses an explicit-only target system; the source is the safe default target.
 
@@ -552,7 +550,7 @@ Exit codes: `0` all passed, `1` any errors, `2` warnings only.
 
 ## `ward plan`
 
-Read-only manifest v2 plan across every repository category.
+Read-only Ward manifest plan across every repository category.
 
 ```bash
 ward plan --repo backend-api
@@ -567,7 +565,7 @@ ward plan --json
 | `--allow-high-impact` | bool | `false` | Allow visibility and archive changes to become actionable |
 | `--all` | bool | `false` | Compatibility flag; all configured systems are already selected when neither `--repo` nor `--system` is set |
 
-The v2 planner covers these categories in safe apply order:
+The Ward manifest planner covers these categories in safe apply order:
 
 `repository`, `files`, `security`, `actions`, `environments`, `access`,
 `integrations`, `rulesets`, and `branch-protection`.
@@ -579,7 +577,7 @@ emits the stable unified report shape.
 
 ## `ward apply`
 
-Apply managed manifest v2 categories to existing repositories. Ward completes
+Apply managed Ward manifest categories to existing repositories. Ward completes
 all read-only plans and dependency preflights before the first mutation, applies
 categories in safe order, and verifies the result.
 

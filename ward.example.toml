@@ -1,9 +1,6 @@
 [org]
 name = "my-github-org"
 
-[source]
-repository = "my-github-org/reference-service"
-
 [schema]
 version = 2
 

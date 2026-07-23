@@ -6,6 +6,7 @@ use dialoguer::{Confirm, Input};
 use toml_edit::DocumentMut;
 
 use crate::config::Manifest;
+use crate::config::manifest::CategoryPolicy;
 
 #[derive(clap::Args)]
 pub struct ConfigCommand {
@@ -42,25 +43,32 @@ pub enum ConfigAction {
 
 const VALID_KEYS: &[(&str, ValueKind)] = &[
     ("org.name", ValueKind::Str),
-    ("security.secret_scanning", ValueKind::Bool),
-    ("security.push_protection", ValueKind::Bool),
-    ("security.dependabot_alerts", ValueKind::Bool),
-    ("security.dependabot_security_updates", ValueKind::Bool),
-    ("security.secret_scanning_ai_detection", ValueKind::Bool),
-    ("security.codeql_advanced_setup", ValueKind::Bool),
-    ("branch_protection.enabled", ValueKind::Bool),
-    ("branch_protection.required_approvals", ValueKind::Int),
-    ("branch_protection.dismiss_stale_reviews", ValueKind::Bool),
+    ("categories.security.secret_scanning", ValueKind::Bool),
     (
-        "branch_protection.require_code_owner_reviews",
+        "categories.security.secret_scanning_push_protection",
         ValueKind::Bool,
     ),
-    ("branch_protection.require_status_checks", ValueKind::Bool),
-    ("branch_protection.strict_status_checks", ValueKind::Bool),
-    ("branch_protection.enforce_admins", ValueKind::Bool),
-    ("branch_protection.required_linear_history", ValueKind::Bool),
-    ("branch_protection.allow_force_pushes", ValueKind::Bool),
-    ("branch_protection.allow_deletions", ValueKind::Bool),
+    ("categories.security.dependabot_alerts", ValueKind::Bool),
+    (
+        "categories.security.dependabot_security_updates",
+        ValueKind::Bool,
+    ),
+    (
+        "categories.security.secret_scanning_ai_detection",
+        ValueKind::Bool,
+    ),
+    (
+        "categories.branch_protection.default_branch.enabled",
+        ValueKind::Bool,
+    ),
+    (
+        "categories.branch_protection.default_branch.required_approvals",
+        ValueKind::Int,
+    ),
+    (
+        "categories.branch_protection.default_branch.dismiss_stale_reviews",
+        ValueKind::Bool,
+    ),
     ("file_delivery.branch", ValueKind::Str),
     ("file_delivery.commit_message_prefix", ValueKind::Str),
 ];
@@ -123,96 +131,122 @@ fn run_show(config_override: Option<&str>) -> Result<()> {
     let manifest = Manifest::load(config_override)?;
 
     println!();
+    println!("  {}", style("Ward manifest").bold());
     println!("  {}", style("Organization").bold());
     println!("    name: {}", style(&manifest.org.name).cyan());
 
     println!();
-    println!("  {}", style("Security").bold());
-    print_bool("    secret_scanning", manifest.security.secret_scanning);
-    print_bool(
-        "    secret_scanning_ai_detection",
-        manifest.security.secret_scanning_ai_detection,
-    );
-    print_bool("    push_protection", manifest.security.push_protection);
-    print_bool("    dependabot_alerts", manifest.security.dependabot_alerts);
-    print_bool(
-        "    dependabot_security_updates",
-        manifest.security.dependabot_security_updates,
-    );
-    print_bool(
-        "    codeql_advanced_setup",
-        manifest.security.codeql_advanced_setup,
-    );
-
-    println!();
-    println!("  {}", style("Branch Protection").bold());
-    print_bool("    enabled", manifest.branch_protection.enabled);
-    println!(
-        "    required_approvals: {}",
-        manifest.branch_protection.required_approvals
-    );
-    print_bool(
-        "    dismiss_stale_reviews",
-        manifest.branch_protection.dismiss_stale_reviews,
-    );
-    print_bool(
-        "    require_code_owner_reviews",
-        manifest.branch_protection.require_code_owner_reviews,
-    );
-    print_bool(
-        "    require_status_checks",
-        manifest.branch_protection.require_status_checks,
-    );
-    print_bool(
-        "    strict_status_checks",
-        manifest.branch_protection.strict_status_checks,
-    );
-    print_bool(
-        "    enforce_admins",
-        manifest.branch_protection.enforce_admins,
-    );
-    print_bool(
-        "    required_linear_history",
-        manifest.branch_protection.required_linear_history,
-    );
-    print_bool(
-        "    allow_force_pushes",
-        manifest.branch_protection.allow_force_pushes,
-    );
-    print_bool(
-        "    allow_deletions",
-        manifest.branch_protection.allow_deletions,
-    );
-
-    println!();
-    println!("  {}", style("Rulesets").bold());
-    if let Some(ref bp) = manifest.rulesets.branch_protection {
-        println!("    {}", style("branch_protection:").dim());
-        print_bool("      enabled", bp.enabled);
-        println!("      required_approvals: {}", bp.required_approvals);
-        print_bool("      dismiss_stale_reviews", bp.dismiss_stale_reviews);
-        print_bool(
-            "      require_code_owner_reviews",
-            bp.require_code_owner_reviews,
+    println!("  {}", style("Categories").bold());
+    let categories = &manifest.categories;
+    let mut category_count = 0;
+    if let Some(category) = &categories.repository {
+        print_category(
+            "repository",
+            &category.policy,
+            "repository settings and metadata",
         );
-        print_bool("      require_linear_history", bp.require_linear_history);
-        print_bool("      block_force_pushes", bp.block_force_pushes);
-        if !bp.bypass_teams.is_empty() {
-            println!(
-                "      bypass_teams: {}",
-                bp.bypass_teams
-                    .iter()
-                    .map(|t| t.slug().to_owned())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-        }
-        if !bp.overrides.is_empty() {
-            println!("      overrides: {} pattern(s)", bp.overrides.len());
-        }
-    } else {
-        println!("    (not configured)");
+        category_count += 1;
     }
+    if let Some(category) = &categories.security {
+        let configured = [
+            category.advanced_security,
+            category.code_security,
+            category.dependabot_alerts,
+            category.dependabot_security_updates,
+            category.secret_scanning,
+            category.secret_scanning_push_protection,
+            category.secret_scanning_validity_checks,
+            category.secret_scanning_non_provider_patterns,
+            category.secret_scanning_ai_detection,
+            category.private_vulnerability_reporting,
+        ]
+        .into_iter()
+        .flatten()
+        .count();
+        print_category(
+            "security",
+            &category.policy,
+            &format!("{configured} configured setting(s)"),
+        );
+        category_count += 1;
+    }
+    if let Some(category) = &categories.branch_protection {
+        let summary = match (
+            category.default_branch.is_some(),
+            category.default_branch_detailed.is_some(),
+            category.protected_branches.len(),
+        ) {
+            (_, true, count) if count > 0 => {
+                format!("detailed default branch and {count} protected branch(es)")
+            }
+            (_, true, _) => "detailed default branch".to_owned(),
+            (true, _, count) if count > 0 => {
+                format!("default branch and {count} protected branch(es)")
+            }
+            (true, _, _) => "default branch".to_owned(),
+            (false, _, count) => format!("{count} protected branch(es)"),
+        };
+        print_category("branch_protection", &category.policy, &summary);
+        category_count += 1;
+    }
+    if let Some(category) = &categories.rulesets {
+        print_category(
+            "rulesets",
+            &category.policy,
+            &format!(
+                "{} repository ruleset(s)",
+                category.repository_rulesets.len()
+            ),
+        );
+        category_count += 1;
+    }
+    if let Some(category) = &categories.files {
+        print_category(
+            "files",
+            &category.policy,
+            &format!("{} managed file(s)", category.entries.len()),
+        );
+        category_count += 1;
+    }
+    if let Some(category) = &categories.actions {
+        print_category("actions", &category.policy, "Actions configuration");
+        category_count += 1;
+    }
+    if let Some(category) = &categories.environments {
+        print_category(
+            "environments",
+            &category.policy,
+            &format!("{} environment(s)", category.entries.len()),
+        );
+        category_count += 1;
+    }
+    if let Some(category) = &categories.access {
+        print_category(
+            "access",
+            &category.policy,
+            &format!(
+                "{} team(s), {} collaborator(s)",
+                category.teams.len(),
+                category.collaborators.len()
+            ),
+        );
+        category_count += 1;
+    }
+    if let Some(category) = &categories.integrations {
+        print_category("integrations", &category.policy, "repository integrations");
+        category_count += 1;
+    }
+    if category_count == 0 {
+        println!("    (no categories configured)");
+    }
+
+    println!();
+    println!("  {}", style("File delivery").bold());
+    println!("    branch: {}", manifest.file_delivery.branch);
+    println!(
+        "    commit_message_prefix: {}",
+        manifest.file_delivery.commit_message_prefix
+    );
 
     if manifest.systems.is_empty() {
         println!();
@@ -236,12 +270,16 @@ fn run_show(config_override: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn print_bool(label: &str, value: bool) {
-    if value {
-        println!("{label}: {}", style("true").green());
-    } else {
-        println!("{label}: {}", style("false").red());
-    }
+fn print_category(name: &str, policy: &CategoryPolicy, summary: &str) {
+    let disposition = format!("{:?}", policy.disposition).to_lowercase();
+    let sensitive = if policy.sensitive { ", sensitive" } else { "" };
+    println!(
+        "    {}: {}{} — {}",
+        style(name).cyan(),
+        disposition,
+        sensitive,
+        summary
+    );
 }
 
 fn run_edit(config_override: Option<&str>) -> Result<()> {
@@ -311,32 +349,37 @@ pub fn apply_set(path: &Path, key: &str, value: &str) -> Result<()> {
         .parse()
         .with_context(|| format!("Failed to parse {}", path.display()))?;
 
-    let parts: Vec<&str> = key.splitn(2, '.').collect();
-    if parts.len() != 2 {
-        bail!("Key must use dot notation (e.g., security.push_protection)");
-    }
-    let (section, field) = (parts[0], parts[1]);
-
-    if doc.get(section).is_none() {
-        doc[section] = toml_edit::Item::Table(toml_edit::Table::new());
-    }
-
-    match kind {
+    let item = match kind {
         ValueKind::Bool => {
             let parsed: bool = value
                 .parse()
                 .with_context(|| format!("Expected bool for '{key}', got '{value}'"))?;
-            doc[section][field] = toml_edit::value(parsed);
+            toml_edit::value(parsed)
         }
         ValueKind::Int => {
             let parsed: i64 = value
                 .parse()
                 .with_context(|| format!("Expected integer for '{key}', got '{value}'"))?;
-            doc[section][field] = toml_edit::value(parsed);
+            toml_edit::value(parsed)
         }
-        ValueKind::Str => {
-            doc[section][field] = toml_edit::value(value);
+        ValueKind::Str => toml_edit::value(value),
+    };
+
+    match key {
+        "org.name" => doc["org"]["name"] = item,
+        "file_delivery.branch" => doc["file_delivery"]["branch"] = item,
+        "file_delivery.commit_message_prefix" => {
+            doc["file_delivery"]["commit_message_prefix"] = item
         }
+        key if key.starts_with("categories.security.") => {
+            let field = key.rsplit('.').next().unwrap();
+            canonical_category(&mut doc, "security")?[field] = item;
+        }
+        key if key.starts_with("categories.branch_protection.default_branch.") => {
+            let field = key.rsplit('.').next().unwrap();
+            canonical_category(&mut doc, "branch_protection")?["default_branch"][field] = item;
+        }
+        _ => unreachable!("validated configuration key"),
     }
 
     std::fs::write(path, doc.to_string())
@@ -344,6 +387,21 @@ pub fn apply_set(path: &Path, key: &str, value: &str) -> Result<()> {
 
     println!("  {} Set {key} = {value}", style("[ok]").green());
     Ok(())
+}
+
+fn canonical_category<'a>(
+    doc: &'a mut DocumentMut,
+    category: &str,
+) -> Result<&'a mut toml_edit::Table> {
+    doc.get_mut("categories")
+        .and_then(toml_edit::Item::as_table_mut)
+        .and_then(|categories| categories.get_mut(category))
+        .and_then(toml_edit::Item::as_table_mut)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Canonical category '{category}' is not configured. Add it to the Ward manifest before setting its values."
+            )
+        })
 }
 
 fn run_add_system(config_override: Option<&str>) -> Result<()> {
@@ -490,19 +548,33 @@ mod tests {
 [org]
 name = "my-org"
 
-[security]
+[schema]
+version = 2
+
+[categories.security]
 # Enable secret scanning
 secret_scanning = true
-push_protection = false
+secret_scanning_push_protection = false
 dependabot_alerts = true
 dependabot_security_updates = true
 
-[branch_protection]
+[categories.security.policy]
+disposition = "managed"
+prune = false
+sensitive = true
+
+[categories.branch_protection.default_branch]
 enabled = true
 required_approvals = 1
+dismiss_stale_reviews = false
+
+[categories.branch_protection.policy]
+disposition = "managed"
+prune = false
+sensitive = true
 
 [file_delivery]
-branch = "chore/ward-setup"
+branch = "chore/ward-sync"
 commit_message_prefix = "chore: "
 
 [[systems]]
@@ -520,11 +592,23 @@ exclude = ["operations?"]
     #[test]
     fn test_config_set_bool_value() {
         let file = write_temp(SAMPLE_TOML);
-        apply_set(file.path(), "security.push_protection", "true").unwrap();
+        apply_set(
+            file.path(),
+            "categories.security.secret_scanning_push_protection",
+            "true",
+        )
+        .unwrap();
 
         let updated = std::fs::read_to_string(file.path()).unwrap();
         let manifest: Manifest = toml::from_str(&updated).unwrap();
-        assert!(manifest.security.push_protection);
+        assert!(
+            manifest
+                .categories
+                .security
+                .unwrap()
+                .secret_scanning_push_protection
+                .unwrap()
+        );
     }
 
     #[test]
@@ -540,17 +624,36 @@ exclude = ["operations?"]
     #[test]
     fn test_config_set_integer_value() {
         let file = write_temp(SAMPLE_TOML);
-        apply_set(file.path(), "branch_protection.required_approvals", "3").unwrap();
+        apply_set(
+            file.path(),
+            "categories.branch_protection.default_branch.required_approvals",
+            "3",
+        )
+        .unwrap();
 
         let updated = std::fs::read_to_string(file.path()).unwrap();
         let manifest: Manifest = toml::from_str(&updated).unwrap();
-        assert_eq!(manifest.branch_protection.required_approvals, 3);
+        assert_eq!(
+            manifest
+                .categories
+                .branch_protection
+                .unwrap()
+                .default_branch
+                .unwrap()
+                .required_approvals,
+            3
+        );
     }
 
     #[test]
     fn test_config_set_preserves_comments() {
         let file = write_temp(SAMPLE_TOML);
-        apply_set(file.path(), "security.push_protection", "true").unwrap();
+        apply_set(
+            file.path(),
+            "categories.security.secret_scanning_push_protection",
+            "true",
+        )
+        .unwrap();
 
         let updated = std::fs::read_to_string(file.path()).unwrap();
         assert!(
@@ -566,13 +669,32 @@ exclude = ["operations?"]
     #[test]
     fn test_config_set_invalid_key() {
         let file = write_temp(SAMPLE_TOML);
-        let result = apply_set(file.path(), "nonexistent.key", "value");
+        let result = apply_set(file.path(), "security.push_protection", "true");
         assert!(result.is_err());
         assert!(
             result
                 .unwrap_err()
                 .to_string()
                 .contains("Unknown config key")
+        );
+    }
+
+    #[test]
+    fn test_config_set_requires_canonical_category() {
+        let file = write_temp(
+            r#"[org]
+name = "my-org"
+"#,
+        );
+
+        let result = apply_set(file.path(), "categories.security.secret_scanning", "true");
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Canonical category 'security' is not configured")
         );
     }
 
