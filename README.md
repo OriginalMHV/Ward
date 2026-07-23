@@ -133,7 +133,7 @@ Repository bootstrap starts with conservative policies. Manually authored manife
 | Guide | Description |
 |---|---|
 | **[Getting Started](docs/getting-started.md)** | Manual setup, repository bootstrap, review, plan, and apply |
-| [Configuration](docs/configuration.md) | Manifest v2 categories, policies, references, and placeholders |
+| [Configuration](docs/configuration.md) | Ward manifest categories, policies, references, and placeholders |
 | [GitHub Coverage](docs/github-coverage.md) | Managed settings, file selection, coverage outcomes, and API boundaries |
 | [Commands](docs/commands.md) | Complete CLI command reference |
 | [Architecture](docs/architecture.md) | Independent collectors, planning, safe ordering, and verification |

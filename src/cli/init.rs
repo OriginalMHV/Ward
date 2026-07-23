@@ -14,21 +14,30 @@ use crate::config::auth;
 const EXAMPLE_MANIFEST: &str = r#"[org]
 name = "your-github-org"
 
-[security]
+[schema]
+version = 2
+
+[file_delivery]
+branch = "chore/ward-sync"
+reviewers = []
+commit_message_prefix = "chore: "
+
+[categories.security]
 secret_scanning = true
+secret_scanning_push_protection = true
 secret_scanning_ai_detection = true
-push_protection = true
 dependabot_alerts = true
 dependabot_security_updates = true
 
-[file_delivery]
-branch = "chore/ward-setup"
-reviewers = []
-commit_message_prefix = "chore: "
+[categories.security.policy]
+disposition = "managed"
+prune = false
+sensitive = true
 
 # [[systems]]
 # id = "my-system"
 # name = "My System"
+# match_prefix = true
 # exclude = ["operations?", "workflows"]
 "#;
 
@@ -502,7 +511,7 @@ fn ask_exclude_patterns() -> Result<Vec<String>> {
 fn ask_file_delivery() -> Result<FileDeliverySettings> {
     let branch: String = Input::new()
         .with_prompt("  Branch name for PRs")
-        .default("chore/ward-setup".to_owned())
+        .default("chore/ward-sync".to_owned())
         .interact_text()?;
 
     let reviewers_raw: String = Input::new()
@@ -532,18 +541,25 @@ fn ask_file_delivery() -> Result<FileDeliverySettings> {
 // TOML generation
 
 fn write_toml(state: &WizardState) -> Result<()> {
+    std::fs::write(OUTPUT_PATH, render_manifest(state)).context("Failed to write ward.toml")?;
+    Ok(())
+}
+
+fn render_manifest(state: &WizardState) -> String {
     let mut out = String::new();
 
     out.push_str("[org]\n");
     out.push_str(&format!("name = {:?}\n", state.org));
 
-    out.push_str("\n[security]\n");
+    out.push_str("\n[schema]\nversion = 2\n");
+
+    out.push_str("\n[categories.security]\n");
     out.push_str(&format!(
         "secret_scanning = {}\n",
         state.security.secret_scanning
     ));
     out.push_str(&format!(
-        "push_protection = {}\n",
+        "secret_scanning_push_protection = {}\n",
         state.security.push_protection
     ));
     out.push_str(&format!(
@@ -554,19 +570,21 @@ fn write_toml(state: &WizardState) -> Result<()> {
         "dependabot_security_updates = {}\n",
         state.security.dependabot_security_updates
     ));
+    out.push_str("\n[categories.security.policy]\n");
+    out.push_str("disposition = \"managed\"\nprune = false\nsensitive = true\n");
 
-    out.push_str("\n[branch_protection]\n");
+    out.push_str("\n[categories.branch_protection.default_branch]\n");
     out.push_str(&format!("enabled = {}\n", state.branch_protection.enabled));
-    if state.branch_protection.enabled {
-        out.push_str(&format!(
-            "required_approvals = {}\n",
-            state.branch_protection.required_approvals
-        ));
-        out.push_str(&format!(
-            "dismiss_stale_reviews = {}\n",
-            state.branch_protection.dismiss_stale_reviews
-        ));
-    }
+    out.push_str(&format!(
+        "required_approvals = {}\n",
+        state.branch_protection.required_approvals
+    ));
+    out.push_str(&format!(
+        "dismiss_stale_reviews = {}\n",
+        state.branch_protection.dismiss_stale_reviews
+    ));
+    out.push_str("\n[categories.branch_protection.policy]\n");
+    out.push_str("disposition = \"managed\"\nprune = false\nsensitive = true\n");
 
     out.push_str("\n[file_delivery]\n");
     out.push_str(&format!("branch = {:?}\n", state.file_delivery.branch));
@@ -587,6 +605,7 @@ fn write_toml(state: &WizardState) -> Result<()> {
         out.push_str("[[systems]]\n");
         out.push_str(&format!("id = {:?}\n", sys.id));
         out.push_str(&format!("name = {:?}\n", sys.name));
+        out.push_str("match_prefix = true\n");
         if !state.exclude_patterns.is_empty() {
             let exclude_toml: Vec<String> = state
                 .exclude_patterns
@@ -597,8 +616,7 @@ fn write_toml(state: &WizardState) -> Result<()> {
         }
     }
 
-    std::fs::write(OUTPUT_PATH, &out).context("Failed to write ward.toml")?;
-    Ok(())
+    out
 }
 
 fn print_summary(state: &WizardState) {
@@ -621,8 +639,8 @@ fn print_summary(state: &WizardState) {
     println!();
     println!("  Next steps:");
     println!("    ward repos list              - see matched repos");
-    println!("    ward security plan            - preview security changes");
-    println!("    ward security apply           - apply changes");
+    println!("    ward plan                    - preview changes");
+    println!("    ward apply                   - apply changes");
     println!();
 }
 
@@ -656,6 +674,8 @@ fn build_http_client(token: &str) -> Result<reqwest::Client> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Manifest;
+    use crate::config::manifest::ManagementDisposition;
 
     fn make_repo(name: &str, archived: bool) -> MinimalRepo {
         MinimalRepo {
@@ -743,5 +763,82 @@ mod tests {
     fn discover_prefixes_empty_input() {
         let prefixes = discover_prefixes(&[]);
         assert!(prefixes.is_empty());
+    }
+
+    #[test]
+    fn default_manifest_is_canonical_and_parseable() {
+        let manifest: Manifest = toml::from_str(EXAMPLE_MANIFEST).unwrap();
+        let security = manifest.categories.security.as_ref().unwrap();
+
+        assert_eq!(manifest.schema.version, 2);
+        assert!(security.secret_scanning.unwrap());
+        assert!(security.secret_scanning_push_protection.unwrap());
+        assert!(security.secret_scanning_ai_detection.unwrap());
+        assert_eq!(security.policy.disposition, ManagementDisposition::Managed);
+        crate::cli::plan::require_canonical_categories(&manifest, "plan").unwrap();
+        crate::cli::plan::require_canonical_categories(&manifest, "apply").unwrap();
+    }
+
+    #[test]
+    fn wizard_manifest_preserves_selected_settings_in_categories() {
+        let state = WizardState {
+            org: "example-org".to_owned(),
+            repo_count: 2,
+            security: SecuritySettings {
+                secret_scanning: false,
+                push_protection: true,
+                dependabot_alerts: false,
+                dependabot_security_updates: true,
+            },
+            branch_protection: BranchProtectionSettings {
+                enabled: false,
+                required_approvals: 3,
+                dismiss_stale_reviews: true,
+            },
+            systems: vec![SystemEntry {
+                id: "payments".to_owned(),
+                name: "Payments".to_owned(),
+                repo_count: 2,
+            }],
+            exclude_patterns: vec!["operations?".to_owned()],
+            file_delivery: FileDeliverySettings {
+                branch: "chore/ward".to_owned(),
+                reviewers: vec!["octocat".to_owned()],
+                commit_message_prefix: "chore: ".to_owned(),
+            },
+        };
+
+        let rendered = render_manifest(&state);
+        assert!(rendered.contains("[categories.security]"));
+        assert!(rendered.contains("[categories.branch_protection.default_branch]"));
+        assert!(!rendered.contains("\n[security]"));
+        assert!(!rendered.contains("\n[branch_protection]"));
+
+        let manifest: Manifest = toml::from_str(&rendered).unwrap();
+        let security = manifest.categories.security.as_ref().unwrap();
+        let branch_protection = manifest
+            .categories
+            .branch_protection
+            .as_ref()
+            .unwrap()
+            .default_branch
+            .as_ref()
+            .unwrap();
+
+        assert_eq!(manifest.org.name, "example-org");
+        assert_eq!(manifest.systems[0].id, "payments");
+        assert!(manifest.systems[0].match_prefix);
+        assert!(!security.secret_scanning.unwrap());
+        assert!(security.secret_scanning_push_protection.unwrap());
+        assert!(!security.dependabot_alerts.unwrap());
+        assert!(security.dependabot_security_updates.unwrap());
+        assert!(!branch_protection.enabled);
+        assert_eq!(branch_protection.required_approvals, 3);
+        assert!(branch_protection.dismiss_stale_reviews);
+        crate::cli::plan::require_canonical_categories(&manifest, "plan").unwrap();
+        crate::cli::plan::require_canonical_categories(&manifest, "apply").unwrap();
+        assert_eq!(manifest.file_delivery.branch, "chore/ward");
+        assert_eq!(manifest.file_delivery.reviewers, ["octocat"]);
+        assert_eq!(manifest.file_delivery.commit_message_prefix, "chore: ");
     }
 }

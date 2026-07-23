@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Manifest v2 with source provenance, per-category management policies, coverage evidence, stable references, and external-value placeholders
+- One category-based Ward manifest with source provenance, management policies, coverage evidence, stable references, and external-value placeholders
 - Comprehensive repository import for General settings, security, rulesets, detailed branch protection, Actions, environments, access, integrations, labels, and configuration files
 - `ward import --target`, `--include`, `--exclude`, and `--strict` for one-command baseline and target setup
 - Binary-safe configuration-file snapshots with Git modes, source SHAs, include/exclude globs, and atomic Git Data API commits
@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configuration files are always delivered through a dedicated branch and pull request; dependent enforcement is deferred until merge
 - Imported manifests target only the source repository unless existing same-owner targets are supplied explicitly
 - Generic managed-file delivery settings moved from `[templates]` to `[file_delivery]`
+- Focused plan/apply commands now use the same reconciliation engine and exact category scope as `ward plan` and `ward apply`
+- Per-system category blocks replace the corresponding global category while omitted categories inherit global desired state
 
 ### Removed
 
@@ -33,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed built-in/custom templates, ecosystem detection, and target-project version inference
 - Removed the unsafe `rollback`, redundant `setup`, template-management, and custom policy DSL commands
 - Removed dead dependencies, GitHub API wrappers, output modules, and audit-log rollback readers
+- Removed the old top-level manifest sections and their separate security planning engine
 
 ### Fixed
 

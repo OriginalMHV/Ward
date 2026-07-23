@@ -88,7 +88,7 @@ pub struct RepositoryCodeSecurityConfiguration {
     pub configuration: CodeSecurityConfiguration,
 }
 
-/// Current security state of a repository used by legacy security commands.
+/// Current security state used by repository inspection and focused security commands.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SecurityState {
     pub dependabot_alerts: bool,

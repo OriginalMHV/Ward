@@ -9,7 +9,7 @@ use ward::cli::commit::CommitCommand;
 use ward::cli::{Cli, Command};
 use ward::config::Manifest;
 use ward::config::manifest::{
-    CategoryPolicy, FilesCategoryV2, ManagedFile, ManifestSchema, SystemConfig,
+    CategoryPolicy, FileEncoding, FilesCategoryV2, ManagedFileV2, ManifestCategories, SystemConfig,
 };
 use ward::github::Client;
 use ward::github::commits::{
@@ -817,7 +817,7 @@ async fn ensure_dedicated_branch_encodes_refs_when_refreshing_stale_unicode_bran
 }
 
 // ---------------------------------------------------------------------------
-// commit apply: v2 Files guard and aggregated failures
+// commit apply: canonical files and aggregated failures
 // ---------------------------------------------------------------------------
 
 fn parse_commit_command(args: &[&str]) -> (CommitCommand, Option<String>, Option<String>) {
@@ -831,40 +831,7 @@ fn parse_commit_command(args: &[&str]) -> (CommitCommand, Option<String>, Option
 }
 
 #[tokio::test]
-async fn commit_apply_is_blocked_by_v2_files_guard() {
-    let mut manifest = Manifest::default();
-    manifest.org.name = "test-org".to_owned();
-    manifest.v2.schema = Some(ManifestSchema::v2());
-    manifest.v2.categories.files = Some(FilesCategoryV2 {
-        policy: CategoryPolicy::observe(),
-        include: Vec::new(),
-        exclude: Vec::new(),
-        entries: Vec::new(),
-    });
-
-    let (command, system, repo) =
-        parse_commit_command(&["ward", "commit", "apply", "--yes", "--repo", "target"]);
-
-    // The guard runs before any HTTP call, so the client is never contacted.
-    let client = Client::new_for_test("test-org", "http://127.0.0.1:0");
-    let error = command
-        .run(&client, &manifest, system.as_deref(), repo.as_deref())
-        .await
-        .unwrap_err();
-
-    let message = format!("{error}");
-    assert!(
-        message.contains("files"),
-        "guard should name the files category, got: {message}"
-    );
-    assert!(
-        message.contains("ward apply"),
-        "guard should redirect to ward apply, got: {message}"
-    );
-}
-
-#[tokio::test]
-async fn commit_apply_managed_files_returns_error_and_reports_all_failures() {
+async fn commit_apply_reports_collection_failures_for_every_repository() {
     let server = MockServer::start().await;
 
     for repo in ["repo-a", "repo-b"] {
@@ -877,18 +844,7 @@ async fn commit_apply_managed_files_returns_error_and_reports_all_failures() {
             .mount(&server)
             .await;
 
-        // Managed file is missing, so it counts as a change.
-        Mock::given(method("GET"))
-            .and(path(format!(
-                "/repos/test-org/{repo}/contents/.github/managed.yml"
-            )))
-            .respond_with(
-                ResponseTemplate::new(404).set_body_json(json!({ "message": "Not Found" })),
-            )
-            .mount(&server)
-            .await;
-
-        // Default head lookup during ensure_dedicated_branch.
+        // The ref exists, but the intentionally unmocked commit lookup blocks collection.
         Mock::given(method("GET"))
             .and(path(format!("/repos/test-org/{repo}/git/ref/heads/main")))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -899,37 +855,28 @@ async fn commit_apply_managed_files_returns_error_and_reports_all_failures() {
             .await;
     }
 
-    // Branch creation fails for the first repo.
-    Mock::given(method("POST"))
-        .and(path("/repos/test-org/repo-a/git/refs"))
-        .respond_with(ResponseTemplate::new(500).set_body_json(json!({ "message": "boom" })))
-        .mount(&server)
-        .await;
-
-    // The second repo must still be attempted even though the first failed.
-    Mock::given(method("POST"))
-        .and(path("/repos/test-org/repo-b/git/refs"))
-        .respond_with(ResponseTemplate::new(500).set_body_json(json!({ "message": "boom" })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
     let mut manifest = Manifest::default();
     manifest.org.name = "test-org".to_owned();
     manifest.file_delivery.branch = "chore/ward-sync".to_owned();
-    manifest.files = vec![ManagedFile {
-        path: ".github/managed.yml".to_owned(),
-        content: "version: 1\n".to_owned(),
-    }];
+    manifest.categories.files = Some(FilesCategoryV2 {
+        policy: CategoryPolicy::managed(),
+        include: Vec::new(),
+        exclude: Vec::new(),
+        entries: vec![ManagedFileV2 {
+            path: ".github/managed.yml".to_owned(),
+            content: "version: 1\n".to_owned(),
+            encoding: FileEncoding::Utf8,
+            mode: "100644".to_owned(),
+            source_sha: None,
+        }],
+    });
     manifest.systems = vec![SystemConfig {
         id: "sys".to_owned(),
         name: "System".to_owned(),
         match_prefix: false,
         exclude: Vec::new(),
         repos: vec!["repo-a".to_owned(), "repo-b".to_owned()],
-        security: None,
-        teams: Vec::new(),
-        rulesets: None,
+        categories: ManifestCategories::default(),
     }];
 
     let (command, system, repo) =
@@ -946,7 +893,7 @@ async fn commit_apply_managed_files_returns_error_and_reports_all_failures() {
     );
     let message = format!("{}", result.unwrap_err());
     assert!(
-        message.contains("2 of 2"),
+        message.contains("2 blocked category result"),
         "error should aggregate every failure, got: {message}"
     );
 }

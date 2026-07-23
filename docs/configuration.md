@@ -7,16 +7,13 @@ ward config path
 ward config show
 ```
 
-Manifest schema version 2 can be authored directly or generated through repository bootstrap. Legacy sections remain readable for backward compatibility, but comprehensive `ward plan` and `ward apply` use the versioned `categories` state.
+The Ward manifest can be authored directly or generated through repository bootstrap. Every command reads the same category-based desired state.
 
 ## Identity and optional provenance
 
 ```toml
 [org]
 name = "acme"
-
-[source]
-repository = "acme/reference-service"
 
 [schema]
 version = 2
@@ -31,7 +28,6 @@ default_branch_head_oid = "..."
 | Table | Purpose |
 |---|---|
 | `[org]` | Owner containing the existing target repositories |
-| `[source]` | Optional backward-compatible source repository reference |
 | `[schema]` | Manifest format version |
 | `[provenance]` | Optional source branch and stable source identity captured during repository bootstrap |
 
@@ -225,7 +221,7 @@ Inherited organization or enterprise rulesets are stored under `[[categories.rul
 
 ## `[categories.branch_protection]`
 
-The category stores both a backward-compatible default-branch summary and detailed state:
+The category supports both a compact default-branch policy and detailed per-branch state:
 
 ```toml
 [categories.branch_protection.policy]
@@ -517,6 +513,26 @@ When `match_prefix = true`, Ward finds repositories named exactly `id` or beginn
 
 Global `--repo` and `--system` flags narrow this set.
 
+### Per-system category overrides
+
+Any category may be configured under a system:
+
+```toml
+[[systems]]
+id = "payments"
+name = "Payments"
+
+[systems.categories.access.policy]
+disposition = "managed"
+sensitive = true
+
+[[systems.categories.access.teams]]
+slug = "payments-maintainers"
+permission = "maintain"
+```
+
+A category present under `systems.categories` replaces the global category for repositories in that system. Omitted system categories inherit the global desired state. Ward does not deep-merge category fields.
+
 ## `[file_delivery]`
 
 ```toml
@@ -527,22 +543,6 @@ commit_message_prefix = "chore: "
 ```
 
 These fields control the configuration-file branch, commit/PR title prefix, and requested reviewers.
-
-## Legacy compatibility
-
-Ward still loads the legacy sections:
-
-- `[security]`
-- `[repository]`
-- `[branch_protection]`
-- `[rulesets.branch_protection]`
-- `[[rulesets.repository]]`
-- `[[files]]`
-- team entries under `[[systems]]`
-
-They are retained for existing manifests and focused legacy commands. New imports also emit compatibility fields, but v2 categories are authoritative for comprehensive plan/apply and safety gates.
-
-Use `ward apply --category <CATEGORY>` for imported v2 state rather than bypassing category policies through an older command.
 
 ## Complete example
 

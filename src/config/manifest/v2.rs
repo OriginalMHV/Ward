@@ -2,17 +2,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{
-    BranchProtectionConfig, ManagedFile, Manifest, RepositoryRuleConfig, RepositoryRulesetConfig,
-    RepositorySettingsConfig, RulesetBypassActorConfig, SecurityConfig, SourceConfig, TeamAccess,
+    BranchProtectionConfig, Manifest, RepositoryRuleConfig, RepositorySettingsConfig, TeamAccess,
 };
 
 const MANIFEST_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(transparent)]
-pub struct ManifestDocumentV2(pub Manifest);
+pub struct ManifestDocument(pub Manifest);
 
-impl ManifestDocumentV2 {
+impl ManifestDocument {
     pub fn into_manifest(self) -> Manifest {
         self.0
     }
@@ -22,7 +21,7 @@ impl ManifestDocumentV2 {
     }
 }
 
-impl std::ops::Deref for ManifestDocumentV2 {
+impl std::ops::Deref for ManifestDocument {
     type Target = Manifest;
 
     fn deref(&self) -> &Self::Target {
@@ -30,76 +29,21 @@ impl std::ops::Deref for ManifestDocumentV2 {
     }
 }
 
-impl std::ops::DerefMut for ManifestDocumentV2 {
+impl std::ops::DerefMut for ManifestDocument {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl From<&Manifest> for ManifestDocumentV2 {
+impl From<&Manifest> for ManifestDocument {
     fn from(manifest: &Manifest) -> Self {
-        let mut manifest = manifest.clone();
-        manifest.ensure_v2_defaults();
-        // Once access has a lossless v2 representation, do not render the
-        // legacy per-system team field as a second source of truth.
-        if manifest.v2.categories.access.is_some() {
-            for system in &mut manifest.systems {
-                system.teams.clear();
-            }
-        }
-        Self(manifest)
+        Self(manifest.clone())
     }
 }
 
 impl Manifest {
-    pub fn to_document_v2(&self) -> ManifestDocumentV2 {
-        ManifestDocumentV2::from(self)
-    }
-
-    pub fn ensure_v2_defaults(&mut self) {
-        let foundation = ManifestV2State::foundation_from_manifest(self);
-        self.v2.merge_missing(foundation);
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
-pub struct ManifestV2State {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub schema: Option<ManifestSchema>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provenance: Option<ManifestProvenance>,
-
-    #[serde(default, skip_serializing_if = "ManifestCategories::is_empty")]
-    pub categories: ManifestCategories,
-
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub coverage: Vec<CoverageEntry>,
-}
-
-impl ManifestV2State {
-    pub fn foundation_from_manifest(manifest: &Manifest) -> Self {
-        Self {
-            schema: Some(ManifestSchema::v2()),
-            provenance: manifest
-                .source
-                .as_ref()
-                .map(ManifestProvenance::from_source),
-            categories: ManifestCategories::foundation_from_manifest(manifest),
-            coverage: Vec::new(),
-        }
-    }
-
-    fn merge_missing(&mut self, foundation: Self) {
-        if self.schema.is_none() {
-            self.schema = foundation.schema;
-        }
-
-        if self.provenance.is_none() {
-            self.provenance = foundation.provenance;
-        }
-
-        self.categories.merge_missing(foundation.categories);
+    pub fn to_document(&self) -> ManifestDocument {
+        ManifestDocument::from(self)
     }
 }
 
@@ -109,7 +53,7 @@ pub struct ManifestSchema {
 }
 
 impl ManifestSchema {
-    pub const fn v2() -> Self {
+    pub const fn current() -> Self {
         Self {
             version: MANIFEST_SCHEMA_VERSION,
         }
@@ -128,17 +72,6 @@ pub struct ManifestProvenance {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_branch_head_oid: Option<String>,
-}
-
-impl ManifestProvenance {
-    fn from_source(source: &SourceConfig) -> Self {
-        Self {
-            repository: source.repository.clone(),
-            default_branch: None,
-            repository_node_id: None,
-            default_branch_head_oid: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
@@ -174,50 +107,6 @@ pub struct ManifestCategories {
 impl ManifestCategories {
     pub fn is_empty(&self) -> bool {
         self == &Self::default()
-    }
-
-    fn foundation_from_manifest(manifest: &Manifest) -> Self {
-        Self {
-            security: Some(SecurityCategoryV2::from_manifest(manifest)),
-            repository: Some(RepositoryCategoryV2::from_manifest(manifest)),
-            branch_protection: Some(BranchProtectionCategoryV2::from_manifest(manifest)),
-            rulesets: Some(RulesetsCategoryV2::from_manifest(manifest)),
-            files: Some(FilesCategoryV2::from_manifest(manifest)),
-            actions: Some(ActionsCategoryV2::observe_sensitive()),
-            environments: Some(EnvironmentsCategoryV2::observe_sensitive()),
-            access: RepositoryAccessCategoryV2::from_manifest(manifest),
-            integrations: Some(RepositoryIntegrationsCategoryV2::observe_sensitive()),
-        }
-    }
-
-    fn merge_missing(&mut self, foundation: Self) {
-        if self.security.is_none() {
-            self.security = foundation.security;
-        }
-        if self.repository.is_none() {
-            self.repository = foundation.repository;
-        }
-        if self.branch_protection.is_none() {
-            self.branch_protection = foundation.branch_protection;
-        }
-        if self.rulesets.is_none() {
-            self.rulesets = foundation.rulesets;
-        }
-        if self.files.is_none() {
-            self.files = foundation.files;
-        }
-        if self.actions.is_none() {
-            self.actions = foundation.actions;
-        }
-        if self.environments.is_none() {
-            self.environments = foundation.environments;
-        }
-        if self.access.is_none() {
-            self.access = foundation.access;
-        }
-        if self.integrations.is_none() {
-            self.integrations = foundation.integrations;
-        }
     }
 }
 
@@ -318,9 +207,6 @@ pub struct SecurityCategoryV2 {
     pub policy: CategoryPolicy,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub settings: Option<SecurityConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub advanced_security: Option<bool>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -382,33 +268,6 @@ impl SecurityCategoryV2 {
     pub fn observe_sensitive() -> Self {
         Self {
             policy: CategoryPolicy::observe_sensitive(),
-            settings: None,
-            advanced_security: None,
-            code_security: None,
-            dependabot_alerts: None,
-            dependabot_security_updates: None,
-            secret_scanning: None,
-            secret_scanning_push_protection: None,
-            secret_scanning_validity_checks: None,
-            secret_scanning_non_provider_patterns: None,
-            secret_scanning_ai_detection: None,
-            secret_scanning_delegated_alert_dismissal: None,
-            secret_scanning_delegated_bypass: None,
-            secret_scanning_delegated_alert_dismissal_options: None,
-            secret_scanning_delegated_bypass_options: None,
-            private_vulnerability_reporting: None,
-            codeql_default_setup: None,
-            configuration_reference: None,
-            delegated_alert_dismissal_reviewers: Vec::new(),
-            delegated_bypass_reviewers: Vec::new(),
-            references: Vec::new(),
-        }
-    }
-
-    fn from_manifest(manifest: &Manifest) -> Self {
-        Self {
-            policy: CategoryPolicy::managed(),
-            settings: Some(manifest.security.clone()),
             advanced_security: None,
             code_security: None,
             dependabot_alerts: None,
@@ -488,23 +347,6 @@ pub struct RepositoryCategoryV2 {
     pub references: Vec<ReferencedResourceConfig>,
 }
 
-impl RepositoryCategoryV2 {
-    fn from_manifest(manifest: &Manifest) -> Self {
-        Self {
-            policy: if manifest.repository.is_some() {
-                CategoryPolicy::managed()
-            } else {
-                CategoryPolicy::observe()
-            },
-            settings: manifest.repository.clone(),
-            metadata: None,
-            custom_properties: Vec::new(),
-            immutable_releases: None,
-            references: Vec::new(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct RepositoryMetadataConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -564,15 +406,6 @@ impl BranchProtectionCategoryV2 {
         Self {
             policy: CategoryPolicy::observe(),
             default_branch: None,
-            default_branch_detailed: None,
-            protected_branches: Vec::new(),
-        }
-    }
-
-    fn from_manifest(manifest: &Manifest) -> Self {
-        Self {
-            policy: CategoryPolicy::managed(),
-            default_branch: Some(manifest.branch_protection.clone()),
             default_branch_detailed: None,
             protected_branches: Vec::new(),
         }
@@ -696,26 +529,6 @@ impl RulesetsCategoryV2 {
             repository_rulesets: Vec::new(),
         }
     }
-
-    fn from_manifest(manifest: &Manifest) -> Self {
-        let managed = manifest.rulesets.branch_protection.is_some()
-            || !manifest.rulesets.repository.is_empty();
-
-        Self {
-            policy: if managed {
-                CategoryPolicy::managed()
-            } else {
-                CategoryPolicy::observe()
-            },
-            references: Vec::new(),
-            repository_rulesets: manifest
-                .rulesets
-                .repository
-                .iter()
-                .map(RepositoryRulesetV2::from)
-                .collect(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -743,38 +556,12 @@ pub struct RepositoryRulesetV2 {
     pub bypass_actors: Vec<RulesetBypassActorV2>,
 }
 
-impl From<&RepositoryRulesetConfig> for RepositoryRulesetV2 {
-    fn from(config: &RepositoryRulesetConfig) -> Self {
-        Self {
-            name: config.name.clone(),
-            target: config.target.clone(),
-            enforcement: config.enforcement.clone(),
-            conditions_json: config.conditions_json.clone(),
-            rules: config.rules.clone(),
-            bypass_actors: config
-                .bypass_actors
-                .iter()
-                .map(RulesetBypassActorV2::from)
-                .collect(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct RulesetBypassActorV2 {
     pub actor: ActorReference,
 
     #[serde(default = "default_bypass_mode")]
     pub bypass_mode: String,
-}
-
-impl From<&RulesetBypassActorConfig> for RulesetBypassActorV2 {
-    fn from(config: &RulesetBypassActorConfig) -> Self {
-        Self {
-            actor: ActorReference::from_legacy(config),
-            bypass_mode: config.bypass_mode.clone(),
-        }
-    }
 }
 
 fn default_bypass_mode() -> String {
@@ -796,21 +583,6 @@ pub struct FilesCategoryV2 {
     pub entries: Vec<ManagedFileV2>,
 }
 
-impl FilesCategoryV2 {
-    fn from_manifest(manifest: &Manifest) -> Self {
-        Self {
-            policy: if manifest.files.is_empty() {
-                CategoryPolicy::observe()
-            } else {
-                CategoryPolicy::managed()
-            },
-            include: Vec::new(),
-            exclude: Vec::new(),
-            entries: manifest.files.iter().map(ManagedFileV2::from).collect(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ManagedFileV2 {
     pub path: String,
@@ -824,18 +596,6 @@ pub struct ManagedFileV2 {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_sha: Option<String>,
-}
-
-impl From<&ManagedFile> for ManagedFileV2 {
-    fn from(file: &ManagedFile) -> Self {
-        Self {
-            path: file.path.clone(),
-            content: file.content.clone(),
-            encoding: FileEncoding::Utf8,
-            mode: default_file_mode(),
-            source_sha: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -1057,44 +817,6 @@ impl RepositoryAccessCategoryV2 {
             ..Self::default()
         }
     }
-
-    fn from_manifest(manifest: &Manifest) -> Option<Self> {
-        if manifest.systems.is_empty() {
-            return Some(Self::observe_sensitive());
-        }
-
-        let mut teams_by_system = manifest.systems.iter().map(|system| {
-            let mut teams = system.teams.clone();
-            teams.sort_by(|left, right| {
-                left.slug
-                    .cmp(&right.slug)
-                    .then_with(|| left.permission.cmp(&right.permission))
-            });
-            teams.dedup_by(|left, right| {
-                left.slug == right.slug && left.permission == right.permission
-            });
-            teams
-        });
-        let first = teams_by_system.next().unwrap_or_default();
-
-        // A global v2 access policy cannot safely represent different legacy
-        // team grants per system. Leave access absent so the scoped legacy
-        // configuration remains authoritative instead of flattening it.
-        if teams_by_system.any(|teams| teams != first) {
-            return None;
-        }
-
-        Some(Self {
-            policy: if first.is_empty() {
-                CategoryPolicy::observe_sensitive()
-            } else {
-                CategoryPolicy::managed()
-            },
-            teams: first,
-            collaborators: Vec::new(),
-            references: Vec::new(),
-        })
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -1288,20 +1010,4 @@ pub enum ActorReference {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         actor_id: Option<u64>,
     },
-}
-
-impl ActorReference {
-    fn from_legacy(config: &RulesetBypassActorConfig) -> Self {
-        if let Some(slug) = &config.team_slug {
-            return Self::Team { slug: slug.clone() };
-        }
-
-        match config.actor_type.as_str() {
-            "OrganizationAdmin" => Self::OrganizationAdmin,
-            _ => Self::Unresolved {
-                actor_type: config.actor_type.clone(),
-                actor_id: config.actor_id,
-            },
-        }
-    }
 }

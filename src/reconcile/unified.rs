@@ -1,4 +1,4 @@
-//! Unified plan/apply orchestration across all manifest v2 categories.
+//! Unified plan/apply orchestration across all manifest categories.
 //!
 //! This module ties the individual category reconcilers (general/repository,
 //! files, security, rulesets, branch protection, actions, environments,
@@ -12,9 +12,8 @@ use serde::Serialize;
 
 use crate::config::Manifest;
 use crate::config::manifest::{
-    ActionsCategoryV2, BranchProtectionCategoryV2, CategoryPolicy, CoverageEntry, CoverageOutcome,
-    EnvironmentsCategoryV2, FilesCategoryV2, ManagementDisposition, RepositoryAccessCategoryV2,
-    RepositoryCategoryV2, RepositoryIntegrationsCategoryV2, RulesetsCategoryV2,
+    ActionsCategoryV2, CoverageEntry, CoverageOutcome, ManagementDisposition, ManifestCategories,
+    RepositoryIntegrationsCategoryV2,
 };
 use crate::engine::audit_log::AuditLog;
 use crate::github::Client;
@@ -121,6 +120,7 @@ pub fn parse_categories(values: &[String]) -> Result<Vec<Category>> {
 pub struct UnifiedOptions {
     pub categories: Vec<Category>,
     pub allow_high_impact: bool,
+    pub verify: bool,
 }
 
 impl UnifiedOptions {
@@ -432,13 +432,13 @@ pub async fn resolve_target_repos(
 // Desired-state assembly
 // ---------------------------------------------------------------------------
 
-/// Build the combined general/repository desired state: the manifest v2
+/// Build the combined general/repository desired state: the manifest
 /// repository category plus labels stored in the integrations category. The
 /// repository category policy governs whether those labels are managed.
-fn build_general_desired(manifest: &Manifest) -> Option<general::GeneralDesiredState> {
-    let repository = manifest.v2_categories().repository.clone()?;
+fn build_general_desired(categories: &ManifestCategories) -> Option<general::GeneralDesiredState> {
+    let repository = categories.repository.clone()?;
     let mut desired = general::GeneralDesiredState::from(repository);
-    if let Some(integrations) = manifest.v2_categories().integrations.as_ref() {
+    if let Some(integrations) = categories.integrations.as_ref() {
         desired.labels = integrations
             .labels
             .iter()
@@ -485,13 +485,14 @@ async fn plan_repo(
     options: &UnifiedOptions,
 ) -> RepoPlan {
     let repo = repository.name.clone();
+    let desired_categories = manifest.categories_for_repo(&repo);
     let mut categories = Vec::new();
 
     for category in Category::apply_order() {
         if !options.includes(category) {
             continue;
         }
-        let planned = plan_category(client, manifest, &repo, category, options).await;
+        let planned = plan_category(client, &desired_categories, &repo, category, options).await;
         categories.push(planned);
     }
 
@@ -504,21 +505,21 @@ async fn plan_repo(
 
 async fn plan_category(
     client: &Client,
-    manifest: &Manifest,
+    categories: &ManifestCategories,
     repo: &str,
     category: Category,
     options: &UnifiedOptions,
 ) -> CategoryPlan {
     match category {
-        Category::Repository => plan_repository(client, manifest, repo, options).await,
-        Category::Files => plan_files(client, manifest, repo).await,
-        Category::Security => plan_security(client, manifest, repo).await,
-        Category::Rulesets => plan_rulesets(client, manifest, repo).await,
-        Category::BranchProtection => plan_branch_protection(client, manifest, repo).await,
-        Category::Actions => plan_actions(client, manifest, repo).await,
-        Category::Environments => plan_environments(client, manifest, repo).await,
-        Category::Access => plan_access(client, manifest, repo).await,
-        Category::Integrations => plan_integrations(client, manifest, repo).await,
+        Category::Repository => plan_repository(client, categories, repo, options).await,
+        Category::Files => plan_files(client, categories, repo).await,
+        Category::Security => plan_security(client, categories, repo).await,
+        Category::Rulesets => plan_rulesets(client, categories, repo).await,
+        Category::BranchProtection => plan_branch_protection(client, categories, repo).await,
+        Category::Actions => plan_actions(client, categories, repo).await,
+        Category::Environments => plan_environments(client, categories, repo).await,
+        Category::Access => plan_access(client, categories, repo).await,
+        Category::Integrations => plan_integrations(client, categories, repo).await,
     }
 }
 
@@ -557,11 +558,11 @@ fn collection_failed(
 
 async fn plan_repository(
     client: &Client,
-    manifest: &Manifest,
+    categories: &ManifestCategories,
     repo: &str,
     options: &UnifiedOptions,
 ) -> CategoryPlan {
-    let Some(desired) = build_general_desired(manifest) else {
+    let Some(desired) = build_general_desired(categories) else {
         return absent_category(Category::Repository);
     };
     let disposition = desired.repository.policy.disposition;
@@ -604,8 +605,8 @@ async fn plan_repository(
     }
 }
 
-async fn plan_files(client: &Client, manifest: &Manifest, repo: &str) -> CategoryPlan {
-    let Some(desired) = manifest.v2_categories().files.clone() else {
+async fn plan_files(client: &Client, categories: &ManifestCategories, repo: &str) -> CategoryPlan {
+    let Some(desired) = categories.files.clone() else {
         return absent_category(Category::Files);
     };
     let disposition = desired.policy.disposition;
@@ -652,8 +653,12 @@ async fn plan_files(client: &Client, manifest: &Manifest, repo: &str) -> Categor
     }
 }
 
-async fn plan_security(client: &Client, manifest: &Manifest, repo: &str) -> CategoryPlan {
-    let Some(desired) = manifest.v2_categories().security.clone() else {
+async fn plan_security(
+    client: &Client,
+    categories: &ManifestCategories,
+    repo: &str,
+) -> CategoryPlan {
+    let Some(desired) = categories.security.clone() else {
         return absent_category(Category::Security);
     };
     let disposition = desired.policy.disposition;
@@ -686,8 +691,12 @@ async fn plan_security(client: &Client, manifest: &Manifest, repo: &str) -> Cate
     }
 }
 
-async fn plan_rulesets(client: &Client, manifest: &Manifest, repo: &str) -> CategoryPlan {
-    let Some(desired) = manifest.v2_categories().rulesets.clone() else {
+async fn plan_rulesets(
+    client: &Client,
+    categories: &ManifestCategories,
+    repo: &str,
+) -> CategoryPlan {
+    let Some(desired) = categories.rulesets.clone() else {
         return absent_category(Category::Rulesets);
     };
     let disposition = desired.policy.disposition;
@@ -724,8 +733,12 @@ async fn plan_rulesets(client: &Client, manifest: &Manifest, repo: &str) -> Cate
     }
 }
 
-async fn plan_branch_protection(client: &Client, manifest: &Manifest, repo: &str) -> CategoryPlan {
-    let Some(desired) = manifest.v2_categories().branch_protection.clone() else {
+async fn plan_branch_protection(
+    client: &Client,
+    categories: &ManifestCategories,
+    repo: &str,
+) -> CategoryPlan {
+    let Some(desired) = categories.branch_protection.clone() else {
         return absent_category(Category::BranchProtection);
     };
     let disposition = desired.policy.disposition;
@@ -772,8 +785,12 @@ async fn plan_branch_protection(client: &Client, manifest: &Manifest, repo: &str
     }
 }
 
-async fn plan_actions(client: &Client, manifest: &Manifest, repo: &str) -> CategoryPlan {
-    let Some(desired) = manifest.v2_categories().actions.clone() else {
+async fn plan_actions(
+    client: &Client,
+    categories: &ManifestCategories,
+    repo: &str,
+) -> CategoryPlan {
+    let Some(desired) = categories.actions.clone() else {
         return absent_category(Category::Actions);
     };
     let disposition = desired.policy.disposition;
@@ -803,8 +820,12 @@ async fn plan_actions(client: &Client, manifest: &Manifest, repo: &str) -> Categ
     }
 }
 
-async fn plan_environments(client: &Client, manifest: &Manifest, repo: &str) -> CategoryPlan {
-    let Some(desired) = manifest.v2_categories().environments.clone() else {
+async fn plan_environments(
+    client: &Client,
+    categories: &ManifestCategories,
+    repo: &str,
+) -> CategoryPlan {
+    let Some(desired) = categories.environments.clone() else {
         return absent_category(Category::Environments);
     };
     let disposition = desired.policy.disposition;
@@ -844,8 +865,8 @@ async fn plan_environments(client: &Client, manifest: &Manifest, repo: &str) -> 
     }
 }
 
-async fn plan_access(client: &Client, manifest: &Manifest, repo: &str) -> CategoryPlan {
-    let Some(desired) = manifest.v2_categories().access.clone() else {
+async fn plan_access(client: &Client, categories: &ManifestCategories, repo: &str) -> CategoryPlan {
+    let Some(desired) = categories.access.clone() else {
         return absent_category(Category::Access);
     };
     let disposition = desired.policy.disposition;
@@ -884,8 +905,12 @@ async fn plan_access(client: &Client, manifest: &Manifest, repo: &str) -> Catego
     }
 }
 
-async fn plan_integrations(client: &Client, manifest: &Manifest, repo: &str) -> CategoryPlan {
-    let Some(desired) = manifest.v2_categories().integrations.clone() else {
+async fn plan_integrations(
+    client: &Client,
+    categories: &ManifestCategories,
+    repo: &str,
+) -> CategoryPlan {
+    let Some(desired) = categories.integrations.clone() else {
         return absent_category(Category::Integrations);
     };
     let disposition = desired.policy.disposition;
@@ -959,7 +984,15 @@ pub async fn apply(
 
     let mut repo_reports = Vec::with_capacity(prepared.len());
     for (plan, existing_config_pr) in prepared {
-        let report = apply_repo(client, manifest, plan, existing_config_pr, audit).await;
+        let report = apply_repo(
+            client,
+            manifest,
+            plan,
+            existing_config_pr,
+            options.verify,
+            audit,
+        )
+        .await;
         repo_reports.push(report);
     }
     Ok(UnifiedReport::from_repos(repo_reports))
@@ -970,12 +1003,14 @@ async fn apply_repo(
     manifest: &Manifest,
     plan: RepoPlan,
     existing_config_pr: bool,
+    verify: bool,
     audit: &AuditLog,
 ) -> RepoReport {
     let repo = plan.repo.clone();
     let default_branch = plan.default_branch.clone();
     let branch = sync_branch(manifest);
     let commit_prefix = commit_prefix(manifest);
+    let desired_categories = manifest.categories_for_repo(&repo);
 
     let mut config_pr_pending = existing_config_pr;
     let mut reports = Vec::with_capacity(plan.categories.len());
@@ -984,12 +1019,14 @@ async fn apply_repo(
         let report = apply_category(
             client,
             manifest,
+            &desired_categories,
             &repo,
             &default_branch,
             &branch,
             &commit_prefix,
             &category,
             config_pr_pending,
+            verify,
             audit,
         )
         .await;
@@ -1011,12 +1048,14 @@ async fn apply_repo(
 async fn apply_category(
     client: &Client,
     manifest: &Manifest,
+    desired_categories: &ManifestCategories,
     repo: &str,
     default_branch: &str,
     branch: &str,
     commit_prefix: &str,
     category: &CategoryPlan,
     config_pr_pending: bool,
+    verify: bool,
     audit: &AuditLog,
 ) -> CategoryReport {
     // Never silently proceed past a failed collection.
@@ -1061,6 +1100,7 @@ async fn apply_category(
             apply_files(
                 client,
                 manifest,
+                desired_categories,
                 repo,
                 default_branch,
                 branch,
@@ -1072,12 +1112,21 @@ async fn apply_category(
             .await
         }
         CategoryPlanKind::Security(plan) => {
-            apply_security(client, manifest, repo, category, plan, audit).await
+            apply_security(
+                client,
+                desired_categories,
+                repo,
+                category,
+                plan,
+                verify,
+                audit,
+            )
+            .await
         }
         CategoryPlanKind::Actions(plan) => {
             apply_actions(
                 client,
-                manifest,
+                desired_categories,
                 repo,
                 category,
                 plan,
@@ -1087,15 +1136,15 @@ async fn apply_category(
             .await
         }
         CategoryPlanKind::Environments(plan) => {
-            apply_environments(client, manifest, repo, category, plan, audit).await
+            apply_environments(client, desired_categories, repo, category, plan, audit).await
         }
         CategoryPlanKind::Access(plan) => {
-            apply_access(client, manifest, repo, category, plan, audit).await
+            apply_access(client, desired_categories, repo, category, plan, audit).await
         }
         CategoryPlanKind::Integrations(plan) => {
             apply_integrations(
                 client,
-                manifest,
+                desired_categories,
                 repo,
                 category,
                 plan,
@@ -1107,7 +1156,7 @@ async fn apply_category(
         CategoryPlanKind::Rulesets(plan) => {
             apply_rulesets(
                 client,
-                manifest,
+                desired_categories,
                 repo,
                 category,
                 plan,
@@ -1119,7 +1168,7 @@ async fn apply_category(
         CategoryPlanKind::BranchProtection(plan) => {
             apply_branch_protection(
                 client,
-                manifest,
+                desired_categories,
                 repo,
                 category,
                 plan,
@@ -1157,6 +1206,7 @@ async fn apply_repository(
 async fn apply_files(
     client: &Client,
     manifest: &Manifest,
+    desired_categories: &ManifestCategories,
     repo: &str,
     default_branch: &str,
     branch: &str,
@@ -1165,7 +1215,7 @@ async fn apply_files(
     _default_branch_plan: &files::FilesPlan,
     audit: &AuditLog,
 ) -> CategoryReport {
-    let Some(desired) = manifest.v2_categories().files.clone() else {
+    let Some(desired) = desired_categories.files.clone() else {
         return category.to_report("skipped", 0, None);
     };
 
@@ -1263,16 +1313,19 @@ fn files_apply_report(
 
 async fn apply_security(
     client: &Client,
-    manifest: &Manifest,
+    desired_categories: &ManifestCategories,
     repo: &str,
     category: &CategoryPlan,
     plan: &security_rules::SecurityPlan,
+    verify: bool,
     audit: &AuditLog,
 ) -> CategoryReport {
     if let Err(error) = security_rules::apply_security_plan(client, repo, plan).await {
         return failure(audit, repo, category, error);
     }
-    let verified = if let Some(desired) = manifest.v2_categories().security.as_ref() {
+    let verified = if !verify {
+        None
+    } else if let Some(desired) = desired_categories.security.as_ref() {
         match security_rules::verify_security_category(client, repo, desired).await {
             Ok(result) => Some(result.matches),
             Err(error) => return failure(audit, repo, category, error),
@@ -1286,7 +1339,7 @@ async fn apply_security(
 #[allow(clippy::too_many_arguments)]
 async fn apply_actions(
     client: &Client,
-    manifest: &Manifest,
+    desired_categories: &ManifestCategories,
     repo: &str,
     category: &CategoryPlan,
     plan: &actions_environments::ActionsPlan,
@@ -1310,7 +1363,7 @@ async fn apply_actions(
         Err(error) => return failure(audit, repo, category, error),
     }
 
-    let verified = if let Some(desired) = manifest.v2_categories().actions.as_ref() {
+    let verified = if let Some(desired) = desired_categories.actions.as_ref() {
         if config_pr_pending {
             match verify_actions_safe_subset(client, repo, desired).await {
                 Ok(matches) => Some(matches),
@@ -1331,7 +1384,7 @@ async fn apply_actions(
 
 async fn apply_environments(
     client: &Client,
-    manifest: &Manifest,
+    desired_categories: &ManifestCategories,
     repo: &str,
     category: &CategoryPlan,
     plan: &actions_environments::EnvironmentsPlan,
@@ -1349,7 +1402,7 @@ async fn apply_environments(
         }
         Err(error) => return failure(audit, repo, category, error),
     }
-    let verified = if let Some(desired) = manifest.v2_categories().environments.as_ref() {
+    let verified = if let Some(desired) = desired_categories.environments.as_ref() {
         match actions_environments::verify_environments_category(client, repo, desired).await {
             Ok(result) => Some(result.compliant),
             Err(error) => return failure(audit, repo, category, error),
@@ -1362,7 +1415,7 @@ async fn apply_environments(
 
 async fn apply_access(
     client: &Client,
-    manifest: &Manifest,
+    desired_categories: &ManifestCategories,
     repo: &str,
     category: &CategoryPlan,
     plan: &access_integrations::AccessPlan,
@@ -1375,7 +1428,7 @@ async fn apply_access(
     if !report.blocked.is_empty() {
         return blocked_with_message(audit, repo, category, report.blocked.join("; "));
     }
-    let verified = if let Some(desired) = manifest.v2_categories().access.as_ref() {
+    let verified = if let Some(desired) = desired_categories.access.as_ref() {
         match access_integrations::verify_access(client, repo, desired).await {
             Ok(result) => Some(result.is_ok()),
             Err(error) => return failure(audit, repo, category, error),
@@ -1389,7 +1442,7 @@ async fn apply_access(
 #[allow(clippy::too_many_arguments)]
 async fn apply_integrations(
     client: &Client,
-    manifest: &Manifest,
+    desired_categories: &ManifestCategories,
     repo: &str,
     category: &CategoryPlan,
     plan: &access_integrations::IntegrationsPlan,
@@ -1405,7 +1458,7 @@ async fn apply_integrations(
     if !report.blocked.is_empty() {
         return blocked_with_message(audit, repo, category, report.blocked.join("; "));
     }
-    let verified = if let Some(desired) = manifest.v2_categories().integrations.as_ref() {
+    let verified = if let Some(desired) = desired_categories.integrations.as_ref() {
         if config_pr_pending {
             match verify_integrations_safe_subset(client, repo, desired).await {
                 Ok(matches) => Some(matches),
@@ -1426,7 +1479,7 @@ async fn apply_integrations(
 #[allow(clippy::too_many_arguments)]
 async fn apply_rulesets(
     client: &Client,
-    manifest: &Manifest,
+    desired_categories: &ManifestCategories,
     repo: &str,
     category: &CategoryPlan,
     plan: &security_rules::RulesetsPlan,
@@ -1436,7 +1489,7 @@ async fn apply_rulesets(
     if let Err(error) = security_rules::apply_rulesets_plan(client, repo, plan).await {
         return failure(audit, repo, category, error);
     }
-    let verified = if let Some(desired) = manifest.v2_categories().rulesets.as_ref() {
+    let verified = if let Some(desired) = desired_categories.rulesets.as_ref() {
         match security_rules::verify_rulesets_category(client, repo, desired).await {
             Ok(result) => Some(result.matches),
             Err(error) => return failure(audit, repo, category, error),
@@ -1450,7 +1503,7 @@ async fn apply_rulesets(
 #[allow(clippy::too_many_arguments)]
 async fn apply_branch_protection(
     client: &Client,
-    manifest: &Manifest,
+    desired_categories: &ManifestCategories,
     repo: &str,
     category: &CategoryPlan,
     plan: &security_rules::BranchProtectionPlan,
@@ -1460,7 +1513,7 @@ async fn apply_branch_protection(
     if let Err(error) = security_rules::apply_branch_protection_plan(client, repo, plan).await {
         return failure(audit, repo, category, error);
     }
-    let verified = if let Some(desired) = manifest.v2_categories().branch_protection.as_ref() {
+    let verified = if let Some(desired) = desired_categories.branch_protection.as_ref() {
         match security_rules::verify_branch_protection_category(client, repo, desired).await {
             Ok(result) => Some(result.matches),
             Err(error) => return failure(audit, repo, category, error),
@@ -1751,91 +1804,6 @@ fn audit_category(
     ) {
         tracing::warn!(%error, repo, category = category.name.stable_name(), "Failed to write Ward audit entry");
     }
-}
-
-// ---------------------------------------------------------------------------
-// Legacy path safety guard
-// ---------------------------------------------------------------------------
-
-/// Refuse a legacy category-specific mutation when the v2 manifest marks that
-/// category as observe/reference/placeholder, so unsafe legacy defaults can
-/// never bypass v2 policy. Managed v2 categories still direct users to the
-/// unified command for consistent, ordered, verified application.
-pub fn guard_legacy_mutation(
-    manifest: &Manifest,
-    category: Category,
-    legacy_command: &str,
-) -> Result<()> {
-    // Only guard v2 manifests. Pre-v2 manifests keep their legacy behaviour
-    // untouched, while hand-written v2 categories are honored even when the
-    // optional schema marker was omitted.
-    if manifest.v2_schema().is_none() && manifest.v2_categories().is_empty() {
-        return Ok(());
-    }
-    let Some(policy) = category_policy(manifest, category) else {
-        return Ok(());
-    };
-    if policy.disposition != ManagementDisposition::Managed {
-        bail!(
-            "Category `{name}` is `{disposition}` in this v2 manifest; `ward {legacy_command}` must not mutate it. Use `ward apply --category {name}`.",
-            name = category.stable_name(),
-            disposition = disposition_label(policy.disposition),
-        );
-    }
-    Ok(())
-}
-
-fn category_policy(manifest: &Manifest, category: Category) -> Option<CategoryPolicy> {
-    let categories = manifest.v2_categories();
-    let policy = match category {
-        Category::Repository => categories.repository.as_ref().map(policy_of_repository)?,
-        Category::Files => categories.files.as_ref().map(policy_of_files)?,
-        Category::Security => categories.security.as_ref().map(policy_of_security)?,
-        Category::Rulesets => categories.rulesets.as_ref().map(policy_of_rulesets)?,
-        Category::BranchProtection => categories
-            .branch_protection
-            .as_ref()
-            .map(policy_of_branch_protection)?,
-        Category::Actions => categories.actions.as_ref().map(policy_of_actions)?,
-        Category::Environments => categories
-            .environments
-            .as_ref()
-            .map(policy_of_environments)?,
-        Category::Access => categories.access.as_ref().map(policy_of_access)?,
-        Category::Integrations => categories
-            .integrations
-            .as_ref()
-            .map(policy_of_integrations)?,
-    };
-    Some(policy)
-}
-
-fn policy_of_repository(category: &RepositoryCategoryV2) -> CategoryPolicy {
-    category.policy.clone()
-}
-fn policy_of_files(category: &FilesCategoryV2) -> CategoryPolicy {
-    category.policy.clone()
-}
-fn policy_of_security(category: &crate::config::manifest::SecurityCategoryV2) -> CategoryPolicy {
-    category.policy.clone()
-}
-fn policy_of_rulesets(category: &RulesetsCategoryV2) -> CategoryPolicy {
-    category.policy.clone()
-}
-fn policy_of_branch_protection(category: &BranchProtectionCategoryV2) -> CategoryPolicy {
-    category.policy.clone()
-}
-fn policy_of_actions(category: &ActionsCategoryV2) -> CategoryPolicy {
-    category.policy.clone()
-}
-fn policy_of_environments(category: &EnvironmentsCategoryV2) -> CategoryPolicy {
-    category.policy.clone()
-}
-fn policy_of_access(category: &RepositoryAccessCategoryV2) -> CategoryPolicy {
-    category.policy.clone()
-}
-fn policy_of_integrations(category: &RepositoryIntegrationsCategoryV2) -> CategoryPolicy {
-    category.policy.clone()
 }
 
 // ---------------------------------------------------------------------------
@@ -2153,6 +2121,7 @@ fn style_status(status: &str) -> console::StyledObject<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::manifest::CategoryPolicy;
 
     #[test]
     fn parses_stable_category_names() {
@@ -2521,12 +2490,11 @@ mod tests {
     #[test]
     fn build_general_desired_merges_integration_labels_under_repository_policy() {
         use crate::config::manifest::{
-            LabelConfigV2, ManifestSchema, RepositoryCategoryV2, RepositoryIntegrationsCategoryV2,
+            LabelConfigV2, RepositoryCategoryV2, RepositoryIntegrationsCategoryV2,
         };
 
         let mut manifest = Manifest::default();
-        manifest.v2.schema = Some(ManifestSchema::v2());
-        manifest.v2.categories.repository = Some(RepositoryCategoryV2 {
+        manifest.categories.repository = Some(RepositoryCategoryV2 {
             policy: CategoryPolicy::managed(),
             settings: None,
             metadata: None,
@@ -2534,7 +2502,7 @@ mod tests {
             immutable_releases: None,
             references: Vec::new(),
         });
-        manifest.v2.categories.integrations = Some(RepositoryIntegrationsCategoryV2 {
+        manifest.categories.integrations = Some(RepositoryIntegrationsCategoryV2 {
             policy: CategoryPolicy::observe_sensitive(),
             labels: vec![LabelConfigV2 {
                 name: "bug".to_owned(),
@@ -2545,7 +2513,7 @@ mod tests {
             ..RepositoryIntegrationsCategoryV2::default()
         });
 
-        let desired = build_general_desired(&manifest).unwrap();
+        let desired = build_general_desired(&manifest.categories).unwrap();
         assert_eq!(desired.labels.len(), 1);
         assert_eq!(desired.labels[0].name, "bug");
         // Repository policy governs labels: managed here.
@@ -2553,46 +2521,6 @@ mod tests {
             desired.repository.policy.disposition,
             ManagementDisposition::Managed
         );
-    }
-
-    #[test]
-    fn guard_allows_pre_v2_manifests() {
-        let manifest = Manifest::default();
-        assert!(guard_legacy_mutation(&manifest, Category::Security, "security apply").is_ok());
-    }
-
-    #[test]
-    fn guard_refuses_observe_category_in_v2_manifest() {
-        use crate::config::manifest::{ManifestSchema, RepositoryAccessCategoryV2};
-        let mut manifest = Manifest::default();
-        manifest.v2.schema = Some(ManifestSchema::v2());
-        manifest.v2.categories.access = Some(RepositoryAccessCategoryV2::observe_sensitive());
-
-        let err = guard_legacy_mutation(&manifest, Category::Access, "teams apply").unwrap_err();
-        let message = format!("{err}");
-        assert!(message.contains("ward apply"));
-        assert!(message.contains("access"));
-    }
-
-    #[test]
-    fn guard_refuses_v2_category_without_schema_marker() {
-        use crate::config::manifest::RepositoryAccessCategoryV2;
-        let mut manifest = Manifest::default();
-        manifest.v2.categories.access = Some(RepositoryAccessCategoryV2::observe_sensitive());
-
-        assert!(guard_legacy_mutation(&manifest, Category::Access, "teams apply").is_err());
-    }
-
-    #[test]
-    fn guard_allows_managed_category_in_v2_manifest() {
-        use crate::config::manifest::{ManifestSchema, SecurityCategoryV2};
-        let mut manifest = Manifest::default();
-        manifest.v2.schema = Some(ManifestSchema::v2());
-        let mut security = SecurityCategoryV2::observe_sensitive();
-        security.policy = CategoryPolicy::managed();
-        manifest.v2.categories.security = Some(security);
-
-        assert!(guard_legacy_mutation(&manifest, Category::Security, "security apply").is_ok());
     }
 
     #[test]

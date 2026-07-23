@@ -1,11 +1,10 @@
 use anyhow::Result;
 use clap::Args;
 use console::style;
-use dialoguer::Confirm;
 
 use crate::config::Manifest;
-use crate::engine::{audit_log::AuditLog, executor, planner, verifier};
 use crate::github::Client;
+use crate::reconcile::unified::{self, Category, UnifiedOptions};
 
 #[derive(Args)]
 pub struct SecurityCommand {
@@ -15,7 +14,7 @@ pub struct SecurityCommand {
 
 #[derive(clap::Subcommand)]
 enum SecurityAction {
-    /// Show what security changes would be made (dry-run)
+    /// Show what security changes would be made
     Plan,
 
     /// Apply security changes to repositories
@@ -29,7 +28,7 @@ enum SecurityAction {
         skip_verify: bool,
     },
 
-    /// Audit current security state across all repos
+    /// Audit current security state across repositories
     Audit,
 }
 
@@ -42,151 +41,46 @@ impl SecurityCommand {
         repo: Option<&str>,
     ) -> Result<()> {
         match &self.action {
-            SecurityAction::Plan => plan(client, manifest, system, repo).await,
-            SecurityAction::Apply { yes, skip_verify } => {
-                crate::reconcile::unified::guard_legacy_mutation(
-                    manifest,
-                    crate::reconcile::unified::Category::Security,
-                    "security apply",
-                )?;
-                apply(client, manifest, system, repo, *yes, *skip_verify).await
-            }
+            SecurityAction::Plan => crate::cli::plan::run_canonical_plan(
+                client,
+                manifest,
+                options(true),
+                crate::cli::plan::CategoryRun {
+                    system,
+                    repo,
+                    json: false,
+                    command: "security plan",
+                    title: "Ward Security Plan",
+                },
+            )
+            .await
+            .map(|_| ()),
+            SecurityAction::Apply { yes, skip_verify } => crate::cli::apply::run_canonical_apply(
+                client,
+                manifest,
+                *yes,
+                options(!skip_verify),
+                crate::cli::plan::CategoryRun {
+                    system,
+                    repo,
+                    json: false,
+                    command: "security apply",
+                    title: "Ward Security Apply",
+                },
+            )
+            .await
+            .map(|_| ()),
             SecurityAction::Audit => audit(client, manifest, system, repo).await,
         }
     }
 }
 
-async fn resolve_repos(
-    client: &Client,
-    manifest: &Manifest,
-    system: Option<&str>,
-    repo: Option<&str>,
-) -> Result<Vec<String>> {
-    if let Some(repo_name) = repo {
-        return Ok(vec![repo_name.to_owned()]);
+fn options(verify: bool) -> UnifiedOptions {
+    UnifiedOptions {
+        categories: vec![Category::Security],
+        allow_high_impact: false,
+        verify,
     }
-
-    let sys = system.ok_or_else(|| {
-        anyhow::anyhow!("Either --system or --repo is required for security commands")
-    })?;
-
-    let excludes = manifest.exclude_patterns_for_system(sys);
-    let explicit = manifest.explicit_repos_for_system(sys);
-    let repos = client
-        .list_repos_for_system(
-            sys,
-            manifest.matches_prefix_for_system(sys),
-            &excludes,
-            &explicit,
-        )
-        .await?;
-    Ok(repos.into_iter().map(|r| r.name).collect())
-}
-
-async fn build_plans(
-    client: &Client,
-    manifest: &Manifest,
-    system: Option<&str>,
-    repo: Option<&str>,
-) -> Result<(Vec<planner::RepoPlan>, String)> {
-    let repo_names = resolve_repos(client, manifest, system, repo).await?;
-    let sys_id = system.unwrap_or("default");
-    let desired = manifest.security_for_system(sys_id);
-
-    println!();
-    println!(
-        "  {} Scanning {} repositories...",
-        style("[..]").bold(),
-        repo_names.len()
-    );
-
-    let mut plans = Vec::new();
-    for repo_name in &repo_names {
-        let current = client.get_security_state(repo_name).await?;
-        let plan = planner::plan_security(repo_name, &current, desired);
-        plans.push(plan);
-    }
-
-    Ok((plans, sys_id.to_owned()))
-}
-
-async fn plan(
-    client: &Client,
-    manifest: &Manifest,
-    system: Option<&str>,
-    repo: Option<&str>,
-) -> Result<()> {
-    let (plans, sys_id) = build_plans(client, manifest, system, repo).await?;
-
-    print_plan_table(&plans, &sys_id);
-
-    let needs_changes = plans.iter().filter(|p| p.has_changes()).count();
-    if needs_changes > 0 {
-        println!(
-            "\n  Run {} to apply these changes.",
-            style("ward security apply").cyan().bold()
-        );
-    }
-
-    Ok(())
-}
-
-async fn apply(
-    client: &Client,
-    manifest: &Manifest,
-    system: Option<&str>,
-    repo: Option<&str>,
-    yes: bool,
-    skip_verify: bool,
-) -> Result<()> {
-    let (plans, sys_id) = build_plans(client, manifest, system, repo).await?;
-
-    let needs_changes = plans.iter().filter(|p| p.has_changes()).count();
-    if needs_changes == 0 {
-        println!(
-            "\n  {} All repositories are up to date.",
-            style("[ok]").green()
-        );
-        return Ok(());
-    }
-
-    print_plan_table(&plans, &sys_id);
-
-    if !yes {
-        let proceed = Confirm::new()
-            .with_prompt(format!("  Apply changes to {needs_changes} repositories?"))
-            .default(false)
-            .interact()?;
-
-        if !proceed {
-            println!("  Aborted.");
-            return Ok(());
-        }
-    }
-
-    println!();
-    println!("  {} Applying changes...", style("[>>]").bold());
-
-    let audit_log = AuditLog::new()?;
-    let report = executor::execute_security_plan(client, &plans, &audit_log).await?;
-    report.print_summary();
-
-    if !skip_verify && report.failed.is_empty() {
-        println!();
-        println!("  {} Verifying changes...", style("[..]").bold());
-
-        let desired = manifest.security_for_system(&sys_id);
-        let verify_report = verifier::verify_security(client, &plans, desired).await?;
-        verify_report.print_summary();
-    }
-
-    println!(
-        "\n  {} Audit log: {}",
-        style("[..]").bold(),
-        audit_log.path().display()
-    );
-
-    Ok(())
 }
 
 async fn audit(
@@ -195,13 +89,13 @@ async fn audit(
     system: Option<&str>,
     repo: Option<&str>,
 ) -> Result<()> {
-    let repo_names = resolve_repos(client, manifest, system, repo).await?;
+    let repositories = unified::resolve_target_repos(client, manifest, system, repo).await?;
 
     println!();
     println!(
         "  {} Auditing {} repositories...",
         style("[..]").bold(),
-        repo_names.len()
+        repositories.len()
     );
 
     use tabled::builder::Builder;
@@ -214,9 +108,8 @@ async fn audit(
     let mut total_ok = 0;
     let mut total_issues = 0;
 
-    for repo_name in &repo_names {
-        let state = client.get_security_state(repo_name).await?;
-
+    for repository in &repositories {
+        let state = client.get_security_state(&repository.name).await?;
         let features = [
             state.dependabot_alerts,
             state.dependabot_security_updates,
@@ -225,8 +118,7 @@ async fn audit(
             state.push_protection,
         ];
 
-        let all_ok = features.iter().all(|&f| f);
-        if all_ok {
+        if features.iter().all(|&feature| feature) {
             total_ok += 1;
         } else {
             total_issues += 1;
@@ -234,8 +126,8 @@ async fn audit(
 
         let icons: Vec<String> = features
             .iter()
-            .map(|&f| {
-                if f {
+            .map(|&enabled| {
+                if enabled {
                     format!("{}", style("[ok]").green())
                 } else {
                     format!("{}", style("[!!]").red())
@@ -244,7 +136,7 @@ async fn audit(
             .collect();
 
         builder.push_record([
-            repo_name.clone(),
+            repository.name.clone(),
             icons[0].clone(),
             icons[1].clone(),
             icons[2].clone(),
@@ -257,8 +149,8 @@ async fn audit(
         .build()
         .with(Style::blank())
         .with(
-            Modify::new(Rows::first()).with(tabled::settings::Format::content(|s| {
-                format!("{}", style(s).bold().underlined())
+            Modify::new(Rows::first()).with(tabled::settings::Format::content(|value| {
+                format!("{}", style(value).bold().underlined())
             })),
         )
         .with(Modify::new(Columns::new(..)).with(Alignment::left()))
@@ -283,46 +175,20 @@ async fn audit(
     Ok(())
 }
 
-fn print_plan_table(plans: &[planner::RepoPlan], system_id: &str) {
-    println!();
-    println!(
-        "  {}",
-        style(format!("Security Plan: {system_id}")).bold().cyan()
-    );
-    println!("  {}", style("─".repeat(60)).dim());
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    for plan in plans {
-        if plan.has_changes() {
-            println!("  {} {}", style("[>>]").yellow(), style(&plan.repo).bold());
-            for change in &plan.changes {
-                let current = if change.current {
-                    style("on").green()
-                } else {
-                    style("off").red()
-                };
-                let desired = if change.desired {
-                    style("on").green().bold()
-                } else {
-                    style("off").red().bold()
-                };
-                println!("     {}: {current} -> {desired}", change.feature);
-            }
-        } else {
-            println!("  {} {}", style("[ok]").green(), style(&plan.repo).dim());
-        }
+    #[test]
+    fn focused_security_options_select_only_security() {
+        let options = options(true);
+        assert_eq!(options.categories, [Category::Security]);
+        assert!(options.verify);
+        assert!(!options.allow_high_impact);
     }
 
-    let needs_changes = plans.iter().filter(|p| p.has_changes()).count();
-    let up_to_date = plans.len() - needs_changes;
-
-    println!();
-    println!(
-        "  Summary: {} need changes, {} up to date",
-        if needs_changes > 0 {
-            style(needs_changes).yellow().bold()
-        } else {
-            style(needs_changes).green().bold()
-        },
-        style(up_to_date).green()
-    );
+    #[test]
+    fn skip_verify_is_preserved_by_focused_security_apply() {
+        assert!(!options(false).verify);
+    }
 }

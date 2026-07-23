@@ -4,7 +4,7 @@ use console::style;
 use dialoguer::Confirm;
 
 use crate::config::Manifest;
-use crate::config::manifest::TeamAccess;
+use crate::config::manifest::{ManagementDisposition, RepositoryAccessCategoryV2, TeamAccess};
 use crate::github::Client;
 use crate::github::teams::Team;
 
@@ -44,14 +44,7 @@ impl TeamsCommand {
         match &self.action {
             TeamsAction::List => list(client, manifest, system, repo).await,
             TeamsAction::Plan => plan(client, manifest, system, repo).await,
-            TeamsAction::Apply { yes } => {
-                crate::reconcile::unified::guard_legacy_mutation(
-                    manifest,
-                    crate::reconcile::unified::Category::Access,
-                    "teams apply",
-                )?;
-                apply(client, manifest, system, repo, *yes).await
-            }
+            TeamsAction::Apply { yes } => apply(client, manifest, system, repo, *yes).await,
             TeamsAction::Audit => audit(client, manifest, system, repo).await,
         }
     }
@@ -84,11 +77,19 @@ async fn resolve_repos(
     Ok(repos.into_iter().map(|r| r.name).collect())
 }
 
-fn teams_for_system<'a>(manifest: &'a Manifest, system_id: &str) -> &'a [TeamAccess] {
-    manifest
-        .system(system_id)
-        .map(|s| s.teams.as_slice())
-        .unwrap_or(&[])
+fn access_for_repo<'a>(
+    manifest: &'a Manifest,
+    repo_name: &str,
+) -> Option<&'a RepositoryAccessCategoryV2> {
+    let system_access = manifest
+        .system_for_repo(repo_name)
+        .and_then(|system_id| manifest.system(system_id))
+        .and_then(|system| system.categories.access.as_ref());
+    system_access.or(manifest.categories.access.as_ref())
+}
+
+fn teams_for_repo<'a>(manifest: &'a Manifest, repo_name: &str) -> Option<&'a [TeamAccess]> {
+    access_for_repo(manifest, repo_name).map(|access| access.teams.as_slice())
 }
 
 struct TeamDiff {
@@ -108,7 +109,7 @@ impl TeamDiff {
     }
 }
 
-fn diff_teams(repo: &str, desired: &[TeamAccess], current: &[Team]) -> TeamDiff {
+fn diff_teams(repo: &str, desired: &[TeamAccess], current: &[Team], prune: bool) -> TeamDiff {
     let mut to_add = Vec::new();
     let mut to_update = Vec::new();
     let mut to_remove = Vec::new();
@@ -121,9 +122,11 @@ fn diff_teams(repo: &str, desired: &[TeamAccess], current: &[Team]) -> TeamDiff 
         }
     }
 
-    for c in current {
-        if !desired.iter().any(|d| d.slug == c.slug) {
-            to_remove.push(c.slug.clone());
+    if prune {
+        for c in current {
+            if !desired.iter().any(|d| d.slug == c.slug) {
+                to_remove.push(c.slug.clone());
+            }
         }
     }
 
@@ -183,17 +186,6 @@ async fn build_diffs(
     system: Option<&str>,
     repo: Option<&str>,
 ) -> Result<Vec<TeamDiff>> {
-    let sys_id = system.ok_or_else(|| {
-        anyhow::anyhow!(
-            "--system is required for teams plan/apply (teams are configured per system)"
-        )
-    })?;
-
-    let desired = teams_for_system(manifest, sys_id);
-    if desired.is_empty() {
-        anyhow::bail!("No teams configured for system '{}' in ward.toml", sys_id);
-    }
-
     let repos = resolve_repos(client, manifest, system, repo).await?;
 
     println!();
@@ -206,8 +198,24 @@ async fn build_diffs(
     let mut diffs = Vec::new();
 
     for repo_name in &repos {
+        let access = access_for_repo(manifest, repo_name).ok_or_else(|| {
+            anyhow::anyhow!(
+                "No access category configured for repository '{repo_name}' in ward.toml"
+            )
+        })?;
         let current = client.list_repo_teams(repo_name).await?;
-        diffs.push(diff_teams(repo_name, desired, &current));
+        let diff = diff_teams(repo_name, &access.teams, &current, access.policy.prune);
+        if diff.has_changes() && access.policy.disposition != ManagementDisposition::Managed {
+            anyhow::bail!(
+                "The access category for repository '{repo_name}' is not managed; set disposition = \"managed\" before changing teams"
+            );
+        }
+        if diff.has_changes() && !access.policy.sensitive {
+            anyhow::bail!(
+                "The access category for repository '{repo_name}' requires sensitive = true before changing teams"
+            );
+        }
+        diffs.push(diff);
     }
 
     Ok(diffs)
@@ -384,8 +392,6 @@ async fn audit(
     system: Option<&str>,
     repo: Option<&str>,
 ) -> Result<()> {
-    let sys_id = system.unwrap_or("default");
-    let desired = teams_for_system(manifest, sys_id);
     let repos = resolve_repos(client, manifest, system, repo).await?;
 
     println!();
@@ -406,6 +412,7 @@ async fn audit(
     let mut total_issues = 0;
 
     for repo_name in &repos {
+        let desired = teams_for_repo(manifest, repo_name).unwrap_or(&[]);
         let teams = client.list_repo_teams(repo_name).await?;
 
         let all_desired_present = desired.iter().all(|d| {
@@ -533,13 +540,15 @@ mod tests {
             [[systems]]
             id = "be"
             name = "Backend"
+
+            [systems.categories.access]
             teams = [
                 { slug = "developers", permission = "push" },
                 { slug = "devops", permission = "admin" },
             ]
         "#;
         let m: crate::config::Manifest = toml::from_str(toml_str).unwrap();
-        let teams = teams_for_system(&m, "be");
+        let teams = teams_for_repo(&m, "be-service").unwrap();
         assert_eq!(teams.len(), 2);
         assert_eq!(teams[0].slug, "developers");
         assert_eq!(teams[0].permission, "push");
@@ -579,7 +588,7 @@ mod tests {
             },
         ];
 
-        let diff = diff_teams("my-repo", &desired, &current);
+        let diff = diff_teams("my-repo", &desired, &current, true);
         assert_eq!(diff.repo, "my-repo");
         assert_eq!(diff.to_add.len(), 1);
         assert_eq!(diff.to_add[0].slug, "devops");
@@ -600,8 +609,7 @@ mod tests {
             name = "Backend"
         "#;
         let m: crate::config::Manifest = toml::from_str(toml_str).unwrap();
-        let teams = teams_for_system(&m, "be");
-        assert!(teams.is_empty());
+        assert!(teams_for_repo(&m, "be-service").is_none());
     }
 
     #[test]
@@ -620,7 +628,22 @@ mod tests {
             privacy: "closed".to_string(),
         }];
 
-        let diff = diff_teams("repo", &desired, &current);
+        let diff = diff_teams("repo", &desired, &current, true);
         assert!(!diff.has_changes());
+    }
+
+    #[test]
+    fn team_diff_keeps_unmanaged_target_teams_without_prune() {
+        let current = vec![Team {
+            id: 1,
+            name: "Existing".to_string(),
+            slug: "existing".to_string(),
+            description: None,
+            permission: "push".to_string(),
+            privacy: "closed".to_string(),
+        }];
+
+        let diff = diff_teams("repo", &[], &current, false);
+        assert!(diff.to_remove.is_empty());
     }
 }
