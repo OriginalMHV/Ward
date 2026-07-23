@@ -16,7 +16,7 @@ use ward::reconcile::unified::{self, Category, UnifiedOptions};
 fn base_manifest() -> Manifest {
     let mut manifest = Manifest::default();
     manifest.org.name = "test-org".to_owned();
-    manifest.v2.schema = Some(ManifestSchema::v2());
+    manifest.schema = ManifestSchema::current();
     manifest
 }
 
@@ -47,6 +47,7 @@ fn options(categories: Vec<Category>, allow_high_impact: bool) -> UnifiedOptions
     UnifiedOptions {
         categories,
         allow_high_impact,
+        verify: true,
     }
 }
 
@@ -116,12 +117,12 @@ async fn plan_selects_only_requested_category() {
     .await;
 
     let mut manifest = base_manifest();
-    manifest.v2.categories.files = Some(managed_files_category(vec![dependabot_entry(
+    manifest.categories.files = Some(managed_files_category(vec![dependabot_entry(
         "version: 2\n",
     )]));
     // A second, present category that must NOT be collected when not selected.
     // If it were collected, its missing mocks would surface it as blocked.
-    manifest.v2.categories.security = Some(SecurityCategoryV2::observe_sensitive());
+    manifest.categories.security = Some(SecurityCategoryV2::observe_sensitive());
 
     let client = Client::new_for_test("test-org", &server.uri());
     let repos = vec![test_repo("my-repo")];
@@ -162,7 +163,7 @@ async fn plan_source_matching_files_is_zero_drift() {
     mock_blob(&server, "my-repo", "blob-dependabot", content.as_bytes()).await;
 
     let mut manifest = base_manifest();
-    manifest.v2.categories.files = Some(managed_files_category(vec![dependabot_entry(content)]));
+    manifest.categories.files = Some(managed_files_category(vec![dependabot_entry(content)]));
 
     let client = Client::new_for_test("test-org", &server.uri());
     let repos = vec![test_repo("my-repo")];
@@ -195,7 +196,7 @@ async fn plan_observe_files_category_yields_zero_actions() {
     let mut manifest = base_manifest();
     let mut files = managed_files_category(vec![dependabot_entry("version: 2\n")]);
     files.policy = CategoryPolicy::observe();
-    manifest.v2.categories.files = Some(files);
+    manifest.categories.files = Some(files);
 
     let client = Client::new_for_test("test-org", &server.uri());
     let repos = vec![test_repo("my-repo")];
@@ -363,7 +364,7 @@ async fn apply_files_routes_through_dedicated_branch_and_pull_request() {
         .await;
 
     let mut manifest = base_manifest();
-    manifest.v2.categories.files = Some(managed_files_category(vec![dependabot_entry(
+    manifest.categories.files = Some(managed_files_category(vec![dependabot_entry(
         "version: 2\n",
     )]));
 
@@ -454,7 +455,7 @@ async fn high_impact_repository_change_is_gated() {
             .await;
 
         let mut manifest = base_manifest();
-        manifest.v2.categories.repository = Some(RepositoryCategoryV2 {
+        manifest.categories.repository = Some(RepositoryCategoryV2 {
             policy: CategoryPolicy::managed(),
             settings: None,
             metadata: Some(RepositoryMetadataConfig {

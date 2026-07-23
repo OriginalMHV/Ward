@@ -6,8 +6,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use ward::config::manifest::{
     ActorReference, CategoryPolicy, CoverageOutcome, ManagementDisposition,
-    ReferencedResourceConfig, ReferencedResourceType, SecurityCategoryV2, SecurityConfig,
-    SecurityReviewerConfigV2, SecurityReviewerOptionsConfigV2,
+    ReferencedResourceConfig, ReferencedResourceType, SecurityCategoryV2, SecurityReviewerConfigV2,
+    SecurityReviewerOptionsConfigV2,
 };
 use ward::github::Client;
 use ward::github::security::SecurityAndAnalysisState;
@@ -105,14 +105,7 @@ async fn security_rules_permission_degradation_collects_warning_instead_of_faili
         .unwrap();
 
     assert_eq!(collected.repository_id, 42);
-    assert!(
-        collected
-            .category
-            .settings
-            .as_ref()
-            .unwrap()
-            .secret_scanning
-    );
+    assert_eq!(collected.category.secret_scanning, Some(true));
     assert_eq!(collected.category.private_vulnerability_reporting, None);
     assert!(collected.coverage.iter().any(|entry| {
         entry.endpoint == "GET /repos/{owner}/{repo}/code-security-configuration"
@@ -191,23 +184,15 @@ async fn security_rules_attached_configuration_precedence_ignores_direct_setting
         .unwrap();
     let desired = SecurityCategoryV2 {
         policy: managed_sensitive_policy(),
-        settings: Some(SecurityConfig {
-            secret_scanning: false,
-            secret_scanning_ai_detection: false,
-            push_protection: false,
-            dependabot_alerts: false,
-            dependabot_security_updates: false,
-            codeql_advanced_setup: false,
-        }),
         advanced_security: None,
         code_security: None,
-        dependabot_alerts: None,
-        dependabot_security_updates: None,
-        secret_scanning: None,
-        secret_scanning_push_protection: None,
+        dependabot_alerts: Some(false),
+        dependabot_security_updates: Some(false),
+        secret_scanning: Some(false),
+        secret_scanning_push_protection: Some(false),
         secret_scanning_validity_checks: None,
         secret_scanning_non_provider_patterns: None,
-        secret_scanning_ai_detection: None,
+        secret_scanning_ai_detection: Some(false),
         secret_scanning_delegated_alert_dismissal: None,
         secret_scanning_delegated_bypass: None,
         secret_scanning_delegated_alert_dismissal_options: None,

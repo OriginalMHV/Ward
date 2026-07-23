@@ -6,7 +6,9 @@ use console::style;
 use dialoguer::Confirm;
 
 use crate::config::Manifest;
-use crate::config::manifest::RepositorySettingsConfig;
+use crate::config::manifest::{
+    ManagementDisposition, RepositoryCategoryV2, RepositorySettingsConfig,
+};
 use crate::engine::audit_log::AuditLog;
 use crate::github::Client;
 use crate::github::settings::RepoSettings;
@@ -54,16 +56,39 @@ impl SettingsCommand {
                 plan(client, manifest, system, repo, ruleset.as_deref()).await
             }
             SettingsAction::Apply { ruleset, yes } => {
-                crate::reconcile::unified::guard_legacy_mutation(
-                    manifest,
-                    crate::reconcile::unified::Category::Repository,
-                    "settings apply",
-                )?;
                 apply(client, manifest, system, repo, ruleset.as_deref(), *yes).await
             }
             SettingsAction::Audit => audit(client, manifest, system, repo).await,
         }
     }
+}
+
+fn repository_category_for_repo<'a>(
+    manifest: &'a Manifest,
+    repo_name: &str,
+) -> Option<&'a RepositoryCategoryV2> {
+    let system_repository = manifest
+        .system_for_repo(repo_name)
+        .and_then(|system_id| manifest.system(system_id))
+        .and_then(|system| system.categories.repository.as_ref());
+    system_repository.or(manifest.categories.repository.as_ref())
+}
+
+fn repository_settings_for_repo<'a>(
+    manifest: &'a Manifest,
+    repo_name: &str,
+) -> Option<&'a RepositorySettingsConfig> {
+    repository_category_for_repo(manifest, repo_name)
+        .and_then(|repository| repository.settings.as_ref())
+}
+
+fn managed_repository_settings_for_repo<'a>(
+    manifest: &'a Manifest,
+    repo_name: &str,
+) -> Option<&'a RepositorySettingsConfig> {
+    repository_category_for_repo(manifest, repo_name)
+        .filter(|repository| repository.policy.disposition == ManagementDisposition::Managed)
+        .and_then(|repository| repository.settings.as_ref())
 }
 
 struct RepoRulesetState {
@@ -307,15 +332,6 @@ async fn apply_repository_settings(
     Ok(())
 }
 
-pub(crate) async fn repository_settings_compliant(
-    client: &Client,
-    repo: &str,
-    desired: &RepositorySettingsConfig,
-) -> Result<bool> {
-    let (current, topics) = tokio::try_join!(client.get_settings(repo), client.get_topics(repo))?;
-    Ok(diff_repository_settings(&current, &topics, desired).is_empty())
-}
-
 async fn resolve_repos(
     client: &Client,
     manifest: &Manifest,
@@ -348,9 +364,13 @@ async fn plan(
 ) -> Result<()> {
     let repos = resolve_repos(client, manifest, system, repo).await?;
     let do_ruleset = ruleset.is_some();
-    if manifest.repository.is_none() && !do_ruleset {
+    if !do_ruleset
+        && !repos
+            .iter()
+            .any(|repo_name| managed_repository_settings_for_repo(manifest, repo_name).is_some())
+    {
         anyhow::bail!(
-            "No [repository] settings configured. Use --ruleset for Copilot review setup."
+            "No managed [categories.repository.settings] configured. Use --ruleset for Copilot review setup."
         );
     }
 
@@ -367,7 +387,8 @@ async fn plan(
     let mut up_to_date = 0;
 
     for repo_name in &repos {
-        let state = scan_repo(client, repo_name, manifest.repository.as_ref(), do_ruleset).await?;
+        let desired = managed_repository_settings_for_repo(manifest, repo_name);
+        let state = scan_repo(client, repo_name, desired, do_ruleset).await?;
         let mut changes: Vec<String> = state
             .repository_changes
             .iter()
@@ -426,9 +447,13 @@ async fn apply(
 ) -> Result<()> {
     let repos = resolve_repos(client, manifest, system, repo).await?;
     let do_ruleset = ruleset.is_some();
-    if manifest.repository.is_none() && !do_ruleset {
+    if !do_ruleset
+        && !repos
+            .iter()
+            .any(|repo_name| managed_repository_settings_for_repo(manifest, repo_name).is_some())
+    {
         anyhow::bail!(
-            "No [repository] settings configured. Use --ruleset for Copilot review setup."
+            "No managed [categories.repository.settings] configured. Use --ruleset for Copilot review setup."
         );
     }
 
@@ -442,7 +467,8 @@ async fn apply(
     // Scan all repos
     let mut work: Vec<RepoRulesetState> = Vec::new();
     for repo_name in &repos {
-        let state = scan_repo(client, repo_name, manifest.repository.as_ref(), do_ruleset).await?;
+        let desired = managed_repository_settings_for_repo(manifest, repo_name);
+        let state = scan_repo(client, repo_name, desired, do_ruleset).await?;
         let needs_work =
             !state.repository_changes.is_empty() || (do_ruleset && !state.has_copilot_review);
         if needs_work {
@@ -495,7 +521,7 @@ async fn apply(
         println!("  {} {} ...", style(">>").magenta(), state.repo);
 
         if !state.repository_changes.is_empty()
-            && let Some(desired) = &manifest.repository
+            && let Some(desired) = managed_repository_settings_for_repo(manifest, &state.repo)
         {
             match apply_repository_settings(client, &state.repo, desired).await {
                 Ok(()) => {
@@ -597,7 +623,8 @@ async fn audit(
     let mut issues = 0;
 
     for repo_name in &repos {
-        let state = scan_repo(client, repo_name, manifest.repository.as_ref(), true).await?;
+        let desired = repository_settings_for_repo(manifest, repo_name);
+        let state = scan_repo(client, repo_name, desired, true).await?;
 
         let repository_icon = if state.repository_changes.is_empty() {
             format!("{}", style("[ok]").green())
