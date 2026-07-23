@@ -26,21 +26,12 @@ async fn main() -> Result<()> {
         return cmd.run().await;
     }
 
-    // Setup handles its own client creation (guided flow)
-    if let Command::Setup(cmd) = cli.command {
-        return cmd.run().await;
-    }
-
     // Import handles its own client creation (it creates the manifest)
     if let Command::Import(cmd) = cli.command {
         return cmd.run().await;
     }
 
     if let Command::Config(cmd) = cli.command {
-        return cmd.run(cli.config.as_deref());
-    }
-
-    if let Command::Template(cmd) = cli.command {
         return cmd.run(cli.config.as_deref());
     }
 
@@ -125,7 +116,6 @@ async fn main() -> Result<()> {
             )
             .await
         }
-        Command::Rollback(cmd) => cmd.run(&client).await,
         Command::Audit(cmd) => {
             cmd.run(
                 &client,
@@ -155,21 +145,9 @@ async fn main() -> Result<()> {
             )
             .await
         }
-        Command::Policy(cmd) => {
-            cmd.run(
-                &client,
-                &manifest,
-                cli.system.as_deref(),
-                cli.repo.as_deref(),
-                cli.json,
-            )
-            .await
-        }
         Command::Init(_) => unreachable!(),
-        Command::Setup(_) => unreachable!(),
         Command::Import(_) => unreachable!(),
         Command::Config(_) => unreachable!(),
-        Command::Template(_) => unreachable!(),
         Command::Doctor(_) => unreachable!(),
         Command::Completions { .. } => unreachable!(),
     }

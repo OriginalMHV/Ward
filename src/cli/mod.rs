@@ -7,21 +7,17 @@ pub mod drift;
 pub mod import;
 pub mod init;
 pub mod plan;
-pub mod policy;
 pub mod protection;
 pub mod repos;
-pub mod rollback;
 pub mod rulesets;
 pub mod security;
 pub mod settings;
-pub mod setup;
 pub mod teams;
-pub mod template_cmd;
 
 use clap::Parser;
 
 const AFTER_HELP: &str = "\x1b[1mGetting Started:\x1b[0m
-  init, setup, doctor, config   Set up Ward and configure repos
+  init, doctor, config          Set up Ward and configure repos
 
 \x1b[1mPlan & Apply:\x1b[0m
   plan, apply                   Preview and apply changes across categories
@@ -29,10 +25,10 @@ const AFTER_HELP: &str = "\x1b[1mGetting Started:\x1b[0m
   teams, protection, settings   Access control & repo settings
 
 \x1b[1mMonitor:\x1b[0m
-  drift, audit, policy          Detect drift, audit compliance
+  drift, audit                  Detect drift, audit compliance
 
 \x1b[1mAdvanced:\x1b[0m
-  import, rollback              Import state and undo changes
+  import                        Import existing repository state
 
 \x1b[2mNew to Ward? Run: ward init --from OWNER/REPO → ward plan --all\x1b[0m
 \x1b[2mFull tutorial: https://github.com/OriginalMHV/Ward/blob/main/docs/getting-started.md\x1b[0m";
@@ -89,10 +85,6 @@ pub enum Command {
     #[command(display_order = 1)]
     Init(init::InitCommand),
 
-    /// Set up a single repository (guided, safe — plans before applying)
-    #[command(display_order = 2)]
-    Setup(setup::SetupCommand),
-
     /// Diagnose your Ward setup (token, config, API)
     #[command(display_order = 3)]
     Doctor(doctor::DoctorCommand),
@@ -123,7 +115,7 @@ pub enum Command {
     #[command(display_order = 23)]
     Rulesets(rulesets::RulesetsCommand),
 
-    /// Commit files/templates to repositories (no cloning needed)
+    /// Commit managed files to repositories (no cloning needed)
     #[command(display_order = 24)]
     Commit(commit::CommitCommand),
 
@@ -139,10 +131,6 @@ pub enum Command {
     #[command(display_order = 27)]
     Settings(settings::SettingsCommand),
 
-    /// Manage workflow templates
-    #[command(display_order = 28)]
-    Template(template_cmd::TemplateCommand),
-
     // --- Monitor ---
     /// Detect configuration drift from desired state
     #[command(display_order = 40)]
@@ -152,18 +140,10 @@ pub enum Command {
     #[command(display_order = 41)]
     Audit(audit::AuditCommand),
 
-    /// Check repos against policy rules
-    #[command(display_order = 42)]
-    Policy(policy::PolicyCommand),
-
     // --- Advanced ---
     /// Import an existing repository as an exact Ward baseline
     #[command(display_order = 60)]
     Import(import::ImportCommand),
-
-    /// Rollback changes using the audit log
-    #[command(display_order = 61)]
-    Rollback(rollback::RollbackCommand),
 
     /// Generate shell completions
     #[command(hide = true)]

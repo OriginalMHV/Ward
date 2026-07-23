@@ -1,12 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Args;
 use console::style;
 use dialoguer::Confirm;
 
 use crate::config::Manifest;
-use crate::config::templates::load_templates_with_custom_dir;
-use crate::detection::project_type::ProjectType;
-use crate::detection::versions;
 use crate::engine::audit_log::AuditLog;
 use crate::github::Client;
 use crate::github::commits::CommitFile;
@@ -19,32 +16,15 @@ pub struct CommitCommand {
 
 #[derive(clap::Subcommand)]
 enum CommitAction {
-    /// Preview imported files or a rendered template
-    Plan {
-        /// Template name (dependabot, codeql, dependency-submission)
-        #[arg(long)]
-        template: Option<String>,
-    },
+    /// Preview managed file changes
+    Plan,
 
-    /// Commit imported files or a rendered template and create PRs
+    /// Commit managed files and create PRs
     Apply {
-        /// Template name (dependabot, codeql, dependency-submission)
-        #[arg(long)]
-        template: Option<String>,
-
         /// Skip confirmation prompt
         #[arg(long)]
         yes: bool,
     },
-}
-
-/// Resolved template output for a single repo.
-struct TemplateResult {
-    repo_name: String,
-    target_path: String,
-    rendered: String,
-    already_exists: bool,
-    existing_matches: bool,
 }
 
 impl CommitCommand {
@@ -56,169 +36,17 @@ impl CommitCommand {
         repo: Option<&str>,
     ) -> Result<()> {
         match &self.action {
-            CommitAction::Plan {
-                template: Some(template),
-            } => plan(client, manifest, system, repo, template).await,
-            CommitAction::Plan { template: None } => {
-                plan_managed_files(client, manifest, system, repo).await
-            }
-            CommitAction::Apply { template, yes } => {
+            CommitAction::Plan => plan_managed_files(client, manifest, system, repo).await,
+            CommitAction::Apply { yes } => {
                 crate::reconcile::unified::guard_legacy_mutation(
                     manifest,
                     crate::reconcile::unified::Category::Files,
                     "commit apply",
                 )?;
-                if let Some(template) = template {
-                    apply(client, manifest, system, repo, template, *yes).await
-                } else {
-                    apply_managed_files(client, manifest, system, repo, *yes).await
-                }
+                apply_managed_files(client, manifest, system, repo, *yes).await
             }
         }
     }
-}
-
-fn resolve_template_info(template: &str) -> Result<(&str, &str)> {
-    match template {
-        "dependabot" => Ok((".github/dependabot.yml", "dependabot")),
-        "codeql" => Ok((".github/workflows/codeql.yml", "codeql")),
-        "dependency-submission" => Ok((
-            ".github/workflows/dependency-submission.yml",
-            "dependency-submission",
-        )),
-        _ => anyhow::bail!(
-            "Unknown template: {template}. Available: dependabot, codeql, dependency-submission"
-        ),
-    }
-}
-
-async fn detect_and_render(
-    client: &Client,
-    repo_name: &str,
-    default_branch: &str,
-    template_category: &str,
-    target_path: &str,
-    manifest: &Manifest,
-) -> Result<TemplateResult> {
-    // Detect project type by checking for build files
-    let project_type = detect_project_type(client, repo_name).await?;
-
-    let tera_template_name = match (&project_type, template_category) {
-        (ProjectType::Gradle, "dependabot") => "dependabot/gradle.yml.tera",
-        (ProjectType::Npm, "dependabot") => "dependabot/npm.yml.tera",
-        (ProjectType::Gradle, "codeql") => "codeql/gradle.yml.tera",
-        (ProjectType::Npm, "codeql") => "codeql/npm.yml.tera",
-        (ProjectType::Gradle, "dependency-submission") => "dependency-submission/gradle.yml.tera",
-        (pt, cat) => {
-            anyhow::bail!("No template for {cat} + {pt} in repo {repo_name}");
-        }
-    };
-
-    // Detect version
-    let mut tera_context = tera::Context::new();
-    tera_context.insert("default_branch", default_branch);
-
-    match project_type {
-        ProjectType::Gradle => {
-            let java_ver = detect_java_version(client, repo_name).await?;
-            tera_context.insert("java_version", &java_ver.to_string());
-
-            if let Some(reg) = manifest.templates.registries.get("gradle-artifactory") {
-                tera_context.insert("registry_url", &reg.url);
-                if let Some(ref provider) = reg.jfrog_oidc_provider {
-                    tera_context.insert("jfrog_oidc_provider", provider);
-                }
-            }
-        }
-        ProjectType::Npm => {
-            let node_ver = detect_node_version(client, repo_name).await?;
-            tera_context.insert("node_version", &node_ver);
-        }
-        _ => {}
-    }
-
-    let tera = load_templates_with_custom_dir(
-        manifest
-            .templates
-            .custom_dir
-            .as_ref()
-            .map(std::path::Path::new),
-    )?;
-    let rendered = tera
-        .render(tera_template_name, &tera_context)
-        .with_context(|| format!("Failed to render template {tera_template_name}"))?;
-
-    // Check if file already exists
-    let existing = client.get_file(repo_name, target_path, None).await?;
-    let (already_exists, existing_matches) = if let Some(ref content) = existing {
-        let decoded = Client::decode_content(content)
-            .with_context(|| format!("Failed to decode existing {target_path} in {repo_name}"))?;
-        (true, decoded.trim() == rendered.trim())
-    } else {
-        (false, false)
-    };
-
-    Ok(TemplateResult {
-        repo_name: repo_name.to_owned(),
-        target_path: target_path.to_owned(),
-        rendered,
-        already_exists,
-        existing_matches,
-    })
-}
-
-async fn detect_project_type(client: &Client, repo: &str) -> Result<ProjectType> {
-    // Check for Gradle first (more common in our org)
-    if client
-        .get_file(repo, "build.gradle.kts", None)
-        .await?
-        .is_some()
-    {
-        return Ok(ProjectType::Gradle);
-    }
-    if client.get_file(repo, "build.gradle", None).await?.is_some() {
-        return Ok(ProjectType::Gradle);
-    }
-    if client.get_file(repo, "package.json", None).await?.is_some() {
-        return Ok(ProjectType::Npm);
-    }
-    if client.get_file(repo, "Cargo.toml", None).await?.is_some() {
-        return Ok(ProjectType::Cargo);
-    }
-    Ok(ProjectType::Unknown)
-}
-
-async fn detect_java_version(client: &Client, repo: &str) -> Result<u8> {
-    // Try build.gradle.kts first, then build.gradle
-    for file in &["build.gradle.kts", "build.gradle"] {
-        if let Some(content) = client.get_file(repo, file, None).await? {
-            let text = Client::decode_content(&content)?;
-            if let Some(ver) = versions::extract_java_version(&text) {
-                tracing::info!("{repo}: detected Java {ver} from {file}");
-                return Ok(ver);
-            }
-        }
-    }
-
-    tracing::warn!("{repo}: could not detect Java version, defaulting to 21");
-    Ok(21)
-}
-
-async fn detect_node_version(client: &Client, repo: &str) -> Result<String> {
-    if let Some(content) = client.get_file(repo, "package.json", None).await? {
-        let text = Client::decode_content(&content)?;
-        if let Some(ver) = versions::extract_node_version(&text) {
-            // Extract just the major version number
-            let major: String = ver.chars().filter(|c| c.is_ascii_digit()).collect();
-            if !major.is_empty() {
-                tracing::info!("{repo}: detected Node {major} from package.json");
-                return Ok(major);
-            }
-        }
-    }
-
-    tracing::warn!("{repo}: could not detect Node version, defaulting to 20");
-    Ok("20".to_owned())
 }
 
 async fn resolve_repos_with_branches(
@@ -299,7 +127,7 @@ async fn build_managed_file_plans(
 ) -> Result<Vec<ManagedFilePlan>> {
     if manifest.files.is_empty() {
         anyhow::bail!(
-            "No [[files]] entries configured. Pass --template or run `ward init --from OWNER/REPO`."
+            "No [[files]] entries configured. Run `ward init --from OWNER/REPO` to import managed files."
         );
     }
 
@@ -395,7 +223,7 @@ async fn apply_managed_files(
     println!(
         "  {} repos need managed file changes on branch {}:",
         style(pending.len()).yellow().bold(),
-        style(&manifest.templates.branch).cyan()
+        style(&manifest.file_delivery.branch).cyan()
     );
     for plan in &pending {
         println!(
@@ -480,8 +308,8 @@ async fn commit_managed_files_and_pr(
     manifest: &Manifest,
     plan: &ManagedFilePlan,
 ) -> Result<String> {
-    let branch = &manifest.templates.branch;
-    let prefix = &manifest.templates.commit_message_prefix;
+    let branch = &manifest.file_delivery.branch;
+    let prefix = &manifest.file_delivery.commit_message_prefix;
     client
         .ensure_dedicated_branch(&plan.repo_name, branch, &plan.default_branch)
         .await?;
@@ -512,346 +340,11 @@ async fn commit_managed_files_and_pr(
             &body,
             branch,
             &plan.default_branch,
-            &manifest.templates.reviewers,
+            &manifest.file_delivery.reviewers,
         )
         .await?;
 
     Ok(pull.html_url)
-}
-
-async fn plan(
-    client: &Client,
-    manifest: &Manifest,
-    system: Option<&str>,
-    repo: Option<&str>,
-    template: &str,
-) -> Result<()> {
-    let (target_path, template_category) = resolve_template_info(template)?;
-    let repos = resolve_repos_with_branches(client, manifest, system, repo).await?;
-
-    println!();
-    println!(
-        "  {} Commit plan: {} -> {}",
-        style("[..]").bold(),
-        style(template).cyan().bold(),
-        style(target_path).dim()
-    );
-    println!(
-        "  {} Scanning {} repositories...",
-        style("[..]").bold(),
-        repos.len()
-    );
-    println!();
-
-    let mut to_create = 0;
-    let mut to_update = 0;
-    let mut up_to_date = 0;
-    let mut skipped = 0;
-
-    for (repo_name, default_branch) in &repos {
-        match detect_and_render(
-            client,
-            repo_name,
-            default_branch,
-            template_category,
-            target_path,
-            manifest,
-        )
-        .await
-        {
-            Ok(result) => {
-                if result.existing_matches {
-                    println!(
-                        "  {} {}",
-                        style("[ok]").green(),
-                        style(&result.repo_name).dim()
-                    );
-                    up_to_date += 1;
-                } else if result.already_exists {
-                    println!(
-                        "  {} {} (update {})",
-                        style("[>>]").yellow(),
-                        style(&result.repo_name).bold(),
-                        target_path
-                    );
-                    to_update += 1;
-                } else {
-                    println!(
-                        "  {} {} (create {})",
-                        style("[>>]").yellow(),
-                        style(&result.repo_name).bold(),
-                        target_path
-                    );
-                    to_create += 1;
-                }
-            }
-            Err(e) => {
-                println!(
-                    "  {} {}: {}",
-                    style("--").dim(),
-                    style(&repo_name).dim(),
-                    style(e).dim()
-                );
-                skipped += 1;
-            }
-        }
-    }
-
-    println!();
-    println!(
-        "  Summary: {} to create, {} to update, {} up to date, {} skipped",
-        style(to_create).yellow().bold(),
-        style(to_update).yellow().bold(),
-        style(up_to_date).green(),
-        style(skipped).dim()
-    );
-
-    if to_create + to_update > 0 {
-        println!(
-            "\n  Run {} to apply.",
-            style(format!("ward commit apply --template {template}"))
-                .cyan()
-                .bold()
-        );
-    }
-
-    Ok(())
-}
-
-async fn apply(
-    client: &Client,
-    manifest: &Manifest,
-    system: Option<&str>,
-    repo: Option<&str>,
-    template: &str,
-    yes: bool,
-) -> Result<()> {
-    let (target_path, template_category) = resolve_template_info(template)?;
-    let repos = resolve_repos_with_branches(client, manifest, system, repo).await?;
-    let branch_name = &manifest.templates.branch;
-
-    println!();
-    println!(
-        "  {} Preparing commits: {} -> {}",
-        style("[..]").bold(),
-        style(template).cyan().bold(),
-        style(target_path).dim()
-    );
-
-    // Build all template results
-    let mut pending: Vec<TemplateResult> = Vec::new();
-    for (repo_name, default_branch) in &repos {
-        match detect_and_render(
-            client,
-            repo_name,
-            default_branch,
-            template_category,
-            target_path,
-            manifest,
-        )
-        .await
-        {
-            Ok(result) if !result.existing_matches => {
-                pending.push(result);
-            }
-            Ok(_) => {
-                tracing::debug!("{repo_name}: already up to date, skipping");
-            }
-            Err(e) => {
-                tracing::warn!("{repo_name}: skipped ({e})");
-            }
-        }
-    }
-
-    if pending.is_empty() {
-        println!(
-            "\n  {} All repositories already up to date.",
-            style("[ok]").green()
-        );
-        return Ok(());
-    }
-
-    println!(
-        "\n  {} repos need changes. Branch: {}",
-        style(pending.len()).yellow().bold(),
-        style(branch_name).cyan()
-    );
-
-    for r in &pending {
-        let action = if r.already_exists { "update" } else { "create" };
-        println!(
-            "  {} {} -> {action} {}",
-            style("[>>]").yellow(),
-            r.repo_name,
-            r.target_path
-        );
-    }
-
-    if !yes {
-        println!();
-        let proceed = Confirm::new()
-            .with_prompt(format!(
-                "  Commit to {} repos and create PRs?",
-                pending.len()
-            ))
-            .default(false)
-            .interact()?;
-
-        if !proceed {
-            println!("  Aborted.");
-            return Ok(());
-        }
-    }
-
-    let audit_log = AuditLog::new()?;
-    let mut succeeded = 0usize;
-    let mut failed: Vec<(String, String)> = Vec::new();
-
-    for result in &pending {
-        println!("  {} {} ...", style(">>").magenta(), result.repo_name);
-
-        let default_branch = repos
-            .iter()
-            .find(|(n, _)| *n == result.repo_name)
-            .map(|(_, b)| b.as_str())
-            .unwrap_or("main");
-
-        match commit_and_pr(&CommitPrParams {
-            client,
-            repo: &result.repo_name,
-            default_branch,
-            branch_name,
-            target_path: &result.target_path,
-            content: &result.rendered,
-            template,
-            reviewers: &manifest.templates.reviewers,
-            commit_prefix: &manifest.templates.commit_message_prefix,
-        })
-        .await
-        {
-            Ok(pr_url) => {
-                println!(
-                    "    {} PR: {}",
-                    style("[ok]").green(),
-                    style(&pr_url).cyan()
-                );
-                audit_log.log(
-                    &result.repo_name,
-                    &format!("commit_template_{template}"),
-                    "success",
-                    result.already_exists,
-                    true,
-                )?;
-                succeeded += 1;
-            }
-            Err(e) => {
-                println!("    {} {}", style("[!!]").red(), e);
-                failed.push((result.repo_name.clone(), e.to_string()));
-            }
-        }
-    }
-
-    println!();
-    if failed.is_empty() {
-        println!(
-            "  {} All {} repos committed and PRs created.",
-            style("[ok]").green(),
-            succeeded
-        );
-    } else {
-        println!(
-            "  {} {} succeeded, {} failed:",
-            style("[warn]").yellow(),
-            succeeded,
-            failed.len()
-        );
-        for (repo, err) in &failed {
-            println!("    {} {}: {}", style("[!!]").red(), repo, err);
-        }
-    }
-
-    println!(
-        "\n  {} Audit log: {}",
-        style("[..]").bold(),
-        audit_log.path().display()
-    );
-
-    if !failed.is_empty() {
-        anyhow::bail!(
-            "{} of {} repositories failed during commit apply",
-            failed.len(),
-            succeeded + failed.len()
-        );
-    }
-
-    Ok(())
-}
-
-struct CommitPrParams<'a> {
-    client: &'a Client,
-    repo: &'a str,
-    default_branch: &'a str,
-    branch_name: &'a str,
-    target_path: &'a str,
-    content: &'a str,
-    template: &'a str,
-    reviewers: &'a [String],
-    commit_prefix: &'a str,
-}
-
-async fn commit_and_pr(params: &CommitPrParams<'_>) -> Result<String> {
-    let CommitPrParams {
-        client,
-        repo,
-        default_branch,
-        branch_name,
-        target_path,
-        content,
-        template,
-        reviewers,
-        commit_prefix,
-    } = params;
-
-    // Ensure the dedicated branch is ready (created, preserved when an open PR
-    // tracks it, or refreshed to the default head when stale).
-    client
-        .ensure_dedicated_branch(repo, branch_name, default_branch)
-        .await?;
-
-    // Commit the file
-    let message = format!("{commit_prefix}add {template} configuration");
-    let files = vec![CommitFile {
-        path: target_path.to_string(),
-        content: content.to_string(),
-    }];
-
-    client
-        .create_commit(repo, branch_name, &message, &files)
-        .await?;
-
-    // Create PR
-    let pr_title = format!("{commit_prefix}add {template} configuration");
-    let pr_body = format!(
-        "## Ward: automated template commit\n\n\
-         Template: `{template}`\n\
-         File: `{target_path}`\n\n\
-         This PR was created by [ward](https://github.com/OriginalMHV/ward).\n\n\
-         ---\n\
-         *Review the file contents, then merge.*"
-    );
-
-    let pr = client
-        .create_pull_request(
-            repo,
-            &pr_title,
-            &pr_body,
-            branch_name,
-            default_branch,
-            reviewers,
-        )
-        .await?;
-
-    Ok(pr.html_url)
 }
 
 #[cfg(test)]
@@ -861,36 +354,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn commit_plan_without_template_selects_managed_files() {
+    fn commit_plan_selects_managed_files() {
         let cli = crate::cli::Cli::parse_from(["ward", "commit", "plan", "--repo", "target"]);
         let crate::cli::Command::Commit(command) = cli.command else {
             panic!("expected commit command");
         };
-        assert!(matches!(
-            command.action,
-            CommitAction::Plan { template: None }
-        ));
+        assert!(matches!(command.action, CommitAction::Plan));
     }
 
     #[test]
-    fn commit_plan_with_template_preserves_template_mode() {
-        let cli = crate::cli::Cli::parse_from([
-            "ward",
-            "commit",
-            "plan",
-            "--repo",
-            "target",
-            "--template",
-            "dependabot",
-        ]);
+    fn commit_apply_defaults_to_interactive() {
+        let cli = crate::cli::Cli::parse_from(["ward", "commit", "apply", "--repo", "target"]);
         let crate::cli::Command::Commit(command) = cli.command else {
             panic!("expected commit command");
         };
-        assert!(matches!(
-            command.action,
-            CommitAction::Plan {
-                template: Some(ref template)
-            } if template == "dependabot"
-        ));
+        assert!(matches!(command.action, CommitAction::Apply { yes: false }));
     }
 }

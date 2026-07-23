@@ -27,12 +27,6 @@ pub enum WriteOutcome<T = ()> {
     Blocked(String),
 }
 
-impl<T> WriteOutcome<T> {
-    pub fn is_applied(&self) -> bool {
-        matches!(self, Self::Applied(_))
-    }
-}
-
 /// Classify a write response with no expected body: 2xx/204 is `Applied`,
 /// 403/404/422/other is `Blocked`. Transport-level failures still propagate
 /// as `Err`.

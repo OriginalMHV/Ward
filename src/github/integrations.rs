@@ -137,13 +137,6 @@ impl From<PagesApiResponse> for RepositoryPagesSite {
 }
 
 impl Client {
-    pub async fn list_repo_webhooks(&self, repo: &str) -> Result<Vec<RepositoryWebhook>> {
-        self.list_repo_webhooks_checked(repo)
-            .await?
-            .available()
-            .ok_or_else(|| anyhow::anyhow!("repository webhooks unavailable"))
-    }
-
     pub async fn list_repo_webhooks_checked(
         &self,
         repo: &str,
@@ -209,13 +202,6 @@ impl Client {
         response::expect_empty(self.delete(&path).await?, "DELETE", &path).await
     }
 
-    pub async fn list_repo_deploy_keys(&self, repo: &str) -> Result<Vec<RepositoryDeployKey>> {
-        self.list_repo_deploy_keys_checked(repo)
-            .await?
-            .available()
-            .ok_or_else(|| anyhow::anyhow!("repository deploy keys unavailable"))
-    }
-
     pub async fn list_repo_deploy_keys_checked(
         &self,
         repo: &str,
@@ -259,13 +245,6 @@ impl Client {
     pub async fn delete_repo_deploy_key(&self, repo: &str, key_id: u64) -> Result<()> {
         let path = format!("/repos/{}/{repo}/keys/{key_id}", self.org);
         response::expect_empty(self.delete(&path).await?, "DELETE", &path).await
-    }
-
-    pub async fn get_repo_pages(&self, repo: &str) -> Result<Option<RepositoryPagesSite>> {
-        self.get_repo_pages_checked(repo)
-            .await?
-            .available()
-            .ok_or_else(|| anyhow::anyhow!("repository pages unavailable"))
     }
 
     pub async fn get_repo_pages_checked(
@@ -313,13 +292,6 @@ impl Client {
     pub async fn delete_repo_pages(&self, repo: &str) -> Result<()> {
         let path = format!("/repos/{}/{repo}/pages", self.org);
         response::expect_empty(self.delete(&path).await?, "DELETE", &path).await
-    }
-
-    pub async fn list_repo_autolinks(&self, repo: &str) -> Result<Vec<RepositoryAutolink>> {
-        self.list_repo_autolinks_checked(repo)
-            .await?
-            .available()
-            .ok_or_else(|| anyhow::anyhow!("repository autolinks unavailable"))
     }
 
     pub async fn list_repo_autolinks_checked(

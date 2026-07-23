@@ -110,7 +110,7 @@ ward audit --system backend --format json
 ward audit --repo my-service --format json
 ```
 
-Returns per-repo: project type, language, versions, security features, config files, alert counts by severity, and dependency graph / SBOM audit data. The `dependency_graph` block is the primary signal for whether GitHub currently has usable dependency data for a repository.
+Returns per-repo security features, key GitHub configuration files, alert counts by severity, and dependency graph / SBOM audit data. The `dependency_graph` block is the primary signal for whether GitHub currently has usable dependency data for a repository.
 
 ---
 
@@ -120,7 +120,7 @@ Use `--yes` to skip confirmation prompts in CI:
 
 ```bash
 ward security apply --system backend --yes
-ward commit apply --template dependabot --system backend --yes
+ward commit apply --system backend --yes
 ward protection apply --system backend --yes
 ```
 
@@ -154,8 +154,7 @@ jobs:
           GH_TOKEN: ${{ secrets.WARD_TOKEN }}
         run: |
           ward security apply --system ${{ inputs.system }} --yes
-          ward commit apply --template dependabot --system ${{ inputs.system }} --yes
-          ward commit apply --template codeql --system ${{ inputs.system }} --yes
+          ward commit apply --system ${{ inputs.system }} --yes
           ward protection apply --system ${{ inputs.system }} --yes
 
       - name: Verify

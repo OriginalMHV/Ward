@@ -11,7 +11,7 @@ version = 2
 repository = "my-github-org/reference-service"
 default_branch = "main"
 
-[templates]
+[file_delivery]
 branch = "chore/ward-sync"
 reviewers = ["alice", "bob"]
 commit_message_prefix = "chore: "
@@ -86,7 +86,6 @@ sensitive = true
 
 [categories.security.codeql_default_setup]
 state = "configured"
-languages = ["java-kotlin"]
 query_suite = "default"
 
 [categories.rulesets.policy]
@@ -147,8 +146,8 @@ artifact_retention_days = 30
 log_retention_days = 30
 
 [[categories.actions.variables]]
-name = "JAVA_VERSION"
-value = "25"
+name = "RELEASE_CHANNEL"
+value = "stable"
 
 [[categories.actions.secrets]]
 name = "DEPLOY_TOKEN"
@@ -206,13 +205,3 @@ default = true
 key_prefix = "JIRA-"
 url_template = "https://jira.example.com/browse/<num>"
 is_alphanumeric = false
-
-[[policies]]
-name = "no-public-repos"
-rule = "visibility != 'public'"
-severity = "error"
-
-[[policies]]
-name = "require-secret-scanning"
-rule = "security.secret_scanning"
-severity = "error"

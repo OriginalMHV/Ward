@@ -95,44 +95,8 @@ impl Manifest {
         self.v2.schema.as_ref()
     }
 
-    pub fn v2_provenance(&self) -> Option<&ManifestProvenance> {
-        self.v2.provenance.as_ref()
-    }
-
     pub fn v2_categories(&self) -> &ManifestCategories {
         &self.v2.categories
-    }
-
-    pub fn v2_coverage(&self) -> &[CoverageEntry] {
-        &self.v2.coverage
-    }
-
-    pub fn v2_actions_category(&self) -> Option<&ActionsCategoryV2> {
-        self.v2.categories.actions.as_ref()
-    }
-
-    pub fn v2_security_category(&self) -> Option<&SecurityCategoryV2> {
-        self.v2.categories.security.as_ref()
-    }
-
-    pub fn v2_repository_category(&self) -> Option<&RepositoryCategoryV2> {
-        self.v2.categories.repository.as_ref()
-    }
-
-    pub fn v2_branch_protection_category(&self) -> Option<&BranchProtectionCategoryV2> {
-        self.v2.categories.branch_protection.as_ref()
-    }
-
-    pub fn v2_environments_category(&self) -> Option<&EnvironmentsCategoryV2> {
-        self.v2.categories.environments.as_ref()
-    }
-
-    pub fn v2_access_category(&self) -> Option<&RepositoryAccessCategoryV2> {
-        self.v2.categories.access.as_ref()
-    }
-
-    pub fn v2_integrations_category(&self) -> Option<&RepositoryIntegrationsCategoryV2> {
-        self.v2.categories.integrations.as_ref()
     }
 }
 
@@ -145,12 +109,11 @@ impl Default for Manifest {
             source: None,
             security: SecurityConfig::default(),
             repository: None,
-            templates: TemplateConfig::default(),
+            file_delivery: FileDeliveryConfig::default(),
             branch_protection: BranchProtectionConfig::default(),
             rulesets: RulesetsConfig::default(),
             systems: Vec::new(),
             files: Vec::new(),
-            policies: Vec::new(),
             v2: ManifestV2State::default(),
         }
     }

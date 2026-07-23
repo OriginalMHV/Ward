@@ -453,21 +453,6 @@ impl Client {
         map_classified_empty(response::classify_empty(response, "PATCH", &path).await?)
     }
 
-    pub async fn get_immutable_releases_state(&self, repo: &str) -> Result<ImmutableReleasesState> {
-        match self.get_immutable_releases_state_classified(repo).await? {
-            ClassifiedApiResponse::Success(state) => Ok(state),
-            ClassifiedApiResponse::NoContent => Ok(ImmutableReleasesState {
-                enabled: false,
-                enforced_by_owner: false,
-            }),
-            ClassifiedApiResponse::Forbidden(message)
-            | ClassifiedApiResponse::NotFound(message)
-            | ClassifiedApiResponse::Unprocessable(message)
-            | ClassifiedApiResponse::Conflict(message)
-            | ClassifiedApiResponse::Other(message) => Err(anyhow::Error::msg(message)),
-        }
-    }
-
     pub async fn get_immutable_releases_state_classified(
         &self,
         repo: &str,
@@ -500,18 +485,6 @@ impl Client {
     ) -> Result<ClassifiedApiResponse<()>> {
         let path = format!("/repos/{}/{repo}/immutable-releases", self.org);
         classify_empty_with_conflict(self.delete(&path).await?, "DELETE", &path).await
-    }
-
-    pub async fn list_labels(&self, repo: &str) -> Result<Vec<RepositoryLabel>> {
-        match self.list_labels_classified(repo).await? {
-            ClassifiedApiResponse::Success(labels) => Ok(labels),
-            ClassifiedApiResponse::NoContent => Ok(Vec::new()),
-            ClassifiedApiResponse::Forbidden(message)
-            | ClassifiedApiResponse::NotFound(message)
-            | ClassifiedApiResponse::Unprocessable(message)
-            | ClassifiedApiResponse::Conflict(message)
-            | ClassifiedApiResponse::Other(message) => Err(anyhow::Error::msg(message)),
-        }
     }
 
     pub async fn list_labels_classified(

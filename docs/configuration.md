@@ -165,7 +165,6 @@ sensitive = true
 
 [categories.security.codeql_default_setup]
 state = "configured"
-languages = ["java-kotlin"]
 query_suite = "default"
 runner_type = "standard"
 ```
@@ -276,7 +275,7 @@ sensitive = true
 [categories.actions.settings]
 enabled = true
 allowed_actions = "selected"
-selected_actions = ["actions/checkout@*", "gradle/actions/setup-gradle@*"]
+selected_actions = ["actions/checkout@*"]
 allow_github_owned_actions = true
 allow_verified_creator_actions = false
 requires_pinned_actions = true
@@ -296,8 +295,8 @@ Readable variables are copied:
 
 ```toml
 [[categories.actions.variables]]
-name = "JAVA_VERSION"
-value = "25"
+name = "RELEASE_CHANNEL"
+value = "stable"
 ```
 
 Workflow state:
@@ -518,16 +517,16 @@ When `match_prefix = true`, Ward finds repositories named exactly `id` or beginn
 
 Global `--repo` and `--system` flags narrow this set.
 
-## `[templates]`
+## `[file_delivery]`
 
 ```toml
-[templates]
+[file_delivery]
 branch = "chore/ward-sync"
 reviewers = ["alice", "bob"]
 commit_message_prefix = "chore: "
 ```
 
-These fields control the configuration-file branch, commit/PR title prefix, and requested reviewers. Existing template-registry configuration remains supported for `ward commit --template`.
+These fields control the configuration-file branch, commit/PR title prefix, and requested reviewers.
 
 ## Legacy compatibility
 
@@ -544,19 +543,6 @@ Ward still loads the legacy sections:
 They are retained for existing manifests and focused legacy commands. New imports also emit compatibility fields, but v2 categories are authoritative for comprehensive plan/apply and safety gates.
 
 Use `ward apply --category <CATEGORY>` for imported v2 state rather than bypassing category policies through an older command.
-
-## Policy rules
-
-The existing `[[policies]]` engine remains available:
-
-```toml
-[[policies]]
-name = "no-public-repos"
-rule = "visibility != 'public'"
-severity = "error"
-```
-
-See `ward policy list` and `ward policy check` for supported expressions.
 
 ## Complete example
 

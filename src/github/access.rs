@@ -204,16 +204,6 @@ impl Client {
         })
     }
 
-    pub async fn list_repo_invitations(
-        &self,
-        repo: &str,
-    ) -> Result<Vec<PendingCollaboratorInvitation>> {
-        self.list_repo_invitations_checked(repo)
-            .await?
-            .available()
-            .ok_or_else(|| anyhow::anyhow!("invitation listing unavailable"))
-    }
-
     pub async fn list_repo_invitations_checked(
         &self,
         repo: &str,
@@ -374,16 +364,6 @@ impl Client {
         Ok(ReadOutcome::Available(roles))
     }
 
-    pub async fn get_org_secret_metadata(
-        &self,
-        name: &str,
-    ) -> Result<Option<OrgScopedResourceMetadata>> {
-        self.get_org_secret_metadata_checked(name)
-            .await?
-            .available()
-            .ok_or_else(|| anyhow::anyhow!("organization secret metadata unavailable"))
-    }
-
     pub async fn get_org_secret_metadata_checked(
         &self,
         name: &str,
@@ -391,16 +371,6 @@ impl Client {
         let encoded_name = encode_path_segment(name);
         let path = format!("/orgs/{}/actions/secrets/{encoded_name}", self.org);
         classify_optional_metadata_checked(self.get(&path).await?, "GET", &path).await
-    }
-
-    pub async fn get_org_variable_metadata(
-        &self,
-        name: &str,
-    ) -> Result<Option<OrgScopedResourceMetadata>> {
-        self.get_org_variable_metadata_checked(name)
-            .await?
-            .available()
-            .ok_or_else(|| anyhow::anyhow!("organization variable metadata unavailable"))
     }
 
     pub async fn get_org_variable_metadata_checked(
@@ -412,34 +382,12 @@ impl Client {
         classify_optional_metadata_checked(self.get(&path).await?, "GET", &path).await
     }
 
-    pub async fn list_org_secret_selected_repositories(
-        &self,
-        name: &str,
-    ) -> Result<Option<Vec<NamedRepository>>> {
-        self.list_org_secret_selected_repositories_checked(name)
-            .await?
-            .available()
-            .ok_or_else(|| anyhow::anyhow!("organization secret selected repositories unavailable"))
-    }
-
     pub async fn list_org_secret_selected_repositories_checked(
         &self,
         name: &str,
     ) -> Result<ReadOutcome<Option<Vec<NamedRepository>>>> {
         self.list_selected_repositories_checked(SelectedRepositoryKind::Secret, name)
             .await
-    }
-
-    pub async fn list_org_variable_selected_repositories(
-        &self,
-        name: &str,
-    ) -> Result<Option<Vec<NamedRepository>>> {
-        self.list_org_variable_selected_repositories_checked(name)
-            .await?
-            .available()
-            .ok_or_else(|| {
-                anyhow::anyhow!("organization variable selected repositories unavailable")
-            })
     }
 
     pub async fn list_org_variable_selected_repositories_checked(

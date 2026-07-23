@@ -138,7 +138,6 @@ Repository bootstrap starts with conservative policies. Manually authored manife
 | [Commands](docs/commands.md) | Complete CLI command reference |
 | [Architecture](docs/architecture.md) | Independent collectors, planning, safe ordering, and verification |
 | [CI Integration](docs/ci-integration.md) | Run Ward in GitHub Actions |
-| [Templates](docs/templates.md) | Built-in and custom templates |
 
 ## Development
 

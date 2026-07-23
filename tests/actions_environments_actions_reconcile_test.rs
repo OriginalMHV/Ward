@@ -837,7 +837,7 @@ async fn dependabot_and_codespaces_secret_names_are_preserved_as_placeholders() 
     Mock::given(method("GET"))
         .and(path("/repos/test-org/my-repo/dependabot/secrets"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "secrets": [{"name": "NPM_TOKEN"}, {"name": "PYPI_TOKEN"}]
+            "secrets": [{"name": "PRIMARY_TOKEN"}, {"name": "SECONDARY_TOKEN"}]
         })))
         .with_priority(1)
         .mount(&server)
@@ -859,16 +859,12 @@ async fn dependabot_and_codespaces_secret_names_are_preserved_as_placeholders() 
         collected
             .coverage
             .iter()
-            .any(|entry| entry.endpoint == "dependabot/secrets/NPM_TOKEN"
+            .any(|entry| entry.endpoint == "dependabot/secrets/PRIMARY_TOKEN"
                 && entry.outcome == CoverageOutcome::Collected)
     );
-    assert!(
-        collected
-            .coverage
-            .iter()
-            .any(|entry| entry.endpoint == "dependabot/secrets/PYPI_TOKEN"
-                && entry.outcome == CoverageOutcome::Collected)
-    );
+    assert!(collected.coverage.iter().any(|entry| entry.endpoint
+        == "dependabot/secrets/SECONDARY_TOKEN"
+        && entry.outcome == CoverageOutcome::Collected));
     assert!(collected.coverage.iter().any(|entry| entry.endpoint
         == "codespaces/secrets/DEV_CONTAINER_TOKEN"
         && entry.outcome == CoverageOutcome::Collected));
@@ -879,7 +875,7 @@ async fn dependabot_and_codespaces_secret_names_are_preserved_as_placeholders() 
         .iter()
         .map(|placeholder| placeholder.name.as_str())
         .collect();
-    assert_eq!(dependabot_names, vec!["NPM_TOKEN", "PYPI_TOKEN"]);
+    assert_eq!(dependabot_names, vec!["PRIMARY_TOKEN", "SECONDARY_TOKEN"]);
     let codespaces_names: Vec<&str> = collected
         .category
         .codespaces_secrets

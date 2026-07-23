@@ -1,8 +1,4 @@
-use std::collections::HashMap;
-
 use serde::{Deserialize, Serialize};
-
-use crate::cli::policy::PolicyRule;
 
 use super::v2::ManifestV2State;
 
@@ -20,7 +16,7 @@ pub struct Manifest {
     pub repository: Option<RepositorySettingsConfig>,
 
     #[serde(default)]
-    pub templates: TemplateConfig,
+    pub file_delivery: FileDeliveryConfig,
 
     #[serde(default)]
     pub branch_protection: BranchProtectionConfig,
@@ -33,9 +29,6 @@ pub struct Manifest {
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<ManagedFile>,
-
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub policies: Vec<PolicyRule>,
 
     #[serde(flatten)]
     pub v2: ManifestV2State,
@@ -138,8 +131,11 @@ pub struct RepositorySettingsConfig {
     pub topics: Option<Vec<String>>,
 }
 
+/// Pull request delivery settings for Ward-managed file synchronization:
+/// the branch Ward pushes to, the reviewers it requests, and the commit
+/// message prefix it uses.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
-pub struct TemplateConfig {
+pub struct FileDeliveryConfig {
     #[serde(default = "default_branch_name")]
     pub branch: String,
 
@@ -148,12 +144,6 @@ pub struct TemplateConfig {
 
     #[serde(default = "default_commit_prefix")]
     pub commit_message_prefix: String,
-
-    #[serde(default)]
-    pub custom_dir: Option<String>,
-
-    #[serde(default)]
-    pub registries: HashMap<String, RegistryConfig>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
@@ -432,17 +422,6 @@ pub struct RulesetBypassActorConfig {
 pub struct TeamAccess {
     pub slug: String,
     pub permission: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct RegistryConfig {
-    #[serde(rename = "type")]
-    pub registry_type: String,
-    pub url: String,
-    #[serde(default)]
-    pub jfrog_oidc_provider: Option<String>,
-    #[serde(default)]
-    pub audience: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]

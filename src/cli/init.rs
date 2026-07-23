@@ -21,7 +21,7 @@ push_protection = true
 dependabot_alerts = true
 dependabot_security_updates = true
 
-[templates]
+[file_delivery]
 branch = "chore/ward-setup"
 reviewers = []
 commit_message_prefix = "chore: "
@@ -124,7 +124,7 @@ struct WizardState {
     branch_protection: BranchProtectionSettings,
     systems: Vec<SystemEntry>,
     exclude_patterns: Vec<String>,
-    templates: TemplateSettings,
+    file_delivery: FileDeliverySettings,
 }
 
 struct SecuritySettings {
@@ -146,7 +146,7 @@ struct SystemEntry {
     repo_count: usize,
 }
 
-struct TemplateSettings {
+struct FileDeliverySettings {
     branch: String,
     reviewers: Vec<String>,
     commit_message_prefix: String,
@@ -199,9 +199,9 @@ async fn run_wizard() -> Result<()> {
     print_step(5, total_steps, "Systems");
     let (systems, exclude_patterns) = discover_systems(&token, &org).await?;
 
-    // Step 6: Templates
-    print_step(6, total_steps, "Templates");
-    let templates = ask_templates()?;
+    // Step 6: File delivery
+    print_step(6, total_steps, "File Delivery");
+    let file_delivery = ask_file_delivery()?;
 
     let state = WizardState {
         org,
@@ -210,7 +210,7 @@ async fn run_wizard() -> Result<()> {
         branch_protection,
         systems,
         exclude_patterns,
-        templates,
+        file_delivery,
     };
 
     write_toml(&state)?;
@@ -497,9 +497,9 @@ fn ask_exclude_patterns() -> Result<Vec<String>> {
     Ok(patterns)
 }
 
-// Step 6: Templates
+// Step 6: File delivery
 
-fn ask_templates() -> Result<TemplateSettings> {
+fn ask_file_delivery() -> Result<FileDeliverySettings> {
     let branch: String = Input::new()
         .with_prompt("  Branch name for PRs")
         .default("chore/ward-setup".to_owned())
@@ -522,7 +522,7 @@ fn ask_templates() -> Result<TemplateSettings> {
         .default("chore: ".to_owned())
         .interact_text()?;
 
-    Ok(TemplateSettings {
+    Ok(FileDeliverySettings {
         branch,
         reviewers,
         commit_message_prefix,
@@ -568,10 +568,10 @@ fn write_toml(state: &WizardState) -> Result<()> {
         ));
     }
 
-    out.push_str("\n[templates]\n");
-    out.push_str(&format!("branch = {:?}\n", state.templates.branch));
+    out.push_str("\n[file_delivery]\n");
+    out.push_str(&format!("branch = {:?}\n", state.file_delivery.branch));
     let reviewers_toml: Vec<String> = state
-        .templates
+        .file_delivery
         .reviewers
         .iter()
         .map(|r| format!("{r:?}"))
@@ -579,7 +579,7 @@ fn write_toml(state: &WizardState) -> Result<()> {
     out.push_str(&format!("reviewers = [{}]\n", reviewers_toml.join(", ")));
     out.push_str(&format!(
         "commit_message_prefix = {:?}\n",
-        state.templates.commit_message_prefix
+        state.file_delivery.commit_message_prefix
     ));
 
     for sys in &state.systems {

@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -9,12 +9,12 @@ use console::style;
 
 use crate::config::manifest::{
     ActionsCategoryV2, ActorReference, BranchProtectionCategoryV2, CategoryPolicy, CoverageEntry,
-    CoverageOutcome, EnvironmentsCategoryV2, ExternalValueReference, FileEncoding, FilesCategoryV2,
-    LabelConfigV2, ManagedFile, Manifest, ManifestCategories, ManifestCategoryName,
-    ManifestProvenance, ManifestSchema, ManifestV2State, OrgConfig, RepositoryAccessCategoryV2,
-    RepositoryIntegrationsCategoryV2, RepositoryRuleConfig, RepositoryRulesetConfig,
-    RepositoryRulesetV2, RulesetBypassActorConfig, RulesetsCategoryV2, RulesetsConfig,
-    SecurityCategoryV2, SourceConfig, SystemConfig, TemplateConfig,
+    CoverageOutcome, EnvironmentsCategoryV2, ExternalValueReference, FileDeliveryConfig,
+    FileEncoding, FilesCategoryV2, LabelConfigV2, ManagedFile, Manifest, ManifestCategories,
+    ManifestCategoryName, ManifestProvenance, ManifestSchema, ManifestV2State, OrgConfig,
+    RepositoryAccessCategoryV2, RepositoryIntegrationsCategoryV2, RepositoryRuleConfig,
+    RepositoryRulesetConfig, RepositoryRulesetV2, RulesetBypassActorConfig, RulesetsCategoryV2,
+    RulesetsConfig, SecurityCategoryV2, SourceConfig, SystemConfig,
 };
 use crate::github::Client;
 use crate::reconcile::access_integrations::{collect_access, collect_integrations};
@@ -594,12 +594,10 @@ async fn snapshot_repository(
         }),
         security: security_category.settings.clone().unwrap_or_default(),
         repository: repository_category.settings.clone(),
-        templates: TemplateConfig {
+        file_delivery: FileDeliveryConfig {
             branch: DEFAULT_BRANCH.to_owned(),
             reviewers: Vec::new(),
             commit_message_prefix: "chore: ".to_owned(),
-            custom_dir: None,
-            registries: HashMap::new(),
         },
         branch_protection: branch_protection_category
             .default_branch
@@ -624,7 +622,6 @@ async fn snapshot_repository(
             rulesets: None,
         }],
         files: legacy_utf8_files(&files_category),
-        policies: Vec::new(),
         v2: ManifestV2State {
             schema: Some(ManifestSchema::v2()),
             provenance: Some(ManifestProvenance {
@@ -1085,7 +1082,7 @@ mod tests {
     }
 
     #[test]
-    fn rendered_v2_manifest_round_trips_binary_files_and_policies() {
+    fn rendered_v2_manifest_round_trips_binary_files() {
         let repository = RepositoryCategoryV2 {
             policy: CategoryPolicy::managed(),
             settings: Some(RepositorySettingsConfig {
@@ -1131,7 +1128,7 @@ mod tests {
             }),
             security: SecurityConfig::default(),
             repository: repository.settings.clone(),
-            templates: TemplateConfig::default(),
+            file_delivery: FileDeliveryConfig::default(),
             branch_protection: BranchProtectionConfig::default(),
             rulesets: RulesetsConfig::default(),
             systems: vec![SystemConfig {
@@ -1145,7 +1142,6 @@ mod tests {
                 rulesets: None,
             }],
             files: Vec::new(),
-            policies: Vec::new(),
             v2: ManifestV2State {
                 schema: Some(ManifestSchema::v2()),
                 provenance: Some(ManifestProvenance {

@@ -98,21 +98,6 @@ impl GitHubApiError {
     pub(crate) fn status(&self) -> Option<StatusCode> {
         self.status
     }
-
-    #[allow(dead_code)]
-    pub(crate) fn is_not_found(&self) -> bool {
-        self.kind == GitHubApiErrorKind::NotFound
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn is_forbidden(&self) -> bool {
-        self.kind == GitHubApiErrorKind::Forbidden
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn is_unprocessable(&self) -> bool {
-        self.kind == GitHubApiErrorKind::Unprocessable
-    }
 }
 
 impl fmt::Display for GitHubApiError {
@@ -469,8 +454,8 @@ mod tests {
         };
 
         assert_eq!(error.status(), Some(StatusCode::UNPROCESSABLE_ENTITY));
-        assert!(error.is_unprocessable());
-        assert!(!error.is_not_found());
+        assert_eq!(error.kind(), super::GitHubApiErrorKind::Unprocessable);
+        assert_ne!(error.kind(), super::GitHubApiErrorKind::NotFound);
 
         let display = error.to_string();
         assert!(display.contains("Validation Failed"));
@@ -526,7 +511,7 @@ mod tests {
             other => panic!("expected forbidden response, got {other:?}"),
         };
 
-        assert!(error.is_forbidden());
+        assert_eq!(error.kind(), super::GitHubApiErrorKind::Forbidden);
     }
 
     #[test]
