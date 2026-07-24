@@ -282,15 +282,7 @@ impl Client {
         let body = json!({
             "selected_repository_ids": repository_ids,
         });
-        let url = format!("{}{}", self.base_url, path);
-        let response = self
-            .http
-            .delete(&url)
-            .json(&body)
-            .send()
-            .await
-            .with_context(|| format!("DELETE {url} failed"))?;
-        response::expect_empty(response, "DELETE", &path).await
+        response::expect_empty(self.delete_json(&path, &body).await?, "DELETE", &path).await
     }
 
     /// Read the current security state of a repository.

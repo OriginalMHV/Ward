@@ -16,10 +16,10 @@ use super::response;
 /// GitHub API client with rate limiting and concurrency control.
 #[derive(Clone)]
 pub struct Client {
-    pub(crate) http: reqwest::Client,
+    http: reqwest::Client,
     pub(crate) org: String,
-    pub(crate) semaphore: Arc<Semaphore>,
-    pub(crate) base_url: String,
+    semaphore: Arc<Semaphore>,
+    base_url: String,
     retry_policy: RetryPolicy,
 }
 
@@ -104,6 +104,17 @@ impl Client {
     pub async fn delete(&self, path: &str) -> Result<reqwest::Response> {
         let url = format!("{}{}", self.base_url, path);
         self.send("DELETE", &url, self.http.delete(&url)).await
+    }
+
+    /// Make a DELETE request with a JSON body.
+    pub async fn delete_json<T: serde::Serialize>(
+        &self,
+        path: &str,
+        body: &T,
+    ) -> Result<reqwest::Response> {
+        let url = format!("{}{}", self.base_url, path);
+        self.send("DELETE", &url, self.http.delete(&url).json(body))
+            .await
     }
 
     pub async fn graphql<T, V>(&self, query: &str, variables: &V) -> Result<T>

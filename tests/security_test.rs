@@ -128,6 +128,26 @@ async fn test_set_security_features() {
 }
 
 #[tokio::test]
+async fn test_detach_code_security_configurations_sends_json_through_shared_client() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("DELETE"))
+        .and(path("/orgs/test-org/code-security/configurations/detach"))
+        .and(body_partial_json(json!({
+            "selected_repository_ids": [11, 22]
+        })))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    client
+        .detach_code_security_configurations(&[11, 22])
+        .await
+        .expect("detach request should succeed");
+}
+
+#[tokio::test]
 async fn test_audit_dependency_graph_available() {
     let server = MockServer::start().await;
 

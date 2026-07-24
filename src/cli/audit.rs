@@ -1,6 +1,7 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Args;
 use console::style;
+use reqwest::StatusCode;
 use serde::Serialize;
 
 use crate::config::Manifest;
@@ -70,13 +71,16 @@ impl AuditCommand {
     ) -> Result<()> {
         let (repos, system_id, scope_label) = resolve_repos(client, manifest, system, repo).await?;
 
-        println!();
-        println!(
-            "  {} Full audit: {} repo(s) in {}",
-            style("[..]").bold(),
-            repos.len(),
-            style(scope_label).cyan()
-        );
+        let json_output = is_json_format(&self.format);
+        if !json_output {
+            println!();
+            println!(
+                "  {} Full audit: {} repo(s) in {}",
+                style("[..]").bold(),
+                repos.len(),
+                style(scope_label).cyan()
+            );
+        }
 
         let mut audits = Vec::new();
 
@@ -86,7 +90,7 @@ impl AuditCommand {
             audits.push(audit);
         }
 
-        if self.format == "json" {
+        if json_output {
             let report = AuditReport {
                 generated_at: chrono::Utc::now().to_rfc3339(),
                 organization: client.org().to_owned(),
@@ -146,14 +150,17 @@ async fn audit_repo(
         .await?
         .is_some();
 
-    let rulesets = client.list_rulesets(repo).await.unwrap_or_default();
+    let rulesets = client
+        .list_rulesets(repo)
+        .await
+        .with_context(|| format!("Failed to audit rulesets for repository {repo}"))?;
     let has_copilot_review = rulesets.iter().any(|r| r.name == "Copilot Code Review");
     let has_copilot_instructions = client
         .get_file(repo, ".github/copilot-instructions.md", None)
         .await?
         .is_some();
 
-    let alert_counts = get_alert_counts(client, repo).await.unwrap_or_default();
+    let alert_counts = get_alert_counts(client, repo).await?;
     let dependency_graph = client.audit_dependency_graph(repo).await;
 
     Ok(RepoAudit {
@@ -180,57 +187,50 @@ async fn audit_repo(
 }
 
 async fn get_alert_counts(client: &Client, repo: &str) -> Result<AlertCounts> {
-    let mut counts = AlertCounts::default();
-
-    for severity in ["critical", "high", "medium", "low"] {
-        let resp = client
-            .get(&format!(
-                "/repos/{}/{repo}/dependabot/alerts?state=open&severity={severity}&per_page=1",
-                client.org()
-            ))
-            .await?;
-
-        if resp.status().is_success() {
-            let alerts: Vec<serde_json::Value> = resp.json().await.unwrap_or_default();
-            let count = if alerts.is_empty() { 0 } else { 1 };
-
-            match severity {
-                "critical" => counts.critical = count,
-                "high" => counts.high = count,
-                "medium" => counts.medium = count,
-                "low" => counts.low = count,
-                _ => {}
-            }
-        }
+    let path = format!(
+        "/repos/{}/{repo}/dependabot/alerts?state=open&per_page=100",
+        client.org()
+    );
+    let response = client
+        .get(&path)
+        .await
+        .with_context(|| format!("GET {path} for repository {repo} failed"))?;
+    let status = response.status();
+    if status == StatusCode::NOT_FOUND {
+        return Ok(AlertCounts::default());
+    }
+    if !status.is_success() {
+        return Err(anyhow::anyhow!(
+            "GET {path} for repository {repo} returned unexpected HTTP status {status}"
+        ));
     }
 
-    let resp = client
-        .get(&format!(
-            "/repos/{}/{repo}/dependabot/alerts?state=open&per_page=100",
-            client.org()
-        ))
-        .await?;
+    let alerts: Vec<serde_json::Value> = response
+        .json()
+        .await
+        .with_context(|| format!("Failed to decode JSON from GET {path} for repository {repo}"))?;
 
-    if resp.status().is_success() {
-        let alerts: Vec<serde_json::Value> = resp.json().await.unwrap_or_default();
-        counts = AlertCounts::default();
-        for alert in &alerts {
-            let severity = alert
-                .get("security_vulnerability")
-                .and_then(|v| v.get("severity"))
-                .and_then(|s| s.as_str())
-                .unwrap_or("unknown");
-            match severity {
-                "critical" => counts.critical += 1,
-                "high" => counts.high += 1,
-                "medium" => counts.medium += 1,
-                "low" => counts.low += 1,
-                _ => {}
-            }
+    let mut counts = AlertCounts::default();
+    for alert in &alerts {
+        let severity = alert
+            .get("security_vulnerability")
+            .and_then(|v| v.get("severity"))
+            .and_then(|s| s.as_str())
+            .unwrap_or("unknown");
+        match severity {
+            "critical" => counts.critical += 1,
+            "high" => counts.high += 1,
+            "medium" => counts.medium += 1,
+            "low" => counts.low += 1,
+            _ => {}
         }
     }
 
     Ok(counts)
+}
+
+fn is_json_format(format: &str) -> bool {
+    format == "json"
 }
 
 fn print_table(audits: &[RepoAudit]) {
@@ -345,9 +345,15 @@ fn print_table(audits: &[RepoAudit]) {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
     use tabled::builder::Builder;
     use tabled::settings::object::Columns;
     use tabled::settings::{Alignment, Modify, Style};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::{get_alert_counts, is_json_format};
+    use crate::github::Client;
 
     fn strip_ansi(s: &str) -> String {
         let re = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
@@ -424,5 +430,72 @@ mod tests {
             widths.windows(2).all(|w| w[0] == w[1]),
             "all rows should have same visible width, got: {widths:?}"
         );
+    }
+
+    #[test]
+    fn json_format_suppresses_human_progress_output() {
+        assert!(is_json_format("json"));
+        assert!(!is_json_format("table"));
+    }
+
+    #[tokio::test]
+    async fn malformed_alert_json_is_reported() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/repos/test-org/my-repo/dependabot/alerts"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("not json"))
+            .mount(&server)
+            .await;
+
+        let client = Client::new_for_test("test-org", &server.uri());
+        let error = get_alert_counts(&client, "my-repo")
+            .await
+            .expect_err("malformed alert JSON must fail the audit");
+
+        let message = format!("{error:#}");
+        assert!(message.contains("Failed to decode JSON"));
+        assert!(message.contains("my-repo"));
+    }
+
+    #[tokio::test]
+    async fn missing_alert_endpoint_is_treated_as_zero_counts() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/repos/test-org/my-repo/dependabot/alerts"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let client = Client::new_for_test("test-org", &server.uri());
+        let counts = get_alert_counts(&client, "my-repo")
+            .await
+            .expect("missing alert endpoint should be treated as empty");
+
+        assert_eq!(counts.critical, 0);
+        assert_eq!(counts.high, 0);
+        assert_eq!(counts.medium, 0);
+        assert_eq!(counts.low, 0);
+    }
+
+    #[tokio::test]
+    async fn failed_alert_request_is_reported() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/repos/test-org/my-repo/dependabot/alerts"))
+            .respond_with(ResponseTemplate::new(500).set_body_json(json!({
+                "message": "server error"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = Client::new_for_test("test-org", &server.uri());
+        let error = get_alert_counts(&client, "my-repo")
+            .await
+            .expect_err("failed alert requests must fail the audit");
+
+        let message = format!("{error:#}");
+        assert!(message.contains("GET"));
+        assert!(message.contains("my-repo"));
+        assert!(message.contains("/dependabot/alerts"));
     }
 }

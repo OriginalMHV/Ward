@@ -163,6 +163,11 @@ fn init_tracing(verbose: u8) {
 
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(filter)))
-        .with(fmt::layer().with_target(false).without_time())
+        .with(
+            fmt::layer()
+                .with_target(false)
+                .without_time()
+                .with_writer(std::io::stderr),
+        )
         .init();
 }
