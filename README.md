@@ -14,7 +14,7 @@ Ward is a Rust CLI for managing GitHub repository configuration as code. There a
 
 ```text
 author ward.toml manually ---------+
-                                   +-> ward plan -> ward apply -> verify
+                                   +-> ward plan -> ward apply (includes verification)
 bootstrap from a repository -------+
 ```
 
@@ -53,7 +53,7 @@ Source installation requires Rust 1.85 or newer. Ward reads authentication from 
 gh auth status
 ```
 
-Manual setup needs access only to the target repositories. Repository bootstrap additionally needs read access to its source. Applying every category normally requires repository administration, Actions, security-events, workflow, hook, Pages, and organization-read permissions appropriate to the selected settings.
+Required permissions depend on the setup path and selected categories. Directly authoring `ward.toml` needs no API access until `plan`; repository bootstrap additionally needs read access to its source. Planning and applying require access to the target repositories, with additional repository or organization permissions for the selected settings. See [GitHub Coverage](docs/github-coverage.md) for the API boundaries.
 
 ## Quick Start
 
@@ -120,9 +120,9 @@ See [GitHub Coverage](docs/github-coverage.md) for the complete matrix, file-sel
 ## Safe by default
 
 - Ward manages only existing repositories; it never creates, renames, transfers, or deletes them.
-- Every category is explicitly `managed`, `observe`, `reference`, or `placeholder`.
+- Every configured category is explicitly `managed`, `observe`, `reference`, or `placeholder`.
 - Pruning is off unless enabled deliberately, and incomplete observations never trigger silent deletion.
-- Visibility, archive, secrets, access, hooks, rules, and other sensitive changes require explicit gates.
+- Visibility and archive changes, access, integrations, rules, and destructive pruning require explicit opt-in gates.
 - Managed files go through dedicated branches and pull requests, never directly to the default branch.
 - Secret values stay outside `ward.toml` and are resolved only when needed for apply.
 
