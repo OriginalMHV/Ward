@@ -30,7 +30,7 @@ const AFTER_HELP: &str = "\x1b[1mGetting Started:\x1b[0m
 \x1b[1mAdvanced:\x1b[0m
   import                        Import existing repository state
 
-\x1b[2mNew to Ward? Run: ward init --from OWNER/REPO → ward plan --all\x1b[0m
+\x1b[2mNew to Ward? Run: ward init --from OWNER/REPO → ward plan\x1b[0m
 \x1b[2mFull tutorial: https://github.com/OriginalMHV/Ward/blob/main/docs/getting-started.md\x1b[0m";
 
 #[derive(Parser)]
@@ -123,7 +123,7 @@ pub enum Command {
     #[command(display_order = 25)]
     Teams(teams::TeamsCommand),
 
-    /// Manage branch protection rules (legacy, prefer rulesets)
+    /// Manage classic branch protection rules
     #[command(display_order = 26)]
     Protection(protection::ProtectionCommand),
 

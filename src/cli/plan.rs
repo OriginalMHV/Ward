@@ -16,10 +16,6 @@ pub(crate) struct CategoryRun<'a> {
 /// Preview the desired manifest state across existing repositories.
 #[derive(Args)]
 pub struct PlanCommand {
-    /// Compatibility flag; canonical planning already checks every configured system by default
-    #[arg(long)]
-    all: bool,
-
     /// Limit to one or more categories (repeatable). Valid: repository, files,
     /// security, rulesets, branch-protection, actions, environments, access,
     /// integrations.
@@ -40,7 +36,6 @@ impl PlanCommand {
         repo: Option<&str>,
         json: bool,
     ) -> Result<()> {
-        let _ = self.all;
         let options = UnifiedOptions {
             categories: unified::parse_categories(&self.categories)?,
             allow_high_impact: self.allow_high_impact,

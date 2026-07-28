@@ -236,7 +236,7 @@ Entries contain repository, category/action, status, and structural before/after
 | `src/reconcile/files.rs` | binary-safe configuration files |
 | `src/reconcile/unified.rs` | cross-category planning, ordering, deferral, verification |
 | `src/github/` | typed REST, GraphQL, Git Data, and classification helpers |
-| `src/engine/` | audit log and legacy planning/execution helpers |
+| `src/engine/` | append-only audit logging |
 | `tests/` | Wiremock clients, reconciliation, safety, and CLI integration tests |
 
 ## Key dependencies
