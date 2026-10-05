@@ -566,15 +566,75 @@ async fn repo_flag_inside_manifest_scope_narrows() {
 }
 
 #[tokio::test]
-async fn repo_flag_for_archived_repository_is_an_error() {
+async fn repo_flag_allows_an_archived_repository_for_read_only_commands() {
     let server = MockServer::start().await;
     mock_repo(&server, "recall", true).await;
     let client = Client::new_for_test("test-org", &server.uri());
 
-    let error = unified::resolve_target_repos(&client, &scoped_manifest(), None, Some("recall"))
+    let repos = unified::resolve_target_repos(&client, &scoped_manifest(), None, Some("recall"))
+        .await
+        .unwrap();
+    assert_eq!(repos.len(), 1);
+    assert!(repos[0].archived);
+}
+
+#[tokio::test]
+async fn apply_refuses_an_archived_repository_with_a_clear_message() {
+    let server = MockServer::start().await;
+    mock_repo(&server, "recall", true).await;
+    let client = Client::new_for_test("test-org", &server.uri());
+    let repos = unified::resolve_target_repos(&client, &scoped_manifest(), None, Some("recall"))
+        .await
+        .unwrap();
+
+    let error = unified::prepare_apply(
+        &client,
+        &scoped_manifest(),
+        &repos,
+        &options(vec![Category::Files], false),
+    )
+    .await
+    .map(|_| ())
+    .unwrap_err();
+    assert!(error.to_string().contains("archived"), "{error}");
+    assert!(error.to_string().contains("does not apply"), "{error}");
+}
+
+#[tokio::test]
+async fn repo_flag_is_the_explicit_target_when_the_manifest_has_no_systems() {
+    let server = MockServer::start().await;
+    mock_repo(&server, "pulse", false).await;
+    let client = Client::new_for_test("test-org", &server.uri());
+
+    let repos = unified::resolve_target_repos(&client, &base_manifest(), None, Some("pulse"))
+        .await
+        .unwrap();
+    assert_eq!(repos[0].name, "pulse");
+
+    let error = unified::resolve_target_repos(&client, &base_manifest(), None, None)
         .await
         .unwrap_err();
-    assert!(error.to_string().contains("archived"), "{error}");
+    assert!(error.to_string().contains("No target selected"), "{error}");
+}
+
+#[tokio::test]
+async fn repo_flag_matches_system_and_explicit_names_case_insensitively() {
+    let server = MockServer::start().await;
+    mock_repo(&server, "Recall", false).await;
+    mock_repo(&server, "RECALL-api", false).await;
+    let client = Client::new_for_test("test-org", &server.uri());
+    let mut manifest = scoped_manifest();
+
+    let repos = unified::resolve_target_repos(&client, &manifest, None, Some("Recall"))
+        .await
+        .unwrap();
+    assert_eq!(repos.len(), 1);
+
+    manifest.systems[0].match_prefix = true;
+    let repos = unified::resolve_target_repos(&client, &manifest, None, Some("RECALL-api"))
+        .await
+        .unwrap();
+    assert_eq!(repos.len(), 1);
 }
 
 #[tokio::test]

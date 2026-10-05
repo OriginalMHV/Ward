@@ -446,31 +446,31 @@ pub async fn resolve_target_repos(
         manifest.systems.iter().map(|s| s.id.clone()).collect()
     };
 
-    if system_ids.is_empty() {
+    if system_ids.is_empty() && repo.is_none() {
         bail!(
-            "No target selected. Pass --system <id> or configure systems in ward.toml (--repo only narrows configured systems)"
+            "No target selected. Pass --repo <name>, pass --system <id>, or configure systems in ward.toml"
         );
     }
 
     if let Some(repo_name) = repo {
-        let mut in_scope = false;
-        for system_id in &system_ids {
-            if system_includes_repo(manifest, system_id, repo_name)? {
-                in_scope = true;
-                break;
+        // Without systems the manifest has only top-level categories, so there is
+        // no scope to escape and --repo is the explicit target.
+        if !system_ids.is_empty() {
+            let mut in_scope = false;
+            for system_id in &system_ids {
+                if system_includes_repo(manifest, system_id, repo_name)? {
+                    in_scope = true;
+                    break;
+                }
+            }
+            if !in_scope {
+                bail!(
+                    "Repository '{repo_name}' is not in the manifest scope (systems: {}). Add it to a system or check its exclude patterns",
+                    system_ids.join(", ")
+                );
             }
         }
-        if !in_scope {
-            bail!(
-                "Repository '{repo_name}' is not in the manifest scope (systems: {}). Add it to a system or check its exclude patterns",
-                system_ids.join(", ")
-            );
-        }
-        let repository = client.get_repo(repo_name).await?;
-        if repository.archived {
-            bail!("Repository '{repo_name}' is archived and is not reconciled");
-        }
-        return Ok(vec![repository]);
+        return Ok(vec![client.get_repo(repo_name).await?]);
     }
 
     let mut repos: Vec<Repository> = Vec::new();
@@ -504,15 +504,18 @@ fn system_includes_repo(manifest: &Manifest, system_id: &str, repo: &str) -> Res
     if manifest
         .explicit_repos_for_system(system_id)
         .iter()
-        .any(|explicit| explicit == repo)
+        .any(|explicit| explicit.eq_ignore_ascii_case(repo))
     {
         return Ok(true);
     }
     if !manifest.matches_prefix_for_system(system_id) {
         return Ok(false);
     }
-    let suffix = match repo.strip_prefix(system_id) {
-        Some("") => repo,
+    // GitHub repository names are case-insensitive.
+    let repo = repo.to_ascii_lowercase();
+    let prefix = system_id.to_ascii_lowercase();
+    let suffix = match repo.strip_prefix(prefix.as_str()) {
+        Some("") => repo.as_str(),
         Some(rest) => match rest.strip_prefix('-') {
             Some(suffix) => suffix,
             None => return Ok(false),
@@ -523,8 +526,10 @@ fn system_includes_repo(manifest: &Manifest, system_id: &str, repo: &str) -> Res
     if excludes.is_empty() {
         return Ok(true);
     }
-    let pattern =
-        regex::Regex::new(&excludes.join("|")).context("Invalid exclude pattern regex")?;
+    let pattern = regex::RegexBuilder::new(&excludes.join("|"))
+        .case_insensitive(true)
+        .build()
+        .context("Invalid exclude pattern regex")?;
     Ok(!pattern.is_match(suffix))
 }
 
@@ -1174,6 +1179,12 @@ pub async fn prepare_apply(
     repos: &[Repository],
     options: &UnifiedOptions,
 ) -> Result<PreparedApply> {
+    if let Some(archived) = repos.iter().find(|repository| repository.archived) {
+        bail!(
+            "Repository '{}' is archived. Ward plans and audits archived repositories but does not apply changes to them",
+            archived.name
+        );
+    }
     let branch = sync_branch(manifest);
     let prepared = crate::reconcile::map_buffered(repos, |repository| async {
         let plan = plan_repo(client, manifest, repository, options).await;
