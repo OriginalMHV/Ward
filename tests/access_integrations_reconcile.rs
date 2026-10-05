@@ -632,7 +632,7 @@ fn pages_status_autolink_recreate_and_idempotence_work() {
                 }],
                 ..current.state.clone()
             },
-            ..current.clone()
+            ..current
         },
         &RepositoryIntegrationsCategoryV2 {
             autolinks: vec![desired.autolinks[0].clone()],

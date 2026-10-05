@@ -870,7 +870,7 @@ pub fn plan_security_category(
                 .map(codeql_state_to_manifest)
                 != Some(codeql.clone())
             {
-                codeql_default_setup = Some(desired_codeql.clone());
+                codeql_default_setup = Some(desired_codeql);
             }
         }
     }

@@ -572,9 +572,9 @@ async fn snapshot_repository(
     strict_failures.dedup();
 
     let categories = ManifestCategories {
-        security: Some(security_category.clone()),
-        repository: Some(repository_category.clone()),
-        branch_protection: Some(branch_protection_category.clone()),
+        security: Some(security_category),
+        repository: Some(repository_category),
+        branch_protection: Some(branch_protection_category),
         rulesets: Some(rulesets_category.clone()),
         files: Some(files_category.clone()),
         actions: Some(actions_category.clone()),

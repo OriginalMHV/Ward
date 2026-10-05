@@ -304,7 +304,7 @@ fn label_actions_respect_prune_gate_and_default_label_safety() {
             .any(|action| matches!(action, PlannedLabelAction::Delete { .. }))
     );
 
-    let mut desired_with_prune = desired.clone();
+    let mut desired_with_prune = desired;
     desired_with_prune.repository.policy.prune = true;
     desired_with_prune.labels = vec![GeneralLabel {
         name: "feature".to_owned(),

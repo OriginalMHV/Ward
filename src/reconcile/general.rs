@@ -1789,7 +1789,7 @@ fn plan_optional_string_change(
     if let Some(desired_value) = desired_value
         && current_value.as_deref() != Some(desired_value.as_str())
     {
-        rest_patch.insert(field.to_owned(), json!(desired_value.clone()));
+        rest_patch.insert(field.to_owned(), json!(desired_value));
         changes.push(GeneralChange {
             kind: GeneralChangeKind::RestField {
                 field: field.to_owned(),
@@ -1815,7 +1815,7 @@ fn plan_policy_change(
     if let Some(desired_value) = desired_value
         && current_value != Some(desired_value.clone())
     {
-        rest_patch.insert(field.to_owned(), json!(desired_value.clone()));
+        rest_patch.insert(field.to_owned(), json!(desired_value));
         changes.push(GeneralChange {
             kind: GeneralChangeKind::RestField {
                 field: field.to_owned(),
@@ -1967,7 +1967,7 @@ fn plan_high_impact_string_change(
         && current_value.as_deref() != Some(desired_value.as_str())
     {
         if allow_high_impact {
-            rest_patch.insert(field.to_owned(), json!(desired_value.clone()));
+            rest_patch.insert(field.to_owned(), json!(desired_value));
             changes.push(GeneralChange {
                 kind: GeneralChangeKind::RestField {
                     field: field.to_owned(),
