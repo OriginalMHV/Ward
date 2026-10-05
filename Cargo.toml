@@ -30,7 +30,7 @@ dialoguer = { version = "0.12" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 
 # HTTP & GitHub API
-reqwest = { version = "0.13", features = ["json", "rustls"], default-features = false }
+reqwest = { version = "0.13", features = ["json", "rustls", "gzip", "http2"], default-features = false }
 http = "1"
 
 # Serialization

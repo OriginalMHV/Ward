@@ -182,3 +182,32 @@ async fn put_patch_and_delete_are_retried_on_server_errors() {
         200
     );
 }
+
+#[tokio::test]
+async fn gzip_encoded_responses_are_decompressed() {
+    const GZIPPED_OK: [u8; 31] = [
+        31, 139, 8, 0, 0, 0, 0, 0, 2, 255, 171, 86, 202, 207, 86, 178, 42, 41, 42, 77, 173, 5, 0,
+        144, 95, 212, 167, 11, 0, 0, 0,
+    ];
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/g"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-encoding", "gzip")
+                .set_body_raw(GZIPPED_OK.to_vec(), "application/json"),
+        )
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let body: serde_json::Value = client
+        .get("/repos/test-org/g")
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(body["ok"], true);
+}
