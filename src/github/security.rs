@@ -96,6 +96,9 @@ pub struct SecurityState {
     pub secret_scanning: bool,
     pub secret_scanning_ai_detection: bool,
     pub push_protection: bool,
+    /// Features whose state could not be read, so their `false` is unknown.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unknown: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -308,8 +311,18 @@ impl Client {
         let mut state = SecurityState::default();
 
         match alerts_result {
-            Ok(response) => state.dependabot_alerts = response.status().as_u16() == 204,
-            Err(error) => tracing::warn!("Failed to check dependabot alerts for {repo}: {error}"),
+            Ok(response) => match response.status().as_u16() {
+                204 => state.dependabot_alerts = true,
+                404 => {}
+                status => {
+                    tracing::warn!("Dependabot alerts state for {repo} unreadable: HTTP {status}");
+                    state.unknown.push("dependabot_alerts".to_owned());
+                }
+            },
+            Err(error) => {
+                tracing::warn!("Failed to check dependabot alerts for {repo}: {error}");
+                state.unknown.push("dependabot_alerts".to_owned());
+            }
         }
 
         match fixes_result {
@@ -341,7 +354,17 @@ impl Client {
             }
             Ok(None) => {}
             Err(error) => {
-                tracing::warn!("Failed to inspect repository security settings for {repo}: {error}")
+                tracing::warn!(
+                    "Failed to inspect repository security settings for {repo}: {error}"
+                );
+                state.unknown.extend(
+                    [
+                        "secret_scanning",
+                        "secret_scanning_ai_detection",
+                        "push_protection",
+                    ]
+                    .map(str::to_owned),
+                );
             }
         }
 

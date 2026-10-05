@@ -199,3 +199,30 @@ async fn test_audit_dependency_graph_unavailable() {
         "GitHub could not export an SBOM for this repository"
     );
 }
+
+#[tokio::test]
+async fn test_get_security_state_marks_unreadable_alerts_as_unknown() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/my-repo/vulnerability-alerts"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({ "message": "Forbidden" })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/my-repo/automated-security-fixes"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/my-repo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "name": "my-repo" })))
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let state = client.get_security_state("my-repo").await.unwrap();
+
+    assert!(!state.dependabot_alerts);
+    assert_eq!(state.unknown, ["dependabot_alerts"]);
+}

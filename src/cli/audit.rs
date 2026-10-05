@@ -153,6 +153,12 @@ async fn audit_repo(
         .is_some();
 
     let mut unavailable = Vec::new();
+    if !security_state.unknown.is_empty() {
+        unavailable.push(format!(
+            "security state: {}",
+            security_state.unknown.join(", ")
+        ));
+    }
     let rulesets = match client.list_rulesets(repo).await {
         Ok(rulesets) => rulesets,
         Err(error) => {
@@ -628,7 +634,9 @@ mod tests {
         .unwrap();
 
         let audit = super::audit_repo(&client, &repo, None).await.unwrap();
-        assert_eq!(audit.unavailable.len(), 2, "{:?}", audit.unavailable);
+        let joined = audit.unavailable.join("\n");
+        assert!(joined.contains("rulesets:"), "{joined}");
+        assert!(joined.contains("dependabot alerts:"), "{joined}");
         assert!(audit.security.has_dependabot_config);
     }
 }
