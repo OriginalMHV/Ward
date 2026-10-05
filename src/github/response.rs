@@ -265,24 +265,21 @@ pub(crate) struct RetryPlan {
 
 /// Decide whether and when to retry a response.
 ///
-/// `secondary_limit_body` is true when a 403 body names a secondary rate limit.
+/// `rate_limit_body` is true when a 403 body says the request hit a rate limit.
+/// A 403 is a rate limit only when the headers or the body say so, never because of
+/// `x-ratelimit-remaining: 0` alone, since a plain permission error can carry it.
 pub(crate) fn retry_delay(
     status: StatusCode,
     headers: &header::HeaderMap,
-    secondary_limit_body: bool,
+    rate_limit_body: bool,
     retry_number: usize,
     timing: &RetryTiming<'_>,
     now: DateTime<Utc>,
 ) -> Option<RetryPlan> {
     match status {
-        StatusCode::TOO_MANY_REQUESTS | StatusCode::FORBIDDEN => rate_limit_plan(
-            status,
-            headers,
-            secondary_limit_body,
-            retry_number,
-            timing,
-            now,
-        ),
+        StatusCode::TOO_MANY_REQUESTS | StatusCode::FORBIDDEN => {
+            rate_limit_plan(status, headers, rate_limit_body, retry_number, timing, now)
+        }
         StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT => {
             fallback_retry_delay(retry_number, timing.backoff_schedule).map(|delay| RetryPlan {
                 delay,
@@ -296,7 +293,7 @@ pub(crate) fn retry_delay(
 fn rate_limit_plan(
     status: StatusCode,
     headers: &header::HeaderMap,
-    secondary_limit_body: bool,
+    rate_limit_body: bool,
     retry_number: usize,
     timing: &RetryTiming<'_>,
     now: DateTime<Utc>,
@@ -307,10 +304,12 @@ fn rate_limit_plan(
     };
     let (delay, kind) = if let Some(delay) = parse_retry_after(headers, now) {
         (delay, RetryKind::SecondaryRateLimit)
-    } else if is_rate_limit_exhausted(headers) {
+    } else if is_rate_limit_exhausted(headers)
+        && (status == StatusCode::TOO_MANY_REQUESTS || rate_limit_body)
+    {
         let delay = parse_rate_limit_reset(headers, now).unwrap_or_else(backoff);
         (delay, RetryKind::PrimaryRateLimit)
-    } else if status == StatusCode::TOO_MANY_REQUESTS || secondary_limit_body {
+    } else if status == StatusCode::TOO_MANY_REQUESTS || rate_limit_body {
         (backoff(), RetryKind::SecondaryRateLimit)
     } else {
         return None;
@@ -319,9 +318,9 @@ fn rate_limit_plan(
     (delay <= timing.max_rate_limit_wait).then_some(RetryPlan { delay, kind })
 }
 
-pub(crate) fn mentions_secondary_rate_limit(body: &[u8]) -> bool {
+pub(crate) fn mentions_rate_limit(body: &[u8]) -> bool {
     let body = String::from_utf8_lossy(body).to_ascii_lowercase();
-    body.contains("secondary rate limit") || body.contains("abuse detection")
+    body.contains("rate limit") || body.contains("abuse detection")
 }
 
 pub(crate) fn is_rate_limit_status(status: StatusCode) -> bool {
@@ -332,7 +331,7 @@ pub(crate) fn is_rate_limit_status(status: StatusCode) -> bool {
 }
 
 pub(crate) fn needs_body_check(headers: &header::HeaderMap) -> bool {
-    !has_retry_after(headers) && !is_rate_limit_exhausted(headers)
+    !has_retry_after(headers)
 }
 
 fn kind_from_disposition(disposition: ResponseDisposition) -> GitHubApiErrorKind {
@@ -495,7 +494,7 @@ mod tests {
 
     use super::{
         ClassifiedResponse, GitHubApiError, RetryKind, RetryPlan, RetryTiming, classify_empty,
-        classify_json, mentions_secondary_rate_limit, retry_delay,
+        classify_json, mentions_rate_limit, retry_delay,
     };
 
     #[tokio::test]
@@ -658,7 +657,7 @@ mod tests {
         let headers = exhausted_headers("1784023205");
         let now = Utc.timestamp_opt(1784023200, 0).single().unwrap();
 
-        let result = plan(StatusCode::FORBIDDEN, &headers, false, 1, now);
+        let result = plan(StatusCode::FORBIDDEN, &headers, true, 1, now);
 
         assert_eq!(
             result,
@@ -666,6 +665,11 @@ mod tests {
                 delay: Duration::from_secs(5),
                 kind: RetryKind::PrimaryRateLimit
             })
+        );
+        assert_eq!(
+            plan(StatusCode::FORBIDDEN, &headers, false, 1, now),
+            None,
+            "a 403 without a rate limit message is a permission error"
         );
         assert_eq!(
             plan(StatusCode::TOO_MANY_REQUESTS, &headers, false, 1, now),
@@ -698,7 +702,7 @@ mod tests {
         let headers = exhausted_headers("1784026800");
         let now = Utc.timestamp_opt(1784023200, 0).single().unwrap();
 
-        assert_eq!(plan(StatusCode::FORBIDDEN, &headers, false, 1, now), None);
+        assert_eq!(plan(StatusCode::FORBIDDEN, &headers, true, 1, now), None);
     }
 
     #[test]
@@ -731,10 +735,13 @@ mod tests {
 
     #[test]
     fn secondary_rate_limit_body_detection_is_case_insensitive() {
-        assert!(mentions_secondary_rate_limit(
+        assert!(mentions_rate_limit(
             br#"{"message":"You have exceeded a Secondary Rate Limit."}"#
         ));
-        assert!(!mentions_secondary_rate_limit(
+        assert!(mentions_rate_limit(
+            br#"{"message":"API rate limit exceeded for user ID 1."}"#
+        ));
+        assert!(!mentions_rate_limit(
             br#"{"message":"Resource not accessible by integration"}"#
         ));
     }

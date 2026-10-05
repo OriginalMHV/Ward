@@ -281,6 +281,7 @@ impl Client {
         let _permit = self.semaphore.acquire().await?;
         let mut request = request;
         let mut attempt = 1usize;
+        let mut retried_after_server_error = false;
 
         loop {
             tracing::debug!("{method} {url} attempt {attempt}");
@@ -297,13 +298,24 @@ impl Client {
 
             check_rate_limit(&response);
 
-            let (response, secondary_limit_body) = detect_secondary_limit(response).await?;
+            let (response, rate_limit_body) = detect_rate_limit_body(response).await?;
             let status = response.status();
+
+            // The attempt that failed with a 5xx may have deleted the resource.
+            if method == "DELETE"
+                && retried_after_server_error
+                && status == reqwest::StatusCode::NOT_FOUND
+            {
+                tracing::debug!(
+                    "{method} {url} returned HTTP 404 after a retry. The first attempt already deleted it"
+                );
+                return Ok(no_content_response());
+            }
 
             let Some(plan) = response::retry_delay(
                 status,
                 response.headers(),
-                secondary_limit_body,
+                rate_limit_body,
                 attempt,
                 &self.retry_policy.timing(),
                 Utc::now(),
@@ -351,6 +363,9 @@ impl Client {
                 }
             }
 
+            if plan.kind == response::RetryKind::Transient {
+                retried_after_server_error = true;
+            }
             tokio::time::sleep(delay).await;
             request = next_request;
             attempt += 1;
@@ -358,10 +373,16 @@ impl Client {
     }
 }
 
-/// Read a 403 body only when no rate limit header explains it, so a secondary
-/// rate limit without `retry-after` is still recognised. The response is rebuilt
+fn no_content_response() -> reqwest::Response {
+    let mut response = http::Response::new("");
+    *response.status_mut() = reqwest::StatusCode::NO_CONTENT;
+    reqwest::Response::from(response)
+}
+
+/// Read a 403 body unless `retry-after` already explains it, so a rate limit is
+/// recognised by its message and never by `x-ratelimit-remaining` alone. The response is rebuilt
 /// so callers can read the body again.
-async fn detect_secondary_limit(response: reqwest::Response) -> Result<(reqwest::Response, bool)> {
+async fn detect_rate_limit_body(response: reqwest::Response) -> Result<(reqwest::Response, bool)> {
     if response.status() != reqwest::StatusCode::FORBIDDEN
         || !response::needs_body_check(response.headers())
     {
@@ -375,7 +396,7 @@ async fn detect_secondary_limit(response: reqwest::Response) -> Result<(reqwest:
         .bytes()
         .await
         .context("Failed to read GitHub 403 response body")?;
-    let secondary = response::mentions_secondary_rate_limit(&body);
+    let secondary = response::mentions_rate_limit(&body);
 
     let mut rebuilt = http::Response::new(body);
     *rebuilt.status_mut() = status;

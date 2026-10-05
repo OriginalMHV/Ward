@@ -211,3 +211,64 @@ async fn gzip_encoded_responses_are_decompressed() {
 
     assert_eq!(body["ok"], true);
 }
+
+#[tokio::test]
+async fn delete_that_is_404_after_a_server_error_retry_counts_as_deleted() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/repos/test-org/d/keys/1"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path("/repos/test-org/d/keys/1"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({"message": "Not Found"})))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let response = client.delete("/repos/test-org/d/keys/1").await.unwrap();
+
+    assert_eq!(response.status(), 204);
+}
+
+#[tokio::test]
+async fn delete_that_is_404_on_the_first_attempt_stays_not_found() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/repos/test-org/d/keys/2"))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let response = client.delete("/repos/test-org/d/keys/2").await.unwrap();
+
+    assert_eq!(response.status(), 404);
+}
+
+#[tokio::test]
+async fn forbidden_with_an_exhausted_header_but_a_permission_body_is_not_retried() {
+    let server = MockServer::start().await;
+    let soon = (chrono::Utc::now().timestamp() + 2).to_string();
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/e"))
+        .respond_with(
+            ResponseTemplate::new(403)
+                .insert_header("x-ratelimit-remaining", "0")
+                .insert_header("x-ratelimit-reset", soon.as_str())
+                .set_body_json(json!({"message": "Resource not accessible by integration"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let response = client.get("/repos/test-org/e").await.unwrap();
+
+    assert_eq!(response.status(), 403);
+}
