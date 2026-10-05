@@ -63,12 +63,9 @@ Choose whichever setup path fits the situation.
 
 ```bash
 ward init
-
-# Or create a minimal scaffold without prompts
-ward init --non-interactive
 ```
 
-Review and edit `ward.toml` using the [configuration reference](docs/configuration.md). The wizard is a starting point, not a limit on what can be managed.
+`ward init` writes a minimal scaffold. Review and edit `ward.toml` using the [configuration reference](docs/configuration.md). The scaffold is a starting point, not a limit on what can be managed. For real onboarding, use `ward import OWNER/REPO`.
 
 ### Bootstrap from an existing repository
 

@@ -427,12 +427,11 @@ ward config remove-system backend --yes
 
 ## `ward init`
 
-Create `ward.toml` through the setup wizard, as a minimal scaffold, or by bootstrapping from an existing repository.
+Create `ward.toml` as a minimal scaffold, or bootstrap it from an existing repository. For real onboarding, use `ward import OWNER/REPO`.
 
 ```bash
-# Manual setup
+# Minimal scaffold
 ward init
-ward init --non-interactive
 
 # Repository bootstrap
 ward init --from acme/reference-service
@@ -448,7 +447,7 @@ ward init --from acme/reference-service --force
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--from <SOURCE>` | -- | Snapshot `OWNER/REPO` or a GitHub URL |
-| `--non-interactive` | `false` | Write a default `ward.toml` without prompts |
+| `--non-interactive` | `false` | Accepted for compatibility. It changes nothing, because init never prompts |
 | `--output <PATH>` | `ward.toml` | Output path for `--from` |
 | `--stdout` | `false` | Print the generated config instead of writing it |
 | `--force` | `false` | Replace an existing output file |
@@ -460,14 +459,7 @@ ward init --from acme/reference-service --force
 
 Manual setup and `--from` are equal entry points to the same Ward lifecycle. Use manual setup for deliberate policy authoring; use `--from` as a read-only shortcut when an existing repository is the best baseline. The generated manifest is a static snapshot. Without `--target`, it initially targets only the source repository.
 
-Without `--from`, the wizard walks through:
-
-1. **Authentication** -- checks for a valid GitHub token
-2. **Organization** -- verifies the org and counts repos
-3. **Security settings** -- prompts for each security feature
-4. **Branch protection** -- enable and configure protection rules
-5. **Systems discovery** -- scans repos and auto-detects name prefixes (requires at least 2 repos per prefix)
-6. **File delivery** -- branch name, reviewers, commit prefix
+Without `--from`, init writes the minimal scaffold and does not contact GitHub. It never overwrites an existing `ward.toml`.
 
 ---
 

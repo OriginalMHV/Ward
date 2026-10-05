@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Removed the interactive `ward init` wizard. `ward init` now writes only the minimal scaffold and `--non-interactive` is an accepted no-op. Use `ward import OWNER/REPO` or `ward init --from OWNER/REPO` for onboarding
 - Removed the interactive TUI, its disk cache, and the `ratatui`/`crossterm` dependencies
 - Removed built-in/custom templates, ecosystem detection, and target-project version inference
 - Removed the unsafe `rollback`, redundant `setup`, template-management, and custom policy DSL commands

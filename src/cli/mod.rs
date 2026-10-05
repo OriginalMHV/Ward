@@ -82,7 +82,7 @@ pub struct Cli {
 #[derive(clap::Subcommand)]
 pub enum Command {
     // --- Getting Started ---
-    /// Create ward.toml interactively or from an existing repository
+    /// Create a minimal ward.toml, or build one from an existing repository
     #[command(display_order = 1)]
     Init(init::InitCommand),
 
