@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Args;
 use console::style;
 
+use super::output::{ok_icon, print_table};
 use crate::config::Manifest;
 use crate::engine::audit_log::AuditLog;
 use crate::github::Client;
@@ -125,8 +126,6 @@ async fn audit(
     );
 
     use tabled::builder::Builder;
-    use tabled::settings::object::{Columns, Rows};
-    use tabled::settings::{Alignment, Modify, Style};
 
     let mut builder = Builder::default();
     builder.push_record([
@@ -160,41 +159,20 @@ async fn audit(
             total_issues += 1;
         }
 
-        let icon = |value: bool| {
-            if value {
-                format!("{}", style("[ok]").green())
-            } else {
-                format!("{}", style("[!!]").red())
-            }
-        };
-
         builder.push_record([
             repo_name.clone(),
             default_branch.clone(),
-            icon(state.required_pull_request_reviews),
+            ok_icon(state.required_pull_request_reviews),
             state.required_approving_review_count.to_string(),
-            icon(state.dismiss_stale_reviews),
-            icon(state.enforce_admins),
-            icon(state.required_linear_history),
-            icon(state.allow_force_pushes),
+            ok_icon(state.dismiss_stale_reviews),
+            ok_icon(state.enforce_admins),
+            ok_icon(state.required_linear_history),
+            ok_icon(state.allow_force_pushes),
         ]);
     }
 
-    let table = builder
-        .build()
-        .with(Style::blank())
-        .with(
-            Modify::new(Rows::first()).with(tabled::settings::Format::content(|value| {
-                format!("{}", style(value).bold().underlined())
-            })),
-        )
-        .with(Modify::new(Columns::new(..)).with(Alignment::left()))
-        .to_string();
-
     println!();
-    for line in table.lines() {
-        println!("  {line}");
-    }
+    print_table(builder);
 
     println!();
     println!(

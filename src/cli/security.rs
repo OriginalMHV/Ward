@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Args;
 use console::style;
 
+use super::output::{ok_icon, print_table};
 use crate::config::Manifest;
 use crate::engine::audit_log::AuditLog;
 use crate::github::Client;
@@ -116,8 +117,6 @@ async fn audit(
     );
 
     use tabled::builder::Builder;
-    use tabled::settings::object::{Columns, Rows};
-    use tabled::settings::{Alignment, Modify, Style};
 
     let mut builder = Builder::default();
     builder.push_record(["Repository", "Dep.A", "Dep.SU", "Secret", "AI", "Push"]);
@@ -151,16 +150,7 @@ async fn audit(
             total_issues += 1;
         }
 
-        let icons: Vec<String> = features
-            .iter()
-            .map(|&enabled| {
-                if enabled {
-                    format!("{}", style("[ok]").green())
-                } else {
-                    format!("{}", style("[!!]").red())
-                }
-            })
-            .collect();
+        let icons: Vec<String> = features.iter().map(|&enabled| ok_icon(enabled)).collect();
 
         builder.push_record([
             repository.name.clone(),
@@ -172,21 +162,8 @@ async fn audit(
         ]);
     }
 
-    let table = builder
-        .build()
-        .with(Style::blank())
-        .with(
-            Modify::new(Rows::first()).with(tabled::settings::Format::content(|value| {
-                format!("{}", style(value).bold().underlined())
-            })),
-        )
-        .with(Modify::new(Columns::new(..)).with(Alignment::left()))
-        .to_string();
-
     println!();
-    for line in table.lines() {
-        println!("  {line}");
-    }
+    print_table(builder);
 
     println!();
     println!(

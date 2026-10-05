@@ -4,6 +4,7 @@ use console::style;
 use reqwest::StatusCode;
 use serde::Serialize;
 
+use super::output::{self, ok_icon};
 use crate::config::Manifest;
 use crate::github::Client;
 use crate::github::dependency_graph::{DependencyGraphAudit, DependencyGraphStatus};
@@ -300,8 +301,6 @@ fn is_json_format(format: &str) -> bool {
 
 fn print_table(audits: &[RepoAudit]) {
     use tabled::builder::Builder;
-    use tabled::settings::object::{Columns, Rows};
-    use tabled::settings::{Alignment, Modify, Style};
 
     let mut builder = Builder::default();
     builder.push_record([
@@ -319,14 +318,6 @@ fn print_table(audits: &[RepoAudit]) {
     let mut total_alerts = 0u32;
     let mut fully_secured = 0;
     let mut dependency_graph_available = 0;
-
-    let icon = |b: bool| {
-        if b {
-            format!("{}", style("[ok]").green())
-        } else {
-            format!("{}", style("[!!]").red())
-        }
-    };
 
     for a in audits {
         let alert_total = a.security.alert_counts.critical
@@ -373,32 +364,19 @@ fn print_table(audits: &[RepoAudit]) {
 
         builder.push_record([
             a.name.clone(),
-            icon(a.security.dependabot_alerts),
-            icon(a.security.secret_scanning),
-            icon(a.security.push_protection),
-            icon(a.security.has_dependabot_config),
-            icon(a.security.has_codeql),
+            ok_icon(a.security.dependabot_alerts),
+            ok_icon(a.security.secret_scanning),
+            ok_icon(a.security.push_protection),
+            ok_icon(a.security.has_dependabot_config),
+            ok_icon(a.security.has_codeql),
             dependency_graph_icon,
-            icon(a.settings.has_copilot_review_ruleset),
+            ok_icon(a.settings.has_copilot_review_ruleset),
             alert_str,
         ]);
     }
 
-    let table = builder
-        .build()
-        .with(Style::blank())
-        .with(
-            Modify::new(Rows::first()).with(tabled::settings::Format::content(|s| {
-                format!("{}", style(s).bold().underlined())
-            })),
-        )
-        .with(Modify::new(Columns::new(..)).with(Alignment::left()))
-        .to_string();
-
     println!();
-    for line in table.lines() {
-        println!("  {line}");
-    }
+    output::print_table(builder);
 
     for audit in audits.iter().filter(|a| !a.unavailable.is_empty()) {
         println!();

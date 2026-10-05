@@ -6,6 +6,7 @@ pub mod doctor;
 pub mod drift;
 pub mod import;
 pub mod init;
+mod output;
 pub mod plan;
 pub mod protection;
 pub mod repos;

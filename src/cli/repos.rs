@@ -1,8 +1,8 @@
 use anyhow::Result;
 use clap::Args;
 use console::style;
-use tabled::settings::Style;
 
+use super::output::print_table;
 use crate::config::Manifest;
 use crate::github::Client;
 use crate::reconcile::unified;
@@ -74,8 +74,6 @@ async fn list_repos(client: &Client, manifest: &Manifest, system: Option<&str>) 
     );
 
     use tabled::builder::Builder;
-    use tabled::settings::object::{Columns, Rows};
-    use tabled::settings::{Alignment, Modify};
 
     let mut builder = Builder::default();
     builder.push_record(["Repository", "Language", "Visibility", "Branch"]);
@@ -83,20 +81,7 @@ async fn list_repos(client: &Client, manifest: &Manifest, system: Option<&str>) 
         builder.push_record(row);
     }
 
-    let table = builder
-        .build()
-        .with(Style::blank())
-        .with(
-            Modify::new(Rows::first()).with(tabled::settings::Format::content(|s| {
-                format!("{}", style(s).bold().underlined())
-            })),
-        )
-        .with(Modify::new(Columns::new(..)).with(Alignment::left()))
-        .to_string();
-
-    for line in table.lines() {
-        println!("  {line}");
-    }
+    print_table(builder);
 
     Ok(())
 }

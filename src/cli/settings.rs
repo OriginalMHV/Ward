@@ -3,6 +3,7 @@ use clap::Args;
 use console::style;
 use dialoguer::Confirm;
 
+use super::output::{ok_icon, print_table};
 use crate::config::Manifest;
 use crate::config::manifest::{
     ManagementDisposition, RepositoryCategoryV2, RepositorySettingsConfig,
@@ -469,8 +470,6 @@ async fn audit(
     );
 
     use tabled::builder::Builder;
-    use tabled::settings::object::{Columns, Rows};
-    use tabled::settings::{Alignment, Modify, Style};
 
     let mut builder = Builder::default();
     builder.push_record(["Repository", "Repo Settings", "Review Rule"]);
@@ -483,16 +482,8 @@ async fn audit(
     for (repo_name, state) in repos.iter().zip(states) {
         let state = state?;
 
-        let repository_icon = if state.repository_changes.is_empty() {
-            format!("{}", style("[ok]").green())
-        } else {
-            format!("{}", style("[!!]").red())
-        };
-        let ruleset_icon = if state.has_copilot_review {
-            format!("{}", style("[ok]").green())
-        } else {
-            format!("{}", style("[!!]").red())
-        };
+        let repository_icon = ok_icon(state.repository_changes.is_empty());
+        let ruleset_icon = ok_icon(state.has_copilot_review);
 
         let ok = state.repository_changes.is_empty() && state.has_copilot_review;
         if ok {
@@ -504,21 +495,8 @@ async fn audit(
         builder.push_record([repo_name.as_str(), &repository_icon, &ruleset_icon]);
     }
 
-    let table = builder
-        .build()
-        .with(Style::blank())
-        .with(
-            Modify::new(Rows::first()).with(tabled::settings::Format::content(|s| {
-                format!("{}", style(s).bold().underlined())
-            })),
-        )
-        .with(Modify::new(Columns::new(..)).with(Alignment::left()))
-        .to_string();
-
     println!();
-    for line in table.lines() {
-        println!("  {line}");
-    }
+    print_table(builder);
 
     println!();
     println!(
