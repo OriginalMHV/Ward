@@ -227,6 +227,22 @@ impl UnifiedReport {
     }
 }
 
+impl UnifiedReport {
+    /// Whether a managed category could not read part of its state because of
+    /// a missing permission or an unavailable endpoint. That state is unknown,
+    /// not clean. Observe categories are allowed to degrade.
+    pub fn has_unknown_managed_state(&self) -> bool {
+        self.repos.iter().any(|repo| {
+            repo.categories.iter().any(|category| {
+                category.disposition == "managed"
+                    && category.coverage_outcomes.iter().any(|entry| {
+                        matches!(entry.outcome.as_str(), "permission_denied" | "unavailable")
+                    })
+            })
+        })
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Internal typed plan (retained so apply can execute without re-planning)
 // ---------------------------------------------------------------------------

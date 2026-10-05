@@ -64,14 +64,21 @@ impl DriftCommand {
 }
 
 fn fail_when_drifted(report: &UnifiedReport) -> Result<()> {
-    if report.actionable == 0 && !report.has_failures() {
+    let unknown = report.has_unknown_managed_state();
+    if report.actionable == 0 && report.deferred == 0 && !unknown && !report.has_failures() {
         return Ok(());
     }
 
     anyhow::bail!(
-        "Drift check found {} actionable change(s) and {} blocked category result(s); see report above",
+        "Drift check found {} actionable change(s), {} deferred change(s), {} blocked category result(s){}; see report above",
         report.actionable,
-        report.blocked
+        report.deferred,
+        report.blocked,
+        if unknown {
+            " and unreadable state in managed categories"
+        } else {
+            ""
+        }
     );
 }
 
@@ -136,5 +143,62 @@ mod tests {
         let mut report = UnifiedReport::from_repos(Vec::new());
         report.blocked = 1;
         assert!(fail_when_drifted(&report).is_err());
+    }
+
+    fn category_report(
+        disposition: &str,
+        outcome: Option<&str>,
+    ) -> crate::reconcile::unified::CategoryReport {
+        crate::reconcile::unified::CategoryReport {
+            category: "rulesets".to_owned(),
+            disposition: disposition.to_owned(),
+            status: "noop".to_owned(),
+            actionable: 0,
+            blocked: 0,
+            warnings: 0,
+            deferred: 0,
+            coverage: Default::default(),
+            coverage_outcomes: outcome
+                .map(|outcome| crate::reconcile::unified::CoverageOutcomeCount {
+                    outcome: outcome.to_owned(),
+                    count: 1,
+                })
+                .into_iter()
+                .collect(),
+            details: Vec::new(),
+            error: None,
+            verified: None,
+            configuration_pull_request_pending: false,
+        }
+    }
+
+    fn report_with(category: crate::reconcile::unified::CategoryReport) -> UnifiedReport {
+        UnifiedReport::from_repos(vec![crate::reconcile::unified::RepoReport {
+            repo: "repo".to_owned(),
+            actionable: category.actionable,
+            blocked: category.blocked,
+            warnings: category.warnings,
+            deferred: category.deferred,
+            categories: vec![category],
+        }])
+    }
+
+    #[test]
+    fn drift_exit_is_non_zero_for_deferred_changes() {
+        let mut category = category_report("managed", None);
+        category.deferred = 2;
+        assert!(fail_when_drifted(&report_with(category)).is_err());
+    }
+
+    #[test]
+    fn drift_exit_is_non_zero_for_unreadable_managed_state() {
+        let category = category_report("managed", Some("permission_denied"));
+        assert!(fail_when_drifted(&report_with(category)).is_err());
+    }
+
+    #[test]
+    fn drift_exit_ignores_unreadable_observe_state() {
+        let category = category_report("observe", Some("permission_denied"));
+        assert!(fail_when_drifted(&report_with(category)).is_ok());
     }
 }
