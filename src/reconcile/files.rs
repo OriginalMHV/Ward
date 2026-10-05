@@ -7,6 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::Result;
+use futures_util::StreamExt;
 
 use crate::config::manifest::{
     CategoryPolicy, CoverageEntry, CoverageOutcome, FileEncoding, FilesCategoryV2, ManagedFileV2,
@@ -57,6 +58,15 @@ pub const KNOWN_CONFIG_INCLUDE_GLOBS: &[&str] = &[
 ];
 
 pub const MAX_MANAGED_BLOB_BYTES: u64 = 1024 * 1024;
+
+// The client's own semaphore still bounds in-flight requests.
+const BLOB_FETCH_CONCURRENCY: usize = 8;
+
+struct PendingBlob {
+    scoped_index: usize,
+    issue_index: usize,
+    mode: GitEntryMode,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilesIssueSeverity {
@@ -287,6 +297,7 @@ pub async fn collect_files_category(
 
     let mut scoped_files = Vec::new();
     let mut managed_entries = Vec::new();
+    let mut pending = Vec::new();
 
     for entry in tree.entries {
         if entry.object_type == GitObjectType::Tree || !scope.is_selected(&entry.path) {
@@ -394,44 +405,67 @@ pub async fn collect_files_category(
             continue;
         }
 
-        let bytes = client.get_blob_bytes(repo, &entry.sha).await?;
-        if bytes.len() as u64 > MAX_MANAGED_BLOB_BYTES {
+        pending.push(PendingBlob {
+            scoped_index: scoped_files.len(),
+            issue_index: issues.len(),
+            mode,
+        });
+        scoped_files.push(scoped);
+    }
+
+    let blobs = futures_util::stream::iter(
+        pending
+            .iter()
+            .map(|blob| client.get_blob_bytes(repo, &scoped_files[blob.scoped_index].sha)),
+    )
+    .buffered(BLOB_FETCH_CONCURRENCY)
+    .collect::<Vec<_>>()
+    .await;
+
+    let mut inserted_issues = 0;
+    for (blob, bytes) in pending.iter().zip(blobs) {
+        let bytes = bytes?;
+        let scoped = &mut scoped_files[blob.scoped_index];
+        let issue = if bytes.len() as u64 > MAX_MANAGED_BLOB_BYTES {
             scoped.kind = ScopedRepoFileKind::Oversized;
-            issues.push(FilesIssue {
-                path: Some(entry.path.clone()),
+            Some(FilesIssue {
+                path: Some(scoped.path.clone()),
                 kind: FilesIssueKind::Oversized,
                 severity: FilesIssueSeverity::Warning,
                 message: format!(
                     "{} expands to {} bytes, above the {} byte managed-file limit",
-                    entry.path,
+                    scoped.path,
                     bytes.len(),
                     MAX_MANAGED_BLOB_BYTES
                 ),
-            });
-            scoped_files.push(scoped);
-            continue;
-        }
-
-        if is_lfs_pointer(&bytes) {
+            })
+        } else if is_lfs_pointer(&bytes) {
             scoped.kind = ScopedRepoFileKind::LfsPointer;
             scoped.bytes = Some(bytes);
-            issues.push(FilesIssue {
-                path: Some(entry.path.clone()),
+            Some(FilesIssue {
+                path: Some(scoped.path.clone()),
                 kind: FilesIssueKind::LfsPointer,
                 severity: FilesIssueSeverity::Warning,
                 message: format!(
                     "{} is a Git LFS pointer; Ward will not attempt to copy the external payload",
-                    entry.path
+                    scoped.path
                 ),
-            });
-            scoped_files.push(scoped);
-            continue;
-        }
+            })
+        } else {
+            managed_entries.push(managed_file_from_bytes(
+                &scoped.path,
+                &bytes,
+                blob.mode,
+                &scoped.sha,
+            ));
+            scoped.bytes = Some(bytes);
+            None
+        };
 
-        let managed = managed_file_from_bytes(&entry.path, &bytes, mode, &entry.sha);
-        scoped.bytes = Some(bytes);
-        managed_entries.push(managed);
-        scoped_files.push(scoped);
+        if let Some(issue) = issue {
+            issues.insert(blob.issue_index + inserted_issues, issue);
+            inserted_issues += 1;
+        }
     }
 
     managed_entries.sort_by(|left, right| left.path.cmp(&right.path));
