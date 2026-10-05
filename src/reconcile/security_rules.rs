@@ -974,7 +974,9 @@ pub async fn verify_security_category(
     repo: &str,
     desired: &SecurityCategoryV2,
 ) -> Result<SecurityVerifyResult> {
-    for attempt in 0..10 {
+    const MAX_ATTEMPTS: u32 = 10;
+    let mut attempt = 1;
+    loop {
         let actual = collect_security_category(client, repo, Some(desired)).await?;
         let plan = plan_security_category(desired, &actual)?;
         let waiting_on_codeql = plan.codeql_default_setup.is_some()
@@ -995,8 +997,9 @@ pub async fn verify_security_category(
                 plan,
             });
         }
-        if waiting_on_codeql && attempt < 9 {
+        if waiting_on_codeql && attempt < MAX_ATTEMPTS {
             tokio::time::sleep(Duration::from_millis(100)).await;
+            attempt += 1;
             continue;
         }
         return Ok(SecurityVerifyResult {
@@ -1004,8 +1007,6 @@ pub async fn verify_security_category(
             plan,
         });
     }
-
-    unreachable!()
 }
 
 pub async fn collect_rulesets_category(
