@@ -8,6 +8,7 @@ use crate::config::Manifest;
 use crate::github::Client;
 use crate::github::dependency_graph::{DependencyGraphAudit, DependencyGraphStatus};
 use crate::github::repos::Repository;
+use crate::reconcile::unified;
 
 #[derive(Args)]
 pub struct AuditCommand {
@@ -111,24 +112,18 @@ async fn resolve_repos(
     system: Option<&str>,
     repo: Option<&str>,
 ) -> Result<(Vec<Repository>, Option<String>, String)> {
-    if let Some(repo_name) = repo {
-        let repo = client.get_repo(repo_name).await?;
-        return Ok((vec![repo], None, format!("repository {repo_name}")));
+    if system.is_none() && repo.is_none() {
+        anyhow::bail!("Either --system or --repo is required for audit");
     }
-
-    let sys =
-        system.ok_or_else(|| anyhow::anyhow!("Either --system or --repo is required for audit"))?;
-    let excludes = manifest.exclude_patterns_for_system(sys);
-    let explicit = manifest.explicit_repos_for_system(sys);
-    let repos = client
-        .list_repos_for_system(
-            sys,
-            manifest.matches_prefix_for_system(sys),
-            &excludes,
-            &explicit,
-        )
-        .await?;
-    Ok((repos, Some(sys.to_owned()), format!("system {sys}")))
+    let repos = unified::resolve_target_repos(client, manifest, system, repo).await?;
+    let (system_id, label) = match (system, repo) {
+        (_, Some(repo_name)) => (None, format!("repository {repo_name}")),
+        (sys, None) => (
+            sys.map(str::to_owned),
+            format!("system {}", sys.unwrap_or_default()),
+        ),
+    };
+    Ok((repos, system_id, label))
 }
 
 async fn audit_repo(

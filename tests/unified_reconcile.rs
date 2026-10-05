@@ -504,3 +504,109 @@ async fn high_impact_repository_change_is_gated() {
         "visibility change becomes actionable with --allow-high-impact"
     );
 }
+
+fn scoped_manifest() -> Manifest {
+    let mut manifest = base_manifest();
+    manifest.systems.push(ward::config::manifest::SystemConfig {
+        id: "recall".to_owned(),
+        name: "Recall".to_owned(),
+        match_prefix: false,
+        exclude: Vec::new(),
+        repos: vec!["recall".to_owned()],
+        categories: Default::default(),
+    });
+    manifest
+}
+
+async fn mock_repo(server: &MockServer, name: &str, archived: bool) {
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/test-org/{name}")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(common::make_repo_json(name, archived)),
+        )
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn repo_flag_outside_manifest_scope_is_an_error() {
+    let server = MockServer::start().await;
+    mock_repo(&server, "pulse", false).await;
+    let client = Client::new_for_test("test-org", &server.uri());
+
+    let error = unified::resolve_target_repos(&client, &scoped_manifest(), None, Some("pulse"))
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("not in the manifest scope"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn repo_flag_inside_manifest_scope_narrows() {
+    let server = MockServer::start().await;
+    mock_repo(&server, "recall", false).await;
+    let client = Client::new_for_test("test-org", &server.uri());
+
+    let repos = unified::resolve_target_repos(&client, &scoped_manifest(), None, Some("recall"))
+        .await
+        .unwrap();
+    assert_eq!(repos.len(), 1);
+    assert_eq!(repos[0].name, "recall");
+}
+
+#[tokio::test]
+async fn repo_flag_for_archived_repository_is_an_error() {
+    let server = MockServer::start().await;
+    mock_repo(&server, "recall", true).await;
+    let client = Client::new_for_test("test-org", &server.uri());
+
+    let error = unified::resolve_target_repos(&client, &scoped_manifest(), None, Some("recall"))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("archived"), "{error}");
+}
+
+#[tokio::test]
+async fn unknown_system_is_an_error() {
+    let server = MockServer::start().await;
+    let client = Client::new_for_test("test-org", &server.uri());
+
+    let error = unified::resolve_target_repos(&client, &scoped_manifest(), Some("nope"), None)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("Unknown system"), "{error}");
+}
+
+#[tokio::test]
+async fn repo_flag_respects_exclude_patterns() {
+    let server = MockServer::start().await;
+    mock_repo(&server, "recall-docs", false).await;
+    let client = Client::new_for_test("test-org", &server.uri());
+    let mut manifest = scoped_manifest();
+    manifest.systems[0].match_prefix = true;
+    manifest.systems[0].exclude = vec!["^docs$".to_owned()];
+
+    let error = unified::resolve_target_repos(&client, &manifest, None, Some("recall-docs"))
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("not in the manifest scope"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn explicit_repository_fetch_failure_is_an_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/recall"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    let client = Client::new_for_test("test-org", &server.uri());
+
+    let result = unified::resolve_target_repos(&client, &scoped_manifest(), None, None).await;
+    assert!(result.is_err());
+}

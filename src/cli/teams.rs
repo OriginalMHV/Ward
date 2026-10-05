@@ -7,6 +7,7 @@ use crate::config::Manifest;
 use crate::config::manifest::{ManagementDisposition, RepositoryAccessCategoryV2, TeamAccess};
 use crate::github::Client;
 use crate::github::teams::Team;
+use crate::reconcile::unified;
 
 #[derive(Args)]
 pub struct TeamsCommand {
@@ -56,24 +57,10 @@ async fn resolve_repos(
     system: Option<&str>,
     repo: Option<&str>,
 ) -> Result<Vec<String>> {
-    if let Some(repo_name) = repo {
-        return Ok(vec![repo_name.to_owned()]);
+    if system.is_none() && repo.is_none() {
+        anyhow::bail!("Either --system or --repo is required for teams commands");
     }
-
-    let sys = system.ok_or_else(|| {
-        anyhow::anyhow!("Either --system or --repo is required for teams commands")
-    })?;
-
-    let excludes = manifest.exclude_patterns_for_system(sys);
-    let explicit = manifest.explicit_repos_for_system(sys);
-    let repos = client
-        .list_repos_for_system(
-            sys,
-            manifest.matches_prefix_for_system(sys),
-            &excludes,
-            &explicit,
-        )
-        .await?;
+    let repos = unified::resolve_target_repos(client, manifest, system, repo).await?;
     Ok(repos.into_iter().map(|r| r.name).collect())
 }
 

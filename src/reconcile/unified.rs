@@ -7,7 +7,7 @@
 //! reconciles configuration of repositories that already exist and are owned
 //! by the configured organization.
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use serde::Serialize;
 
 use crate::config::Manifest;
@@ -377,21 +377,28 @@ fn aggregate_repo(repo: String, categories: Vec<CategoryReport>) -> RepoReport {
 // Target repository resolution (same-owner, existing repos only)
 // ---------------------------------------------------------------------------
 
-/// Resolve the set of existing, same-owner repositories to reconcile from the
-/// global `--repo` / `--system` selectors, falling back to every configured
-/// system. Never creates repositories.
+/// Resolve the set of existing, same-owner repositories to reconcile.
+/// The manifest's systems define the scope. `--system` and `--repo` only
+/// narrow it, so an unknown system or an out-of-scope repository is an error.
+/// Never creates repositories.
 pub async fn resolve_target_repos(
     client: &Client,
     manifest: &Manifest,
     system: Option<&str>,
     repo: Option<&str>,
 ) -> Result<Vec<Repository>> {
-    if let Some(repo_name) = repo {
-        let repository = client.get_repo(repo_name).await?;
-        return Ok(vec![repository]);
-    }
-
     let system_ids: Vec<String> = if let Some(system_id) = system {
+        if manifest.system(system_id).is_none() {
+            let known: Vec<&str> = manifest.systems.iter().map(|s| s.id.as_str()).collect();
+            bail!(
+                "Unknown system '{system_id}'. Configured systems: {}",
+                if known.is_empty() {
+                    "none".to_owned()
+                } else {
+                    known.join(", ")
+                }
+            );
+        }
         vec![system_id.to_owned()]
     } else {
         manifest.systems.iter().map(|s| s.id.clone()).collect()
@@ -399,8 +406,29 @@ pub async fn resolve_target_repos(
 
     if system_ids.is_empty() {
         bail!(
-            "No target selected. Pass --repo <name>, --system <id>, or configure systems in ward.toml"
+            "No target selected. Pass --system <id> or configure systems in ward.toml (--repo only narrows configured systems)"
         );
+    }
+
+    if let Some(repo_name) = repo {
+        let mut in_scope = false;
+        for system_id in &system_ids {
+            if system_includes_repo(manifest, system_id, repo_name)? {
+                in_scope = true;
+                break;
+            }
+        }
+        if !in_scope {
+            bail!(
+                "Repository '{repo_name}' is not in the manifest scope (systems: {}). Add it to a system or check its exclude patterns",
+                system_ids.join(", ")
+            );
+        }
+        let repository = client.get_repo(repo_name).await?;
+        if repository.archived {
+            bail!("Repository '{repo_name}' is archived and is not reconciled");
+        }
+        return Ok(vec![repository]);
     }
 
     let mut repos: Vec<Repository> = Vec::new();
@@ -426,6 +454,36 @@ pub async fn resolve_target_repos(
     }
 
     Ok(repos)
+}
+
+/// Whether a system selects the named repository: listed explicitly, or
+/// matched by prefix and not excluded. Mirrors `Client::list_repos_for_system`.
+fn system_includes_repo(manifest: &Manifest, system_id: &str, repo: &str) -> Result<bool> {
+    if manifest
+        .explicit_repos_for_system(system_id)
+        .iter()
+        .any(|explicit| explicit == repo)
+    {
+        return Ok(true);
+    }
+    if !manifest.matches_prefix_for_system(system_id) {
+        return Ok(false);
+    }
+    let suffix = match repo.strip_prefix(system_id) {
+        Some("") => repo,
+        Some(rest) => match rest.strip_prefix('-') {
+            Some(suffix) => suffix,
+            None => return Ok(false),
+        },
+        None => return Ok(false),
+    };
+    let excludes = manifest.exclude_patterns_for_system(system_id);
+    if excludes.is_empty() {
+        return Ok(true);
+    }
+    let pattern =
+        regex::Regex::new(&excludes.join("|")).context("Invalid exclude pattern regex")?;
+    Ok(!pattern.is_match(suffix))
 }
 
 // ---------------------------------------------------------------------------

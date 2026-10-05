@@ -4,7 +4,7 @@ use console::style;
 
 use crate::config::Manifest;
 use crate::github::Client;
-use crate::reconcile::unified::{Category, UnifiedOptions};
+use crate::reconcile::unified::{self, Category, UnifiedOptions};
 
 #[derive(Args)]
 pub struct ProtectionCommand {
@@ -82,24 +82,10 @@ async fn resolve_repos_with_branches(
     system: Option<&str>,
     repo: Option<&str>,
 ) -> Result<Vec<(String, String)>> {
-    if let Some(repo_name) = repo {
-        let repository = client.get_repo(repo_name).await?;
-        return Ok(vec![(repository.name, repository.default_branch)]);
+    if system.is_none() && repo.is_none() {
+        anyhow::bail!("Either --system or --repo is required for protection commands");
     }
-
-    let system = system.ok_or_else(|| {
-        anyhow::anyhow!("Either --system or --repo is required for protection commands")
-    })?;
-    let excludes = manifest.exclude_patterns_for_system(system);
-    let explicit = manifest.explicit_repos_for_system(system);
-    let repos = client
-        .list_repos_for_system(
-            system,
-            manifest.matches_prefix_for_system(system),
-            &excludes,
-            &explicit,
-        )
-        .await?;
+    let repos = unified::resolve_target_repos(client, manifest, system, repo).await?;
     Ok(repos
         .into_iter()
         .map(|repo| (repo.name, repo.default_branch))

@@ -5,6 +5,7 @@ use tabled::settings::Style;
 
 use crate::config::Manifest;
 use crate::github::Client;
+use crate::reconcile::unified;
 
 #[derive(Args)]
 pub struct ReposCommand {
@@ -39,17 +40,8 @@ impl ReposCommand {
 }
 
 async fn list_repos(client: &Client, manifest: &Manifest, system: Option<&str>) -> Result<()> {
-    let repos = if let Some(sys) = system {
-        let excludes = manifest.exclude_patterns_for_system(sys);
-        let explicit = manifest.explicit_repos_for_system(sys);
-        client
-            .list_repos_for_system(
-                sys,
-                manifest.matches_prefix_for_system(sys),
-                &excludes,
-                &explicit,
-            )
-            .await?
+    let repos = if system.is_some() {
+        unified::resolve_target_repos(client, manifest, system, None).await?
     } else {
         client.list_repos().await?
     };

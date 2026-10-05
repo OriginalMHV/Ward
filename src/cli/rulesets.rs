@@ -4,7 +4,7 @@ use console::style;
 
 use crate::config::Manifest;
 use crate::github::Client;
-use crate::reconcile::unified::{Category, UnifiedOptions};
+use crate::reconcile::unified::{self, Category, UnifiedOptions};
 
 #[derive(Args)]
 pub struct RulesetsCommand {
@@ -82,24 +82,10 @@ async fn resolve_repos(
     system: Option<&str>,
     repo: Option<&str>,
 ) -> Result<Vec<String>> {
-    if let Some(repo_name) = repo {
-        return Ok(vec![repo_name.to_owned()]);
+    if system.is_none() && repo.is_none() {
+        anyhow::bail!("Either --system or --repo is required for rulesets commands");
     }
-
-    let sys = system.ok_or_else(|| {
-        anyhow::anyhow!("Either --system or --repo is required for rulesets commands")
-    })?;
-
-    let excludes = manifest.exclude_patterns_for_system(sys);
-    let explicit = manifest.explicit_repos_for_system(sys);
-    let repos = client
-        .list_repos_for_system(
-            sys,
-            manifest.matches_prefix_for_system(sys),
-            &excludes,
-            &explicit,
-        )
-        .await?;
+    let repos = unified::resolve_target_repos(client, manifest, system, repo).await?;
     Ok(repos.into_iter().map(|r| r.name).collect())
 }
 

@@ -128,14 +128,12 @@ impl Client {
             if matched.iter().any(|r| r.name == *repo_name) {
                 continue;
             }
-            match self.get_repo(repo_name).await {
-                Ok(repo) if !repo.archived => {
-                    matched.push(repo);
-                }
-                Ok(_) => {} // archived, skip
-                Err(e) => {
-                    tracing::warn!("Failed to fetch explicit repo {repo_name}: {e}");
-                }
+            let repo = self
+                .get_repo(repo_name)
+                .await
+                .with_context(|| format!("Failed to fetch explicit repository {repo_name}"))?;
+            if !repo.archived {
+                matched.push(repo);
             }
         }
 
