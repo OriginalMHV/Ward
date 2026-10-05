@@ -1713,7 +1713,7 @@ fn normalize_topics(topics: &[String]) -> Vec<String> {
     let mut seen = BTreeSet::new();
     let mut normalized = Vec::new();
     for topic in topics {
-        let topic = topic.trim().to_owned();
+        let topic = topic.trim().to_lowercase();
         if !topic.is_empty() && seen.insert(topic.clone()) {
             normalized.push(topic);
         }
