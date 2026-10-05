@@ -407,7 +407,8 @@ fn low_rate_limit_remaining(headers: &HeaderMap) -> Option<u32> {
     (u64::from(remaining) * 10 < u64::from(limit)).then_some(remaining)
 }
 
-fn default_headers(authorization: HeaderValue) -> Result<HeaderMap> {
+fn default_headers(mut authorization: HeaderValue) -> Result<HeaderMap> {
+    authorization.set_sensitive(true);
     let mut headers = HeaderMap::new();
     headers.insert(
         header::ACCEPT,
@@ -478,13 +479,21 @@ fn validate_parallelism(parallelism: usize) -> Result<()> {
 mod tests {
     use reqwest::header::{HeaderMap, HeaderValue};
 
-    use super::{Client, is_read_only_query, low_rate_limit_remaining};
+    use super::{Client, default_headers, is_read_only_query, low_rate_limit_remaining};
 
     fn limit_headers(remaining: &'static str, limit: &'static str) -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert("x-ratelimit-remaining", HeaderValue::from_static(remaining));
         headers.insert("x-ratelimit-limit", HeaderValue::from_static(limit));
         headers
+    }
+
+    #[test]
+    fn authorization_header_is_marked_sensitive() {
+        let headers = default_headers(HeaderValue::from_static("Bearer secret")).unwrap();
+        let authorization = &headers[reqwest::header::AUTHORIZATION];
+        assert!(authorization.is_sensitive());
+        assert!(!format!("{authorization:?}").contains("secret"));
     }
 
     #[test]
