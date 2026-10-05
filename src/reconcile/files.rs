@@ -16,7 +16,7 @@ use crate::config::manifest::{
 use crate::github::Client;
 use crate::github::commits::{AtomicCommitEntry, AtomicCommitFile, CommitContent, DeleteTreeEntry};
 use crate::github::contents::{
-    GitEntryMode, GitObjectType, GitTreeReadStatus, validate_relative_git_path,
+    GitEntryMode, GitObjectType, GitTreeRead, GitTreeUnavailable, validate_relative_git_path,
 };
 
 pub const KNOWN_CONFIG_INCLUDE_GLOBS: &[&str] = &[
@@ -226,54 +226,54 @@ pub async fn collect_files_category(
         None,
     )];
 
-    let Some(tree) = tree_read.listing else {
-        let (kind, severity, outcome) = match tree_read.status {
-            GitTreeReadStatus::Available => unreachable!("available tree read without listing"),
-            GitTreeReadStatus::EmptyRepository => (
-                FilesIssueKind::EmptyRepository,
-                FilesIssueSeverity::Blocker,
-                CoverageOutcome::Unavailable,
-            ),
-            GitTreeReadStatus::PermissionDenied => (
-                FilesIssueKind::PermissionDenied,
-                FilesIssueSeverity::Blocker,
-                CoverageOutcome::PermissionDenied,
-            ),
-            GitTreeReadStatus::NotFound => (
-                FilesIssueKind::NotFound,
-                FilesIssueSeverity::Blocker,
-                CoverageOutcome::Unavailable,
-            ),
-        };
-        let reason = tree_read.detail.clone();
-        coverage = vec![coverage_entry(
-            repo,
-            branch,
-            outcome,
-            reason.clone(),
-            (tree_read.status == GitTreeReadStatus::PermissionDenied).then_some("contents:read"),
-        )];
+    let tree = match tree_read {
+        GitTreeRead::Available(tree) => tree,
+        GitTreeRead::Unavailable { reason, detail } => {
+            let (kind, severity, outcome) = match reason {
+                GitTreeUnavailable::EmptyRepository => (
+                    FilesIssueKind::EmptyRepository,
+                    FilesIssueSeverity::Blocker,
+                    CoverageOutcome::Unavailable,
+                ),
+                GitTreeUnavailable::PermissionDenied => (
+                    FilesIssueKind::PermissionDenied,
+                    FilesIssueSeverity::Blocker,
+                    CoverageOutcome::PermissionDenied,
+                ),
+                GitTreeUnavailable::NotFound => (
+                    FilesIssueKind::NotFound,
+                    FilesIssueSeverity::Blocker,
+                    CoverageOutcome::Unavailable,
+                ),
+            };
+            coverage = vec![coverage_entry(
+                repo,
+                branch,
+                outcome,
+                Some(detail.clone()),
+                (reason == GitTreeUnavailable::PermissionDenied).then_some("contents:read"),
+            )];
 
-        return Ok(FilesCollection {
-            category: FilesCategoryV2 {
-                policy: category
-                    .map(|category| category.policy.clone())
-                    .unwrap_or_else(CategoryPolicy::observe),
-                include: scope.include,
-                exclude: scope.exclude,
-                entries: Vec::new(),
-            },
-            scoped_files: Vec::new(),
-            issues: vec![FilesIssue {
-                path: None,
-                kind,
-                severity,
-                message: reason
-                    .unwrap_or_else(|| format!("Failed to collect managed files for {repo}")),
-            }],
-            coverage,
-            truncated: false,
-        });
+            return Ok(FilesCollection {
+                category: FilesCategoryV2 {
+                    policy: category
+                        .map(|category| category.policy.clone())
+                        .unwrap_or_else(CategoryPolicy::observe),
+                    include: scope.include,
+                    exclude: scope.exclude,
+                    entries: Vec::new(),
+                },
+                scoped_files: Vec::new(),
+                issues: vec![FilesIssue {
+                    path: None,
+                    kind,
+                    severity,
+                    message: detail,
+                }],
+                coverage,
+                truncated: false,
+            });
+        }
     };
 
     let mut issues = Vec::new();
@@ -851,10 +851,8 @@ fn coverage_entry(
 
 fn unsupported_blocker(file: &ScopedRepoFile, action: &str) -> FilesIssue {
     let (kind, subject) = match file.kind {
-        ScopedRepoFileKind::Managed => {
-            unreachable!("managed file cannot be an unsupported-entry blocker")
-        }
-        ScopedRepoFileKind::UnsupportedMode => (
+        // A managed file reaches this blocker only when it has no usable Git mode.
+        ScopedRepoFileKind::Managed | ScopedRepoFileKind::UnsupportedMode => (
             FilesIssueKind::UnknownMode,
             format!("unsupported Git mode {}", file.raw_mode),
         ),
@@ -1023,6 +1021,46 @@ size 42
             plan.issues
                 .iter()
                 .any(|issue| issue.kind == FilesIssueKind::TruncatedTree
+                    && issue.severity == FilesIssueSeverity::Blocker)
+        );
+    }
+
+    #[test]
+    fn prune_blocks_a_managed_entry_without_a_git_mode() {
+        let desired = FilesCategoryV2 {
+            policy: CategoryPolicy {
+                disposition: ManagementDisposition::Managed,
+                prune: true,
+                sensitive: false,
+            },
+            include: vec![".github/**".to_owned()],
+            exclude: Vec::new(),
+            entries: Vec::new(),
+        };
+        let actual = FilesCollection {
+            category: desired.clone(),
+            scoped_files: vec![ScopedRepoFile {
+                path: ".github/old.yml".to_owned(),
+                mode: None,
+                raw_mode: "100644".to_owned(),
+                object_type: GitObjectType::Blob,
+                sha: "abc".to_owned(),
+                size: Some(1),
+                kind: ScopedRepoFileKind::Managed,
+                bytes: None,
+            }],
+            issues: Vec::new(),
+            coverage: Vec::<CoverageEntry>::new(),
+            truncated: false,
+        };
+
+        let plan = plan_files_category(&desired, &actual).unwrap();
+
+        assert!(plan.deletions.is_empty());
+        assert!(
+            plan.issues
+                .iter()
+                .any(|issue| issue.kind == FilesIssueKind::UnknownMode
                     && issue.severity == FilesIssueSeverity::Blocker)
         );
     }

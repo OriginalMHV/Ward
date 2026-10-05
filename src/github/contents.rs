@@ -194,19 +194,31 @@ struct CommitTree {
     sha: String,
 }
 
+/// Why a repository tree could not be listed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GitTreeReadStatus {
-    Available,
+pub enum GitTreeUnavailable {
     EmptyRepository,
     PermissionDenied,
     NotFound,
 }
 
+/// The outcome of reading a repository tree. A listing exists only when the read succeeded.
 #[derive(Debug, Clone)]
-pub struct GitTreeReadResult {
-    pub status: GitTreeReadStatus,
-    pub listing: Option<GitTreeListing>,
-    pub detail: Option<String>,
+pub enum GitTreeRead {
+    Available(GitTreeListing),
+    Unavailable {
+        reason: GitTreeUnavailable,
+        detail: String,
+    },
+}
+
+impl GitTreeRead {
+    fn unavailable(reason: GitTreeUnavailable, detail: impl Into<String>) -> Self {
+        Self::Unavailable {
+            reason,
+            detail: detail.into(),
+        }
+    }
 }
 
 pub(crate) fn validate_relative_git_path(path: &str) -> Result<()> {
@@ -338,29 +350,26 @@ impl Client {
         &self,
         repo: &str,
         branch: Option<&str>,
-    ) -> Result<GitTreeReadResult> {
+    ) -> Result<GitTreeRead> {
         let branch = match self.resolve_branch_status(repo, branch).await? {
             ResolveBranchStatus::Resolved(branch) => branch,
             ResolveBranchStatus::Empty(detail) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::EmptyRepository,
-                    listing: None,
-                    detail: Some(detail),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::EmptyRepository,
+                    detail,
+                ));
             }
             ResolveBranchStatus::PermissionDenied(detail) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::PermissionDenied,
-                    listing: None,
-                    detail: Some(detail),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::PermissionDenied,
+                    detail,
+                ));
             }
             ResolveBranchStatus::NotFound(detail) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::NotFound,
-                    listing: None,
-                    detail: Some(detail),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::NotFound,
+                    detail,
+                ));
             }
         };
 
@@ -378,25 +387,22 @@ impl Client {
         {
             ClassifiedResponse::Success(value) => value,
             ClassifiedResponse::NotFound(error) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::EmptyRepository,
-                    listing: None,
-                    detail: Some(error.to_string()),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::EmptyRepository,
+                    error.to_string(),
+                ));
             }
             ClassifiedResponse::Forbidden(error) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::PermissionDenied,
-                    listing: None,
-                    detail: Some(error.to_string()),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::PermissionDenied,
+                    error.to_string(),
+                ));
             }
             ClassifiedResponse::Other(error) if error.status() == Some(StatusCode::CONFLICT) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::EmptyRepository,
-                    listing: None,
-                    detail: Some(error.to_string()),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::EmptyRepository,
+                    error.to_string(),
+                ));
             }
             ClassifiedResponse::NoContent
             | ClassifiedResponse::Unprocessable(_)
@@ -428,25 +434,22 @@ impl Client {
         {
             ClassifiedResponse::Success(value) => value,
             ClassifiedResponse::NotFound(error) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::EmptyRepository,
-                    listing: None,
-                    detail: Some(error.to_string()),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::EmptyRepository,
+                    error.to_string(),
+                ));
             }
             ClassifiedResponse::Forbidden(error) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::PermissionDenied,
-                    listing: None,
-                    detail: Some(error.to_string()),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::PermissionDenied,
+                    error.to_string(),
+                ));
             }
             ClassifiedResponse::Other(error) if error.status() == Some(StatusCode::CONFLICT) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::EmptyRepository,
-                    listing: None,
-                    detail: Some(error.to_string()),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::EmptyRepository,
+                    error.to_string(),
+                ));
             }
             ClassifiedResponse::NoContent
             | ClassifiedResponse::Unprocessable(_)
@@ -476,25 +479,22 @@ impl Client {
         {
             ClassifiedResponse::Success(value) => value,
             ClassifiedResponse::NotFound(error) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::EmptyRepository,
-                    listing: None,
-                    detail: Some(error.to_string()),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::EmptyRepository,
+                    error.to_string(),
+                ));
             }
             ClassifiedResponse::Forbidden(error) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::PermissionDenied,
-                    listing: None,
-                    detail: Some(error.to_string()),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::PermissionDenied,
+                    error.to_string(),
+                ));
             }
             ClassifiedResponse::Other(error) if error.status() == Some(StatusCode::CONFLICT) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::EmptyRepository,
-                    listing: None,
-                    detail: Some(error.to_string()),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::EmptyRepository,
+                    error.to_string(),
+                ));
             }
             ClassifiedResponse::NoContent
             | ClassifiedResponse::Unprocessable(_)
@@ -518,15 +518,11 @@ impl Client {
             .collect::<Vec<_>>();
         entries.sort_by(|left, right| left.path.cmp(&right.path));
 
-        Ok(GitTreeReadResult {
-            status: GitTreeReadStatus::Available,
-            listing: Some(GitTreeListing {
-                sha: tree.sha,
-                truncated: tree.truncated,
-                entries,
-            }),
-            detail: None,
-        })
+        Ok(GitTreeRead::Available(GitTreeListing {
+            sha: tree.sha,
+            truncated: tree.truncated,
+            entries,
+        }))
     }
 
     /// Retrieve raw blob bytes using the Git Blobs API.

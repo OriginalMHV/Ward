@@ -458,9 +458,10 @@ async fn test_read_git_tree_recursive_and_get_blob_bytes() {
     let tree = client
         .read_git_tree_recursive("my-repo", Some("main"))
         .await
-        .unwrap()
-        .listing
-        .expect("tree should exist");
+        .unwrap();
+    let ward::github::contents::GitTreeRead::Available(tree) = tree else {
+        panic!("tree should exist");
+    };
 
     assert_eq!(tree.sha, "tree-sha-000");
     assert!(!tree.truncated);
