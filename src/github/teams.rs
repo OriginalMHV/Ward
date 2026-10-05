@@ -10,7 +10,7 @@ use super::environments::encode_path_segment;
 use super::pagination;
 use super::response;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Team {
     pub id: u64,
     pub name: String,
@@ -82,6 +82,11 @@ pub struct TeamRepoPermission {
 impl Client {
     /// List all teams in the organization, handling pagination.
     pub async fn list_org_teams(&self) -> Result<Vec<Team>> {
+        self.cached_org(|lookups| &lookups.teams, self.fetch_org_teams())
+            .await
+    }
+
+    async fn fetch_org_teams(&self) -> Result<Vec<Team>> {
         pagination::collect_paginated(self, |page| {
             format!(
                 "/orgs/{}/teams?per_page={}&page={}",
@@ -93,6 +98,14 @@ impl Client {
     }
 
     pub async fn list_org_teams_checked(&self) -> Result<ReadOutcome<Vec<Team>>> {
+        self.cached_org(
+            |lookups| &lookups.teams_checked,
+            self.fetch_org_teams_checked(),
+        )
+        .await
+    }
+
+    async fn fetch_org_teams_checked(&self) -> Result<ReadOutcome<Vec<Team>>> {
         collect_paginated_checked(self, |page| {
             format!(
                 "/orgs/{}/teams?per_page={}&page={}",

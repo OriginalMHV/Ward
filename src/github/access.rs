@@ -329,6 +329,16 @@ impl Client {
     pub async fn list_custom_repository_roles_checked(
         &self,
     ) -> Result<ReadOutcome<Vec<CustomRepositoryRole>>> {
+        self.cached_org(
+            |lookups| &lookups.custom_roles_checked,
+            self.fetch_custom_repository_roles_checked(),
+        )
+        .await
+    }
+
+    async fn fetch_custom_repository_roles_checked(
+        &self,
+    ) -> Result<ReadOutcome<Vec<CustomRepositoryRole>>> {
         let mut page = pagination::Page::default();
         let mut roles = Vec::new();
 

@@ -716,3 +716,78 @@ async fn plan_reads_the_repository_endpoint_once_per_repository() {
         .count();
     assert_eq!(repo_reads, 1);
 }
+
+async fn org_hits(server: &MockServer, suffix: &str) -> usize {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|request| request.url.path() == format!("/orgs/test-org/{suffix}"))
+        .count()
+}
+
+#[tokio::test]
+async fn plan_reads_organization_lookups_once_for_many_repositories() {
+    use ward::config::manifest::{
+        ReferencedResourceConfig, ReferencedResourceType, RepositoryAccessCategoryV2,
+    };
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/orgs/test-org/teams"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": 7, "name": "Core", "slug": "core", "permission": "push" }
+        ])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/orgs/test-org/custom-repository-roles"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({ "message": "Forbidden" })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+
+    let mut manifest = base_manifest();
+    manifest.categories.access = Some(RepositoryAccessCategoryV2 {
+        policy: CategoryPolicy::observe(),
+        references: vec![
+            ReferencedResourceConfig {
+                resource_type: ReferencedResourceType::Team,
+                name: "core".to_owned(),
+            },
+            ReferencedResourceConfig {
+                resource_type: ReferencedResourceType::Role,
+                name: "Maintainer+".to_owned(),
+            },
+        ],
+        ..RepositoryAccessCategoryV2::default()
+    });
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let repos = ["a", "b", "c", "d"].map(test_repo).to_vec();
+    let report = unified::plan(
+        &client,
+        &manifest,
+        &repos,
+        &options(vec![Category::Access], false),
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.repos.len(), 4);
+
+    assert_eq!(org_hits(&server, "teams").await, 1);
+    assert_eq!(org_hits(&server, "custom-repository-roles").await, 1);
+
+    let fresh = client.uncached();
+    let _ = fresh.list_org_teams_checked().await.unwrap();
+    let _ = client.list_org_teams_checked().await.unwrap();
+    assert_eq!(
+        org_hits(&server, "teams").await,
+        2,
+        "an uncached client reads again and the cached client does not"
+    );
+}

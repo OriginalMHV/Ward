@@ -139,6 +139,15 @@ impl Client {
     }
 
     pub async fn get_team_id(&self, team_slug: &str) -> Result<u64> {
+        self.cached_org_keyed(
+            |lookups| &lookups.team_ids,
+            team_slug,
+            self.fetch_team_id(team_slug),
+        )
+        .await
+    }
+
+    async fn fetch_team_id(&self, team_slug: &str) -> Result<u64> {
         #[derive(Deserialize)]
         struct TeamIdResponse {
             id: u64,
@@ -154,6 +163,15 @@ impl Client {
     }
 
     pub async fn get_user_by_login(&self, login: &str) -> Result<GitHubUser> {
+        self.cached_org_keyed(
+            |lookups| &lookups.users,
+            login,
+            self.fetch_user_by_login(login),
+        )
+        .await
+    }
+
+    async fn fetch_user_by_login(&self, login: &str) -> Result<GitHubUser> {
         let path = format!("/users/{login}");
         response::expect_json(self.get(&path).await?, "GET", &path)
             .await
@@ -192,6 +210,14 @@ impl Client {
     }
 
     pub async fn list_org_installations(&self) -> Result<Vec<InstalledApp>> {
+        self.cached_org(
+            |lookups| &lookups.installations,
+            self.fetch_org_installations(),
+        )
+        .await
+    }
+
+    async fn fetch_org_installations(&self) -> Result<Vec<InstalledApp>> {
         let mut page = pagination::Page::default();
         let mut installations = Vec::new();
 

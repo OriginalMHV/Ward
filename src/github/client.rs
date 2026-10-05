@@ -1,4 +1,9 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    future::Future,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -6,12 +11,34 @@ use reqwest::header::{self, HeaderMap, HeaderValue};
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use tokio::sync::Semaphore;
+use tokio::sync::{OnceCell, Semaphore};
 
 use crate::config::auth;
 
+use super::access::CustomRepositoryRole;
+use super::actions::ReadOutcome;
 use super::metadata;
 use super::response;
+use super::rulesets::{GitHubUser, InstalledApp};
+use super::security::CodeSecurityConfiguration;
+use super::teams::Team;
+
+type KeyedCells<T> = Mutex<HashMap<String, Arc<OnceCell<T>>>>;
+
+/// Organization-level reads that are identical for every repository in a run.
+///
+/// Full outcomes are cached, including the `ReadOutcome` coverage variants, so every
+/// repository reports the same coverage. Errors are not cached.
+#[derive(Default)]
+pub(crate) struct OrgLookups {
+    pub(crate) teams: OnceCell<Vec<Team>>,
+    pub(crate) teams_checked: OnceCell<ReadOutcome<Vec<Team>>>,
+    pub(crate) custom_roles_checked: OnceCell<ReadOutcome<Vec<CustomRepositoryRole>>>,
+    pub(crate) installations: OnceCell<Vec<InstalledApp>>,
+    pub(crate) code_security_configurations: OnceCell<Vec<CodeSecurityConfiguration>>,
+    pub(crate) team_ids: KeyedCells<u64>,
+    pub(crate) users: KeyedCells<GitHubUser>,
+}
 
 /// GitHub API client with rate limiting and concurrency control.
 #[derive(Clone)]
@@ -21,9 +48,55 @@ pub struct Client {
     semaphore: Arc<Semaphore>,
     base_url: String,
     retry_policy: RetryPolicy,
+    org_lookups: Option<Arc<OrgLookups>>,
 }
 
 impl Client {
+    /// A client that shares the connection pool but reads organization lookups fresh.
+    ///
+    /// Use it after mutations, for example for post-apply verification.
+    pub fn uncached(&self) -> Self {
+        Self {
+            org_lookups: None,
+            ..self.clone()
+        }
+    }
+
+    pub(crate) async fn cached_org<T, F, Fut>(&self, cell: F, fetch: Fut) -> Result<T>
+    where
+        T: Clone,
+        F: FnOnce(&OrgLookups) -> &OnceCell<T>,
+        Fut: Future<Output = Result<T>>,
+    {
+        match &self.org_lookups {
+            Some(lookups) => cell(lookups).get_or_try_init(|| fetch).await.cloned(),
+            None => fetch.await,
+        }
+    }
+
+    pub(crate) async fn cached_org_keyed<T, F, Fut>(
+        &self,
+        cells: F,
+        key: &str,
+        fetch: Fut,
+    ) -> Result<T>
+    where
+        T: Clone,
+        F: FnOnce(&OrgLookups) -> &KeyedCells<T>,
+        Fut: Future<Output = Result<T>>,
+    {
+        let Some(lookups) = &self.org_lookups else {
+            return fetch.await;
+        };
+        let cell = {
+            let mut guard = cells(lookups)
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            Arc::clone(guard.entry(key.to_owned()).or_default())
+        };
+        cell.get_or_try_init(|| fetch).await.cloned()
+    }
+
     /// The GitHub organization this client targets.
     pub fn org(&self) -> &str {
         &self.org
@@ -48,6 +121,7 @@ impl Client {
             semaphore: Arc::new(Semaphore::new(parallelism)),
             base_url: "https://api.github.com".to_owned(),
             retry_policy: RetryPolicy::default(),
+            org_lookups: Some(Arc::default()),
         })
     }
 
@@ -178,6 +252,7 @@ impl Client {
             semaphore: Arc::new(Semaphore::new(10)),
             base_url: base_url.to_owned(),
             retry_policy: RetryPolicy::immediate_for_tests(),
+            org_lookups: Some(Arc::default()),
         }
     }
 

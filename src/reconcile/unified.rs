@@ -1206,6 +1206,8 @@ async fn apply_repo(
     verify: bool,
     audit: &AuditLog,
 ) -> RepoReport {
+    // Apply and post-apply verification read organization lookups fresh.
+    let client = &client.uncached();
     let repo = plan.repo.clone();
     let default_branch = plan.default_branch.clone();
     let branch = sync_branch(manifest);

@@ -244,6 +244,14 @@ impl Client {
     pub async fn list_code_security_configurations(
         &self,
     ) -> Result<Vec<CodeSecurityConfiguration>> {
+        self.cached_org(
+            |lookups| &lookups.code_security_configurations,
+            self.fetch_code_security_configurations(),
+        )
+        .await
+    }
+
+    async fn fetch_code_security_configurations(&self) -> Result<Vec<CodeSecurityConfiguration>> {
         pagination::collect_paginated(self, |page| {
             format!(
                 "/orgs/{}/code-security/configurations?per_page={}&page={}",
