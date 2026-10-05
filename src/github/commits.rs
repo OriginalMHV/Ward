@@ -104,13 +104,6 @@ struct CommitTree {
     sha: String,
 }
 
-/// A file to include in an atomic commit.
-#[derive(Debug, Clone)]
-pub struct CommitFile {
-    pub path: String,
-    pub content: String,
-}
-
 /// Result of attempting to create a `refs/heads/*` ref.
 enum BranchRefOutcome {
     /// The ref was created fresh at the requested base commit.
@@ -120,25 +113,6 @@ enum BranchRefOutcome {
 }
 
 impl Client {
-    /// Create an atomic multi-file commit using the Git Trees API.
-    /// This avoids cloning the repo - everything happens via the API.
-    pub async fn create_commit(
-        &self,
-        repo: &str,
-        branch: &str,
-        message: &str,
-        files: &[CommitFile],
-    ) -> Result<String> {
-        let entries = files
-            .iter()
-            .cloned()
-            .map(AtomicCommitEntry::from)
-            .collect::<Vec<_>>();
-
-        self.create_atomic_commit(repo, branch, message, &entries)
-            .await
-    }
-
     /// Create an atomic commit using explicit Git tree entries.
     pub async fn create_atomic_commit(
         &self,
@@ -234,21 +208,6 @@ impl Client {
         .await?;
 
         Ok(commit.sha)
-    }
-
-    /// Create a new branch from another branch's current head.
-    pub async fn create_branch(
-        &self,
-        repo: &str,
-        branch_name: &str,
-        from_branch: &str,
-    ) -> Result<()> {
-        validate_git_ref_name(branch_name)?;
-        validate_git_ref_name(from_branch)?;
-        let source_sha = self.get_ref_sha(repo, from_branch).await?;
-        self.create_branch_ref(repo, branch_name, &source_sha)
-            .await?;
-        Ok(())
     }
 
     /// Create the `refs/heads/{branch_name}` ref at `sha`, reporting whether it
@@ -415,16 +374,6 @@ impl Client {
         let mut segments = vec!["git".to_owned(), "refs".to_owned(), "heads".to_owned()];
         segments.extend(split_git_ref_name(branch)?);
         build_repo_api_url(&self.org, repo, &segments, &[])
-    }
-}
-
-impl From<CommitFile> for AtomicCommitEntry {
-    fn from(file: CommitFile) -> Self {
-        Self::Upsert(AtomicCommitFile {
-            path: file.path,
-            mode: GitEntryMode::File,
-            content: CommitContent::Utf8(file.content),
-        })
     }
 }
 

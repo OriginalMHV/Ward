@@ -72,14 +72,6 @@ pub struct AccessPlan {
     pub issues: Vec<ReconcileIssue>,
 }
 
-impl AccessPlan {
-    pub fn is_empty(&self) -> bool {
-        self.team_actions.is_empty()
-            && self.collaborator_actions.is_empty()
-            && self.reference_actions.is_empty()
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum TeamAccessAction {
     Ensure(TeamAccess),

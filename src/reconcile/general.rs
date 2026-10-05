@@ -1054,14 +1054,6 @@ pub async fn apply(client: &Client, plan: &GeneralPlan) -> Result<GeneralVerific
     Ok(verification)
 }
 
-pub async fn verify(
-    client: &Client,
-    repo: &str,
-    desired: &GeneralDesiredState,
-) -> Result<GeneralVerification> {
-    verify_with_options(client, repo, desired, GeneralPlanOptions::default()).await
-}
-
 pub async fn verify_with_options(
     client: &Client,
     repo: &str,

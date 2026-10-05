@@ -333,28 +333,6 @@ impl Client {
             .context("Failed to parse file content response")
     }
 
-    /// Decode base64-encoded file content from the Contents API into raw bytes.
-    pub fn decode_content_bytes(content: &FileContent) -> Result<Vec<u8>> {
-        let raw = content.content.as_deref().unwrap_or("");
-        if raw.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        match content.encoding.as_deref() {
-            Some("base64") | None => decode_base64_payload(raw),
-            Some(other) => anyhow::bail!(
-                "Unsupported Contents API encoding {other} for {}",
-                content.path
-            ),
-        }
-    }
-
-    /// Decode base64-encoded file content from the Contents API.
-    pub fn decode_content(content: &FileContent) -> Result<String> {
-        String::from_utf8(Self::decode_content_bytes(content)?)
-            .context("File content is not valid UTF-8")
-    }
-
     /// Inspect the repository tree recursively using the Git Trees API.
     pub async fn read_git_tree_recursive(
         &self,
@@ -551,28 +529,6 @@ impl Client {
         })
     }
 
-    /// Resolve the repository tree recursively using the Git Trees API.
-    /// Returns `None` if the repository or ref doesn't exist.
-    pub async fn list_git_tree_recursive(
-        &self,
-        repo: &str,
-        branch: Option<&str>,
-    ) -> Result<Option<GitTreeListing>> {
-        let tree = self.read_git_tree_recursive(repo, branch).await?;
-        match tree.status {
-            GitTreeReadStatus::Available => Ok(tree.listing),
-            GitTreeReadStatus::EmptyRepository | GitTreeReadStatus::NotFound => Ok(None),
-            GitTreeReadStatus::PermissionDenied => {
-                anyhow::bail!(
-                    "{}",
-                    tree.detail.unwrap_or_else(|| {
-                        format!("Permission denied while reading repository tree for {repo}")
-                    })
-                )
-            }
-        }
-    }
-
     /// Retrieve raw blob bytes using the Git Blobs API.
     pub async fn get_blob_bytes(&self, repo: &str, sha: &str) -> Result<Vec<u8>> {
         if sha.is_empty() {
@@ -642,23 +598,14 @@ enum ResolveBranchStatus {
 
 #[cfg(test)]
 mod tests {
-    use super::{FileContent, GitEntryMode, validate_relative_git_path};
-    use crate::github::Client;
+    use super::{GitEntryMode, decode_base64_payload, validate_relative_git_path};
 
     #[test]
-    fn decode_content_bytes_ignores_whitespace() {
-        let file = FileContent {
-            name: "data.bin".to_owned(),
-            path: "data.bin".to_owned(),
-            sha: "blob-sha".to_owned(),
-            size: 4,
-            content: Some("AAEC\n/w==".to_owned()),
-            encoding: Some("base64".to_owned()),
-            kind: Some("file".to_owned()),
-        };
-
-        let decoded = Client::decode_content_bytes(&file).unwrap();
-        assert_eq!(decoded, vec![0, 1, 2, 255]);
+    fn decode_base64_payload_ignores_whitespace() {
+        assert_eq!(
+            decode_base64_payload("AAEC\n/w==").unwrap(),
+            vec![0, 1, 2, 255]
+        );
     }
 
     #[test]

@@ -12,86 +12,8 @@ use ward::config::manifest::{
     CategoryPolicy, FileEncoding, FilesCategoryV2, ManagedFileV2, ManifestCategories, SystemConfig,
 };
 use ward::github::Client;
-use ward::github::commits::{
-    AtomicCommitEntry, AtomicCommitFile, CommitContent, CommitFile, DeleteTreeEntry,
-};
+use ward::github::commits::{AtomicCommitEntry, AtomicCommitFile, CommitContent, DeleteTreeEntry};
 use ward::github::contents::{GitEntryMode, GitObjectType};
-
-#[tokio::test]
-async fn test_create_commit() {
-    let server = MockServer::start().await;
-
-    // 1. GET ref
-    Mock::given(method("GET"))
-        .and(path("/repos/test-org/my-repo/git/ref/heads/main"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "ref": "refs/heads/main",
-            "object": { "sha": "abc123", "type": "commit" }
-        })))
-        .mount(&server)
-        .await;
-
-    // 2. GET commit (to get tree SHA)
-    Mock::given(method("GET"))
-        .and(path("/repos/test-org/my-repo/git/commits/abc123"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "sha": "abc123",
-            "tree": { "sha": "tree-sha-000" },
-            "message": "initial commit"
-        })))
-        .mount(&server)
-        .await;
-
-    // 3. POST blob
-    Mock::given(method("POST"))
-        .and(path("/repos/test-org/my-repo/git/blobs"))
-        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
-            "sha": "blob-sha-001"
-        })))
-        .mount(&server)
-        .await;
-
-    // 4. POST tree
-    Mock::given(method("POST"))
-        .and(path("/repos/test-org/my-repo/git/trees"))
-        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
-            "sha": "new-tree-sha"
-        })))
-        .mount(&server)
-        .await;
-
-    // 5. POST commit
-    Mock::given(method("POST"))
-        .and(path("/repos/test-org/my-repo/git/commits"))
-        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
-            "sha": "new-commit-sha"
-        })))
-        .mount(&server)
-        .await;
-
-    // 6. PATCH ref
-    Mock::given(method("PATCH"))
-        .and(path("/repos/test-org/my-repo/git/refs/heads/main"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "ref": "refs/heads/main",
-            "object": { "sha": "new-commit-sha" }
-        })))
-        .mount(&server)
-        .await;
-
-    let client = Client::new_for_test("test-org", &server.uri());
-    let files = vec![CommitFile {
-        path: "README.md".to_owned(),
-        content: "# Hello\nWorld".to_owned(),
-    }];
-
-    let sha = client
-        .create_commit("my-repo", "main", "test commit", &files)
-        .await
-        .unwrap();
-
-    assert_eq!(sha, "new-commit-sha");
-}
 
 #[tokio::test]
 async fn test_create_atomic_commit_supports_binary_bytes_and_delete_entries() {
@@ -192,86 +114,7 @@ async fn test_create_atomic_commit_supports_binary_bytes_and_delete_entries() {
 }
 
 #[tokio::test]
-async fn test_create_branch() {
-    let server = MockServer::start().await;
-
-    // GET ref for source branch
-    Mock::given(method("GET"))
-        .and(path("/repos/test-org/my-repo/git/ref/heads/main"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "ref": "refs/heads/main",
-            "object": { "sha": "source-sha-123", "type": "commit" }
-        })))
-        .mount(&server)
-        .await;
-
-    // POST refs for new branch
-    Mock::given(method("POST"))
-        .and(path("/repos/test-org/my-repo/git/refs"))
-        .and(body_partial_json(json!({
-            "ref": "refs/heads/feature",
-            "sha": "source-sha-123"
-        })))
-        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
-            "ref": "refs/heads/feature",
-            "object": { "sha": "source-sha-123" }
-        })))
-        .mount(&server)
-        .await;
-
-    let client = Client::new_for_test("test-org", &server.uri());
-    client
-        .create_branch("my-repo", "feature", "main")
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
-async fn test_create_branch_encodes_unicode_ref_and_accepts_existing_branch_only_if_lookup_succeeds()
- {
-    let server = MockServer::start().await;
-
-    Mock::given(method("GET"))
-        .and(path("/repos/test-org/my-repo/git/ref/heads/main"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "ref": "refs/heads/main",
-            "object": { "sha": "source-sha-123", "type": "commit" }
-        })))
-        .mount(&server)
-        .await;
-
-    Mock::given(method("POST"))
-        .and(path("/repos/test-org/my-repo/git/refs"))
-        .and(body_partial_json(json!({
-            "ref": "refs/heads/feature/☃ branch",
-            "sha": "source-sha-123"
-        })))
-        .respond_with(ResponseTemplate::new(422).set_body_json(json!({
-            "message": "Reference already exists"
-        })))
-        .mount(&server)
-        .await;
-
-    Mock::given(method("GET"))
-        .and(path(
-            "/repos/test-org/my-repo/git/ref/heads/feature/%E2%98%83%20branch",
-        ))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "ref": "refs/heads/feature/☃ branch",
-            "object": { "sha": "source-sha-123", "type": "commit" }
-        })))
-        .mount(&server)
-        .await;
-
-    let client = Client::new_for_test("test-org", &server.uri());
-    client
-        .create_branch("my-repo", "feature/☃ branch", "main")
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
-async fn test_create_branch_surfaces_non_existing_422_validation_error() {
+async fn ensure_dedicated_branch_surfaces_non_existing_422_validation_error() {
     let server = MockServer::start().await;
 
     Mock::given(method("GET"))
@@ -301,7 +144,7 @@ async fn test_create_branch_surfaces_non_existing_422_validation_error() {
 
     let client = Client::new_for_test("test-org", &server.uri());
     let error = client
-        .create_branch("my-repo", "feature", "main")
+        .ensure_dedicated_branch("my-repo", "feature", "main")
         .await
         .unwrap_err();
 
@@ -436,8 +279,7 @@ async fn test_get_file_exists() {
     assert_eq!(content.path, ".github/copilot-instructions.md");
     assert_eq!(content.sha, "file-sha-abc");
 
-    let decoded = Client::decode_content(&content).unwrap();
-    assert_eq!(decoded, "# Instructions\nUse ward.");
+    assert_eq!(content.content.as_deref(), Some(content_b64.as_str()));
 }
 
 #[tokio::test]
@@ -494,7 +336,7 @@ async fn test_get_file_not_found() {
 }
 
 #[tokio::test]
-async fn test_list_git_tree_recursive_and_get_blob_bytes() {
+async fn test_read_git_tree_recursive_and_get_blob_bytes() {
     let server = MockServer::start().await;
 
     Mock::given(method("GET"))
@@ -571,9 +413,10 @@ async fn test_list_git_tree_recursive_and_get_blob_bytes() {
 
     let client = Client::new_for_test("test-org", &server.uri());
     let tree = client
-        .list_git_tree_recursive("my-repo", Some("main"))
+        .read_git_tree_recursive("my-repo", Some("main"))
         .await
         .unwrap()
+        .listing
         .expect("tree should exist");
 
     assert_eq!(tree.sha, "tree-sha-000");
