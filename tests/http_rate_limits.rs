@@ -109,3 +109,76 @@ async fn primary_rate_limit_beyond_cap_is_returned_without_retry() {
 
     assert_eq!(response.status(), 403);
 }
+
+#[tokio::test]
+async fn post_is_not_retried_on_server_errors() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/repos/test-org/e/issues"))
+        .respond_with(ResponseTemplate::new(503))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let response = client
+        .post_json("/repos/test-org/e/issues", &json!({ "title": "x" }))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 503);
+}
+
+#[tokio::test]
+async fn graphql_mutation_is_not_retried_on_server_errors() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .respond_with(ResponseTemplate::new(502))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let result = client
+        .graphql::<serde_json::Value, _>("mutation M { x }", &json!({}))
+        .await;
+
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn put_patch_and_delete_are_retried_on_server_errors() {
+    let server = MockServer::start().await;
+    for verb in ["PUT", "PATCH", "DELETE"] {
+        Mock::given(method(verb))
+            .and(path("/repos/test-org/f"))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method(verb))
+            .and(path("/repos/test-org/f"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let body = json!({});
+    assert_eq!(client.put("/repos/test-org/f").await.unwrap().status(), 200);
+    assert_eq!(
+        client
+            .patch_json("/repos/test-org/f", &body)
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    assert_eq!(
+        client.delete("/repos/test-org/f").await.unwrap().status(),
+        200
+    );
+}

@@ -142,8 +142,13 @@ impl Client {
         }
 
         let path = "/graphql";
+        let url = format!("{}{}", self.base_url, path);
+        let request = self
+            .http
+            .post(&url)
+            .json(&GraphqlRequest { query, variables });
         let response = self
-            .post_json(path, &GraphqlRequest { query, variables })
+            .send_with("POST", &url, request, is_read_only_query(query))
             .await?;
         let body: GraphqlResponse<T> = response::expect_json(response, "POST", path).await?;
 
@@ -181,6 +186,18 @@ impl Client {
         method: &str,
         url: &str,
         request: reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response> {
+        self.send_with(method, url, request, method != "POST").await
+    }
+
+    /// `retry_server_errors` must be false for requests that may have taken effect
+    /// before a 5xx, because a retry could duplicate the change.
+    async fn send_with(
+        &self,
+        method: &str,
+        url: &str,
+        request: reqwest::RequestBuilder,
+        retry_server_errors: bool,
     ) -> Result<reqwest::Response> {
         let _permit = self.semaphore.acquire().await?;
         let mut request = request;
@@ -221,6 +238,10 @@ impl Client {
                 }
                 return Ok(response);
             };
+            if plan.kind == response::RetryKind::Transient && !retry_server_errors {
+                tracing::debug!("{method} {url} returned HTTP {status} and is not retried");
+                return Ok(response);
+            }
             let delay = plan.delay;
 
             let Some(next_request) = retry_request else {
@@ -282,6 +303,12 @@ async fn detect_secondary_limit(response: reqwest::Response) -> Result<(reqwest:
     *rebuilt.version_mut() = version;
     *rebuilt.headers_mut() = headers;
     Ok((reqwest::Response::from(rebuilt), secondary))
+}
+
+/// Only a plain query is safe to retry after a 5xx. A mutation may have been applied.
+fn is_read_only_query(query: &str) -> bool {
+    let query = query.trim_start();
+    query.starts_with("query") || query.starts_with('{')
 }
 
 fn check_rate_limit(resp: &reqwest::Response) {
@@ -362,7 +389,15 @@ fn validate_parallelism(parallelism: usize) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::Client;
+    use super::{Client, is_read_only_query};
+
+    #[test]
+    fn only_plain_queries_are_read_only() {
+        assert!(is_read_only_query("  query Viewer { viewer { login } }"));
+        assert!(is_read_only_query("{ viewer { login } }"));
+        assert!(!is_read_only_query("mutation M { x }"));
+        assert!(!is_read_only_query("# note\nmutation M { x }"));
+    }
 
     #[tokio::test]
     async fn client_new_rejects_zero_parallelism() {
