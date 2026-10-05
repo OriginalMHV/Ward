@@ -67,18 +67,6 @@ impl From<&Team> for TeamAccess {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct TeamMember {
-    pub login: String,
-    pub role: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct TeamRepoPermission {
-    pub team_slug: String,
-    pub permission: String,
-}
-
 impl Client {
     /// List all teams in the organization, handling pagination.
     pub async fn list_org_teams(&self) -> Result<Vec<Team>> {

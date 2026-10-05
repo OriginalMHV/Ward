@@ -193,31 +193,7 @@ pub struct EnvironmentUpdate {
 impl Client {
     // ---- Environments ----
 
-    /// `GET /repos/{owner}/{repo}/environments`, paginated (wrapped response,
-    /// not a raw array, so this cannot use the generic `collect_paginated` helper).
-    pub async fn list_environments(&self, repo: &str) -> Result<Vec<Environment>> {
-        let mut items = Vec::new();
-        let mut page = 1u32;
-        loop {
-            let path = format!(
-                "/repos/{}/{repo}/environments?per_page=30&page={page}",
-                self.org()
-            );
-            let body: EnvironmentsResponse =
-                response::expect_json(self.get(&path).await?, "GET", &path)
-                    .await
-                    .context("Failed to parse environments response")?;
-            let count = body.environments.len();
-            items.extend(body.environments);
-            if count < 30 {
-                break;
-            }
-            page += 1;
-        }
-        Ok(items)
-    }
-
-    /// As [`Client::list_environments`], classified: a 403/404/422 on the
+    /// Paginated read, classified as a [`ReadOutcome`]: a 403/404/422 on the
     /// first page is reported as a [`ReadOutcome`] instead of failing.
     pub async fn list_environments_checked(
         &self,
@@ -307,35 +283,7 @@ impl Client {
 
     // ---- Deployment branch/tag policies ----
 
-    /// `GET /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies`, paginated.
-    pub async fn list_deployment_branch_policies(
-        &self,
-        repo: &str,
-        environment_name: &str,
-    ) -> Result<Vec<DeploymentBranchPolicy>> {
-        let env = encode_path_segment(environment_name);
-        let mut items = Vec::new();
-        let mut page = 1u32;
-        loop {
-            let path = format!(
-                "/repos/{}/{repo}/environments/{env}/deployment-branch-policies?per_page=30&page={page}",
-                self.org()
-            );
-            let body: DeploymentBranchPoliciesResponse =
-                response::expect_json(self.get(&path).await?, "GET", &path)
-                    .await
-                    .context("Failed to parse deployment branch policies response")?;
-            let count = body.branch_policies.len();
-            items.extend(body.branch_policies);
-            if count < 30 {
-                break;
-            }
-            page += 1;
-        }
-        Ok(items)
-    }
-
-    /// As [`Client::list_deployment_branch_policies`], classified.
+    /// Paginated read, classified as a [`ReadOutcome`].
     pub async fn list_deployment_branch_policies_checked(
         &self,
         repo: &str,

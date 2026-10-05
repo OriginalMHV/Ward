@@ -163,17 +163,6 @@ struct SelectedRepositoriesPage {
 }
 
 impl Client {
-    pub async fn list_repo_collaborators(
-        &self,
-        repo: &str,
-        affiliation: CollaboratorAffiliation,
-    ) -> Result<Vec<RepositoryCollaborator>> {
-        self.list_repo_collaborators_checked(repo, affiliation)
-            .await?
-            .available()
-            .ok_or_else(|| anyhow::anyhow!("collaborator listing unavailable"))
-    }
-
     pub async fn list_repo_collaborators_checked(
         &self,
         repo: &str,
@@ -757,8 +746,10 @@ mod tests {
 
         let client = Client::new_for_test("test-org", &server.uri());
         let collaborators = client
-            .list_repo_collaborators("my-repo", CollaboratorAffiliation::Direct)
+            .list_repo_collaborators_checked("my-repo", CollaboratorAffiliation::Direct)
             .await
+            .unwrap()
+            .available()
             .unwrap();
 
         assert_eq!(collaborators.len(), 101);

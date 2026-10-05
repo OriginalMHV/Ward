@@ -1026,16 +1026,7 @@ impl Client {
             .context("Failed to parse Actions public key response")
     }
 
-    /// `GET /repos/{owner}/{repo}/actions/secrets`, paginated. Values are never returned.
-    pub async fn list_actions_secrets(&self, repo: &str) -> Result<Vec<SecretMetadata>> {
-        collect_secrets(
-            self,
-            &format!("/repos/{}/{repo}/actions/secrets", self.org()),
-        )
-        .await
-    }
-
-    /// As [`Client::list_actions_secrets`], classified.
+    /// Paginated read, classified as a [`ReadOutcome`].
     pub async fn list_actions_secrets_checked(
         &self,
         repo: &str,
@@ -1091,21 +1082,7 @@ impl Client {
             .context("Failed to parse environment public key response")
     }
 
-    /// `GET /repos/{owner}/{repo}/environments/{environment_name}/secrets`, paginated.
-    pub async fn list_environment_secrets(
-        &self,
-        repo: &str,
-        environment_name: &str,
-    ) -> Result<Vec<SecretMetadata>> {
-        let env = encode_path_segment(environment_name);
-        collect_secrets(
-            self,
-            &format!("/repos/{}/{repo}/environments/{env}/secrets", self.org()),
-        )
-        .await
-    }
-
-    /// As [`Client::list_environment_secrets`], classified.
+    /// Paginated read, classified as a [`ReadOutcome`].
     pub async fn list_environment_secrets_checked(
         &self,
         repo: &str,
@@ -1162,20 +1139,7 @@ impl Client {
 
     // ---- Visible organization secret/variable references ----
 
-    /// `GET /repos/{owner}/{repo}/actions/organization-secrets`, paginated.
-    /// Names only; GitHub scopes this list to secrets already visible to `repo`.
-    pub async fn list_visible_organization_secrets(
-        &self,
-        repo: &str,
-    ) -> Result<Vec<SecretMetadata>> {
-        collect_secrets(
-            self,
-            &format!("/repos/{}/{repo}/actions/organization-secrets", self.org()),
-        )
-        .await
-    }
-
-    /// As [`Client::list_visible_organization_secrets`], classified.
+    /// Paginated read, classified as a [`ReadOutcome`].
     pub async fn list_visible_organization_secrets_checked(
         &self,
         repo: &str,
@@ -1187,22 +1151,7 @@ impl Client {
         .await
     }
 
-    /// `GET /repos/{owner}/{repo}/actions/organization-variables`, paginated.
-    pub async fn list_visible_organization_variables(
-        &self,
-        repo: &str,
-    ) -> Result<Vec<ActionsVariable>> {
-        collect_variables(
-            self,
-            &format!(
-                "/repos/{}/{repo}/actions/organization-variables",
-                self.org()
-            ),
-        )
-        .await
-    }
-
-    /// As [`Client::list_visible_organization_variables`], classified.
+    /// Paginated read, classified as a [`ReadOutcome`].
     pub async fn list_visible_organization_variables_checked(
         &self,
         repo: &str,
@@ -1219,18 +1168,7 @@ impl Client {
 
     // ---- Dependabot and Codespaces secret metadata (read-only, no manifest field) ----
 
-    /// `GET /repos/{owner}/{repo}/dependabot/secrets`, paginated. Metadata only;
-    /// Dependabot secrets are not part of `ActionsCategoryV2` and are reported
-    /// through coverage entries rather than managed state.
-    pub async fn list_dependabot_secrets(&self, repo: &str) -> Result<Vec<SecretMetadata>> {
-        collect_secrets(
-            self,
-            &format!("/repos/{}/{repo}/dependabot/secrets", self.org()),
-        )
-        .await
-    }
-
-    /// As [`Client::list_dependabot_secrets`], classified: Dependabot may be
+    /// Paginated read, classified as a [`ReadOutcome`]: Dependabot may be
     /// disabled for a repository (404) or restricted (403), neither of which
     /// should abort the rest of Actions/Environments collection.
     pub async fn list_dependabot_secrets_checked(
@@ -1244,17 +1182,7 @@ impl Client {
         .await
     }
 
-    /// `GET /repos/{owner}/{repo}/codespaces/secrets`, paginated. Metadata only,
-    /// reported through coverage entries for the same reason as Dependabot secrets.
-    pub async fn list_codespaces_secrets(&self, repo: &str) -> Result<Vec<SecretMetadata>> {
-        collect_secrets(
-            self,
-            &format!("/repos/{}/{repo}/codespaces/secrets", self.org()),
-        )
-        .await
-    }
-
-    /// As [`Client::list_codespaces_secrets`], classified: Codespaces may be
+    /// Paginated read, classified as a [`ReadOutcome`]: Codespaces may be
     /// disabled for a repository (404) or restricted (403).
     pub async fn list_codespaces_secrets_checked(
         &self,
@@ -1331,26 +1259,7 @@ async fn collect_variables_checked(
     Ok(ReadOutcome::Available(items))
 }
 
-async fn collect_secrets(client: &Client, base_path: &str) -> Result<Vec<SecretMetadata>> {
-    let mut items = Vec::new();
-    let mut page = 1u32;
-    let separator = if base_path.contains('?') { '&' } else { '?' };
-    loop {
-        let path = format!("{base_path}{separator}per_page=30&page={page}");
-        let body: SecretsResponse = response::expect_json(client.get(&path).await?, "GET", &path)
-            .await
-            .context("Failed to parse secrets response")?;
-        let count = body.secrets.len();
-        items.extend(body.secrets);
-        if count < 30 {
-            break;
-        }
-        page += 1;
-    }
-    Ok(items)
-}
-
-/// As [`collect_secrets`], but classifies the first page's response so a
+/// Classifies the first page's response so a
 /// 403/404/422 becomes a [`ReadOutcome`] instead of aborting.
 async fn collect_secrets_checked(
     client: &Client,

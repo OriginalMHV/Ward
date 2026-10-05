@@ -86,10 +86,6 @@ impl Client {
         self.list_rulesets_scoped(repo, true).await
     }
 
-    pub async fn list_repository_rulesets(&self, repo: &str) -> Result<Vec<Ruleset>> {
-        self.list_rulesets_scoped(repo, false).await
-    }
-
     async fn list_rulesets_scoped(
         &self,
         repo: &str,
