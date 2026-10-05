@@ -207,6 +207,49 @@ async fn test_create_pull_request_new() {
 }
 
 #[tokio::test]
+async fn test_create_pull_request_survives_reviewer_request_failure() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/my-repo/pulls"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/repos/test-org/my-repo/pulls"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "number": 42,
+            "html_url": "https://github.com/test-org/my-repo/pull/42",
+            "state": "open",
+            "title": "chore: ward setup",
+            "head": { "ref": "feature" }
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/repos/test-org/my-repo/pulls/42/requested_reviewers"))
+        .respond_with(ResponseTemplate::new(422).set_body_json(json!({ "message": "nope" })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let pr = client
+        .create_pull_request(
+            "my-repo",
+            "chore: ward setup",
+            "Automated by ward",
+            "feature",
+            "main",
+            &["octocat".to_owned()],
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(pr.number, 42);
+}
+
+#[tokio::test]
 async fn test_create_pull_request_already_exists() {
     let server = MockServer::start().await;
 

@@ -58,15 +58,22 @@ impl Client {
                 "reviewers": reviewers,
             });
 
-            let _ = self
-                .post_json(
-                    &format!(
-                        "/repos/{}/{repo}/pulls/{}/requested_reviewers",
-                        self.org, pr.number
-                    ),
-                    &review_body,
-                )
-                .await;
+            let reviewers_path = format!(
+                "/repos/{}/{repo}/pulls/{}/requested_reviewers",
+                self.org, pr.number
+            );
+            match self.post_json(&reviewers_path, &review_body).await {
+                Ok(response) if response.status().is_success() => {}
+                Ok(response) => tracing::warn!(
+                    "Could not request reviewers for {repo}#{}: HTTP {}",
+                    pr.number,
+                    response.status()
+                ),
+                Err(error) => tracing::warn!(
+                    "Could not request reviewers for {repo}#{}: {error:#}",
+                    pr.number
+                ),
+            }
         }
 
         Ok(pr)
