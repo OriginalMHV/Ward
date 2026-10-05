@@ -375,7 +375,7 @@ async fn apply(
         }
     }
 
-    Ok(())
+    crate::outcome::fail_when_any_failed(&failed)
 }
 
 async fn audit(

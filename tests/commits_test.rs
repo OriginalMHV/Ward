@@ -799,7 +799,15 @@ async fn commit_apply_reports_collection_failures_for_every_repository() {
         result.is_err(),
         "apply must return a non-zero error when repositories fail"
     );
-    let message = format!("{}", result.unwrap_err());
+    let error = result.unwrap_err();
+    assert!(
+        matches!(
+            error.downcast_ref::<ward::outcome::Outcome>(),
+            Some(ward::outcome::Outcome::ApplyFailed(_))
+        ),
+        "a failed apply must be an Outcome so it exits with code 1"
+    );
+    let message = format!("{error}");
     assert!(
         message.contains("2 blocked category result"),
         "error should aggregate every failure, got: {message}"

@@ -451,7 +451,7 @@ async fn apply(
         audit_log.path().display()
     );
 
-    Ok(())
+    crate::outcome::fail_when_any_failed(&failed)
 }
 
 async fn audit(

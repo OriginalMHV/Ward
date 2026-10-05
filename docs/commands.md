@@ -28,7 +28,7 @@ Every command uses the same exit codes.
 | `1` | Ward ran and found a problem: drift found, a failed check (`ward doctor`), or a failed or blocked apply category. |
 | `2` | Ward could not run: authentication, network, configuration parse error, or invalid arguments. |
 
-`ward doctor` exits `0` when it reports only warnings. `ward settings apply` and `ward teams apply` print failed repositories but still exit `0`.
+`ward doctor` exits `0` when it reports only warnings. `ward settings apply` and `ward teams apply` exit `1` when any repository fails.
 
 ---
 

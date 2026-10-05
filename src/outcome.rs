@@ -25,6 +25,19 @@ impl fmt::Display for Outcome {
 
 impl std::error::Error for Outcome {}
 
+/// Fail with [`Outcome::ApplyFailed`] when any repository failed during an apply.
+pub fn fail_when_any_failed(failed: &[(String, String)]) -> anyhow::Result<()> {
+    if failed.is_empty() {
+        return Ok(());
+    }
+    Err(Outcome::ApplyFailed(format!(
+        "{} repositor{} failed during apply; see the errors above",
+        failed.len(),
+        if failed.len() == 1 { "y" } else { "ies" }
+    ))
+    .into())
+}
+
 /// Map a command error to the process exit code.
 pub fn exit_code(error: &anyhow::Error) -> ExitCode {
     if error.downcast_ref::<Outcome>().is_some() {
@@ -47,6 +60,18 @@ mod tests {
         let error = Err::<(), _>(Outcome::ApplyFailed("failed".to_owned()))
             .context("apply")
             .unwrap_err();
+        assert_eq!(exit_code(&error), std::process::ExitCode::from(1));
+    }
+
+    #[test]
+    fn failed_repositories_make_an_apply_fail_with_exit_one() {
+        assert!(super::fail_when_any_failed(&[]).is_ok());
+        let failed = vec![("repo".to_owned(), "boom".to_owned())];
+        let error = super::fail_when_any_failed(&failed).unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<Outcome>(),
+            Some(Outcome::ApplyFailed(_))
+        ));
         assert_eq!(exit_code(&error), std::process::ExitCode::from(1));
     }
 
