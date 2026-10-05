@@ -16,6 +16,8 @@ use std::fmt;
 
 use anyhow::{Context, Result};
 
+use super::relax_unrequested;
+
 use crate::config::manifest::{
     ActionsCategoryV2, ActionsSettingsConfig, ActorReference, CategoryPolicy, CoverageEntry,
     CoverageOutcome, EnvironmentConfigV2, EnvironmentDeploymentPolicyConfig,
@@ -456,6 +458,32 @@ pub async fn collect_actions_category(
     let mut coverage = Vec::new();
     let mut issues = Vec::new();
 
+    // A source import (`desired` is `None`) reads everything. A plan reads
+    // optional endpoints too, but only counts a failure when the manifest manages them.
+    let requests = |resource: Option<ReferencedResourceType>, has_entries: bool| {
+        desired.is_none_or(|desired| {
+            desired.policy.prune
+                || has_entries
+                || resource.is_some_and(|resource| {
+                    desired
+                        .references
+                        .iter()
+                        .any(|reference| reference.resource_type == resource)
+                })
+        })
+    };
+    let wants_org_secrets = requests(Some(ReferencedResourceType::OrganizationSecret), false);
+    let wants_org_variables = requests(Some(ReferencedResourceType::OrganizationVariable), false);
+    let wants_runners = requests(Some(ReferencedResourceType::Runner), false);
+    let wants_dependabot_secrets = requests(
+        None,
+        desired.is_some_and(|d| !d.dependabot_secrets.is_empty()),
+    );
+    let wants_codespaces_secrets = requests(
+        None,
+        desired.is_some_and(|d| !d.codespaces_secrets.is_empty()),
+    );
+
     if let Some(permissions) = record_read_outcome(
         &mut coverage,
         ManifestCategoryName::Actions,
@@ -706,10 +734,13 @@ pub async fn collect_actions_category(
         &mut coverage,
         ManifestCategoryName::Actions,
         "actions/organization-secrets",
-        client
-            .list_visible_organization_secrets_checked(repo)
-            .await
-            .context("Failed to collect visible organization secret references")?,
+        relax_unrequested(
+            client
+                .list_visible_organization_secrets_checked(repo)
+                .await
+                .context("Failed to collect visible organization secret references")?,
+            wants_org_secrets,
+        ),
     ) {
         category
             .references
@@ -727,10 +758,13 @@ pub async fn collect_actions_category(
         &mut coverage,
         ManifestCategoryName::Actions,
         "actions/organization-variables",
-        client
-            .list_visible_organization_variables_checked(repo)
-            .await
-            .context("Failed to collect visible organization variable references")?,
+        relax_unrequested(
+            client
+                .list_visible_organization_variables_checked(repo)
+                .await
+                .context("Failed to collect visible organization variable references")?,
+            wants_org_variables,
+        ),
     ) {
         category
             .references
@@ -753,10 +787,13 @@ pub async fn collect_actions_category(
         &mut coverage,
         ManifestCategoryName::Actions,
         "actions/runners",
-        client
-            .list_repository_runners_checked(repo)
-            .await
-            .context("Failed to collect self-hosted runner references")?,
+        relax_unrequested(
+            client
+                .list_repository_runners_checked(repo)
+                .await
+                .context("Failed to collect self-hosted runner references")?,
+            wants_runners,
+        ),
     ) {
         category
             .references
@@ -804,10 +841,13 @@ pub async fn collect_actions_category(
         &mut coverage,
         ManifestCategoryName::Actions,
         "dependabot/secrets",
-        client
-            .list_dependabot_secrets_checked(repo)
-            .await
-            .context("Failed to collect Dependabot secret metadata")?,
+        relax_unrequested(
+            client
+                .list_dependabot_secrets_checked(repo)
+                .await
+                .context("Failed to collect Dependabot secret metadata")?,
+            wants_dependabot_secrets,
+        ),
     ) {
         category.dependabot_secrets = dependabot_secrets
             .iter()
@@ -837,10 +877,13 @@ pub async fn collect_actions_category(
         &mut coverage,
         ManifestCategoryName::Actions,
         "codespaces/secrets",
-        client
-            .list_codespaces_secrets_checked(repo)
-            .await
-            .context("Failed to collect Codespaces secret metadata")?,
+        relax_unrequested(
+            client
+                .list_codespaces_secrets_checked(repo)
+                .await
+                .context("Failed to collect Codespaces secret metadata")?,
+            wants_codespaces_secrets,
+        ),
     ) {
         category.codespaces_secrets = codespaces_secrets
             .iter()

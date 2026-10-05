@@ -2048,3 +2048,86 @@ async fn cache_limits_apply_then_verify_is_idempotent() {
         "verify of an already-compliant target must never write"
     );
 }
+
+async fn mount_forbidden_optional_actions_endpoints(server: &MockServer) {
+    // Registered before the baseline so these win (equal priority resolves in registration order).
+    for suffix in [
+        "dependabot/secrets",
+        "codespaces/secrets",
+        "actions/organization-variables",
+        "actions/organization-secrets",
+    ] {
+        Mock::given(method("GET"))
+            .and(path(format!("/repos/test-org/my-repo/{suffix}")))
+            .respond_with(
+                ResponseTemplate::new(403)
+                    .set_body_json(json!({"message": "Resource not accessible"})),
+            )
+            .mount(server)
+            .await;
+    }
+}
+
+fn degraded_endpoints(
+    collected: &ward::reconcile::actions_environments::ActionsCollection,
+) -> Vec<String> {
+    collected
+        .coverage
+        .iter()
+        .filter(|entry| {
+            matches!(
+                entry.outcome,
+                ward::config::manifest::CoverageOutcome::PermissionDenied
+                    | ward::config::manifest::CoverageOutcome::Unavailable
+            )
+        })
+        .map(|entry| entry.endpoint.clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn forbidden_endpoints_the_manifest_does_not_manage_are_not_unknown_state() {
+    let server = MockServer::start().await;
+    mount_forbidden_optional_actions_endpoints(&server).await;
+    mount_actions_baseline(&server, "my-repo", BaselineOverrides::default()).await;
+
+    let desired = ActionsCategoryV2 {
+        policy: managed_policy(false),
+        ..Default::default()
+    };
+    let collected = collect_actions_category(&client(&server), "my-repo", Some(&desired))
+        .await
+        .unwrap();
+
+    assert_eq!(degraded_endpoints(&collected), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn forbidden_endpoints_the_manifest_manages_stay_unknown_state() {
+    let server = MockServer::start().await;
+    mount_forbidden_optional_actions_endpoints(&server).await;
+    mount_actions_baseline(&server, "my-repo", BaselineOverrides::default()).await;
+
+    let desired = ActionsCategoryV2 {
+        policy: managed_policy(false),
+        dependabot_secrets: vec![SecretPlaceholderConfig {
+            name: "TOKEN".to_owned(),
+            value_from: ExternalValueReference::Manual { hint: None },
+        }],
+        references: vec![ReferencedResourceConfig {
+            resource_type: ReferencedResourceType::OrganizationVariable,
+            name: "REGION".to_owned(),
+        }],
+        ..Default::default()
+    };
+    let collected = collect_actions_category(&client(&server), "my-repo", Some(&desired))
+        .await
+        .unwrap();
+
+    let mut degraded = degraded_endpoints(&collected);
+    degraded.sort();
+    assert_eq!(
+        degraded,
+        ["actions/organization-variables", "dependabot/secrets"]
+    );
+}

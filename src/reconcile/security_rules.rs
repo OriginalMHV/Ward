@@ -1026,6 +1026,20 @@ pub async fn collect_rulesets_category(
         "GET /repos/{owner}/{repo}/rulesets",
     )];
 
+    let needs = |matches: fn(&ActorReference) -> bool| {
+        category.is_none_or(|category| {
+            category
+                .repository_rulesets
+                .iter()
+                .flat_map(|ruleset| &ruleset.bypass_actors)
+                .any(|bypass| matches(&bypass.actor))
+        })
+    };
+    let needs_teams = needs(|actor| matches!(actor, ActorReference::Team { .. }));
+    let needs_roles = needs(|actor| matches!(actor, ActorReference::Role { .. }));
+    let needs_apps = needs(|actor| matches!(actor, ActorReference::App { .. }));
+    let needs_users = needs(|actor| matches!(actor, ActorReference::User { .. }));
+
     let all_rulesets = client.list_rulesets(repo).await?;
     let org_teams = match client.list_org_teams().await {
         Ok(value) => {
@@ -1036,10 +1050,11 @@ pub async fn collect_rulesets_category(
             value
         }
         Err(error) => {
-            coverage.push(unavailable_entry(
+            coverage.push(lookup_failure_entry(
                 ManifestCategoryName::Rulesets,
                 "GET /orgs/{org}/teams",
                 error.to_string(),
+                needs_teams,
             ));
             Vec::new()
         }
@@ -1053,10 +1068,11 @@ pub async fn collect_rulesets_category(
             value
         }
         Err(error) => {
-            coverage.push(unavailable_entry(
+            coverage.push(lookup_failure_entry(
                 ManifestCategoryName::Rulesets,
                 "GET /orgs/{org}/custom-repository-roles",
                 error.to_string(),
+                needs_roles,
             ));
             Vec::new()
         }
@@ -1070,10 +1086,11 @@ pub async fn collect_rulesets_category(
             value
         }
         Err(error) => {
-            coverage.push(unavailable_entry(
+            coverage.push(lookup_failure_entry(
                 ManifestCategoryName::Rulesets,
                 "GET /orgs/{org}/installations",
                 error.to_string(),
+                needs_apps,
             ));
             Vec::new()
         }
@@ -1101,10 +1118,11 @@ pub async fn collect_rulesets_category(
                 .collect()
         }
         Err(error) => {
-            coverage.push(unavailable_entry(
+            coverage.push(lookup_failure_entry(
                 ManifestCategoryName::Rulesets,
                 "GET /repos/{owner}/{repo}/collaborators?affiliation=all",
                 error.to_string(),
+                needs_users,
             ));
             HashMap::new()
         }
@@ -2849,6 +2867,27 @@ fn not_applicable_entry(
         outcome: CoverageOutcome::NotApplicable,
         reason: Some(reason),
         required_permission: None,
+    }
+}
+
+/// Record a failed lookup. A lookup the manifest does not need is not applicable,
+/// so it does not make the category count as unknown.
+fn lookup_failure_entry(
+    category: ManifestCategoryName,
+    endpoint: &str,
+    reason: String,
+    requested: bool,
+) -> CoverageEntry {
+    if requested {
+        unavailable_entry(category, endpoint, reason)
+    } else {
+        CoverageEntry {
+            category,
+            endpoint: endpoint.to_owned(),
+            outcome: CoverageOutcome::NotApplicable,
+            reason: Some(format!("not required by the manifest: {reason}")),
+            required_permission: None,
+        }
     }
 }
 

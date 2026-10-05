@@ -13,7 +13,7 @@ use serde::Serialize;
 use crate::config::Manifest;
 use crate::config::manifest::{
     ActionsCategoryV2, CoverageEntry, CoverageOutcome, ManagementDisposition, ManifestCategories,
-    RepositoryIntegrationsCategoryV2,
+    RepositoryCategoryV2, RepositoryIntegrationsCategoryV2,
 };
 use crate::engine::audit_log::AuditLog;
 use crate::github::Client;
@@ -700,6 +700,37 @@ fn collection_failed(
     }
 }
 
+/// Custom properties and immutable releases are optional reads. A failure on them
+/// is unknown managed state only when the manifest actually manages them.
+fn relax_unrequested_repository_coverage(
+    coverage: &mut [CoverageEntry],
+    desired: &RepositoryCategoryV2,
+) {
+    let wants_properties = !desired.custom_properties.is_empty() || desired.policy.prune;
+    let wants_immutable_releases = desired.immutable_releases.is_some();
+    for entry in coverage {
+        let requested = if entry.endpoint.ends_with("/properties/values") {
+            wants_properties
+        } else if entry.endpoint.ends_with("/immutable-releases") {
+            wants_immutable_releases
+        } else {
+            continue;
+        };
+        if !requested
+            && matches!(
+                entry.outcome,
+                CoverageOutcome::PermissionDenied | CoverageOutcome::Unavailable
+            )
+        {
+            entry.outcome = CoverageOutcome::NotApplicable;
+            entry.reason = Some(format!(
+                "not required by the manifest: {}",
+                entry.reason.take().unwrap_or_default()
+            ));
+        }
+    }
+}
+
 async fn plan_repository(
     client: &Client,
     categories: &ManifestCategories,
@@ -715,10 +746,11 @@ async fn plan_repository(
         Some(rest) => general::collect_with_rest(client, repo, rest).await,
         None => general::collect(client, repo).await,
     };
-    let current = match collected {
+    let mut current = match collected {
         Ok(state) => state,
         Err(error) => return collection_failed(Category::Repository, disposition, &error),
     };
+    relax_unrequested_repository_coverage(&mut current.coverage, &desired.repository);
     let plan_options = general::GeneralPlanOptions {
         allow_high_impact: options.allow_high_impact,
     };
@@ -2759,5 +2791,35 @@ mod tests {
         assert_eq!(order[0], Category::Repository);
         assert_eq!(order[1], Category::Files);
         assert_eq!(order[8], Category::BranchProtection);
+    }
+
+    #[test]
+    fn unrequested_optional_repository_reads_do_not_count_as_unknown_state() {
+        let entry = |endpoint: &str| CoverageEntry {
+            category: crate::config::manifest::ManifestCategoryName::Repository,
+            endpoint: endpoint.to_owned(),
+            outcome: CoverageOutcome::PermissionDenied,
+            reason: Some("HTTP 403".to_owned()),
+            required_permission: None,
+        };
+        let mut coverage = vec![
+            entry("GET /repos/{owner}/{repo}/properties/values"),
+            entry("GET /repos/{owner}/{repo}/immutable-releases"),
+            entry("GET /repos/{owner}/{repo}/topics"),
+        ];
+        let desired = RepositoryCategoryV2 {
+            policy: crate::config::manifest::CategoryPolicy::managed(),
+            settings: None,
+            metadata: None,
+            custom_properties: Vec::new(),
+            immutable_releases: None,
+            references: Vec::new(),
+        };
+
+        relax_unrequested_repository_coverage(&mut coverage, &desired);
+
+        assert_eq!(coverage[0].outcome, CoverageOutcome::NotApplicable);
+        assert_eq!(coverage[1].outcome, CoverageOutcome::NotApplicable);
+        assert_eq!(coverage[2].outcome, CoverageOutcome::PermissionDenied);
     }
 }
