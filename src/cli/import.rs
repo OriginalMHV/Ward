@@ -871,8 +871,9 @@ fn write_manifest(output: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
-fn progress(stdout: bool, message: String) {
-    if stdout {
+/// Print progress to stderr when the manifest goes to stdout, so it never mixes with the output.
+fn progress(manifest_on_stdout: bool, message: String) {
+    if manifest_on_stdout {
         eprintln!("\n  {message}");
     } else {
         println!("\n  {message}");
