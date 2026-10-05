@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::Client;
 use super::environments::encode_path_segment;
+use super::pagination;
 use super::response::{self, ClassifiedResponse};
 
 /// The outcome of a write (create/update/delete) call to a GitHub endpoint
@@ -714,25 +715,24 @@ impl Client {
 
     /// `GET /repos/{owner}/{repo}/actions/workflows`, paginated.
     pub async fn list_workflows(&self, repo: &str) -> Result<Vec<Workflow>> {
-        let mut items = Vec::new();
-        let mut page = 1u32;
-        loop {
-            let path = format!(
-                "/repos/{}/{repo}/actions/workflows?per_page=100&page={page}",
-                self.org()
-            );
-            let body: WorkflowsResponse =
-                response::expect_json(self.get(&path).await?, "GET", &path)
-                    .await
-                    .context("Failed to parse workflows response")?;
-            let count = body.workflows.len();
-            items.extend(body.workflows);
-            if count < 100 {
-                break;
-            }
-            page += 1;
-        }
-        Ok(items)
+        pagination::collect_paginated_wrapped(
+            self,
+            100,
+            "Failed to parse workflows response",
+            |page| {
+                format!(
+                    "/repos/{}/{repo}/actions/workflows?per_page={}&page={}",
+                    self.org(),
+                    page.per_page,
+                    page.number
+                )
+            },
+            |body: WorkflowsResponse| pagination::WrappedPage {
+                items: body.workflows,
+                total_count: None,
+            },
+        )
+        .await
     }
 
     /// As [`Client::list_workflows`], classified: a 403/404/422 on the first
@@ -1197,22 +1197,23 @@ impl Client {
 }
 
 async fn collect_variables(client: &Client, base_path: &str) -> Result<Vec<ActionsVariable>> {
-    let mut items = Vec::new();
-    let mut page = 1u32;
     let separator = if base_path.contains('?') { '&' } else { '?' };
-    loop {
-        let path = format!("{base_path}{separator}per_page=30&page={page}");
-        let body: VariablesResponse = response::expect_json(client.get(&path).await?, "GET", &path)
-            .await
-            .context("Failed to parse Actions variables response")?;
-        let count = body.variables.len();
-        items.extend(body.variables);
-        if count < 30 {
-            break;
-        }
-        page += 1;
-    }
-    Ok(items)
+    pagination::collect_paginated_wrapped(
+        client,
+        30,
+        "Failed to parse Actions variables response",
+        |page| {
+            format!(
+                "{base_path}{separator}per_page={}&page={}",
+                page.per_page, page.number
+            )
+        },
+        |body: VariablesResponse| pagination::WrappedPage {
+            items: body.variables,
+            total_count: None,
+        },
+    )
+    .await
 }
 
 /// As [`collect_variables`], but classifies the first page's response so a

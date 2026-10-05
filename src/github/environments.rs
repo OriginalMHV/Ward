@@ -15,6 +15,7 @@ use super::Client;
 use super::actions::{
     ReadOutcome, WriteOutcome, classify_read, write_delete, write_empty, write_json,
 };
+use super::pagination;
 use super::response;
 
 /// Percent-encode a single path segment (e.g. an environment name), which may
@@ -374,25 +375,24 @@ impl Client {
         environment_name: &str,
     ) -> Result<Vec<DeploymentProtectionRule>> {
         let env = encode_path_segment(environment_name);
-        let mut items = Vec::new();
-        let mut page = 1u32;
-        loop {
-            let path = format!(
-                "/repos/{}/{repo}/environments/{env}/deployment_protection_rules?per_page=30&page={page}",
-                self.org()
-            );
-            let body: DeploymentProtectionRulesResponse =
-                response::expect_json(self.get(&path).await?, "GET", &path)
-                    .await
-                    .context("Failed to parse deployment protection rules response")?;
-            let count = body.custom_deployment_protection_rules.len();
-            items.extend(body.custom_deployment_protection_rules);
-            if count < 30 {
-                break;
-            }
-            page += 1;
-        }
-        Ok(items)
+        pagination::collect_paginated_wrapped(
+            self,
+            30,
+            "Failed to parse deployment protection rules response",
+            |page| {
+                format!(
+                    "/repos/{}/{repo}/environments/{env}/deployment_protection_rules?per_page={}&page={}",
+                    self.org(),
+                    page.per_page,
+                    page.number
+                )
+            },
+            |body: DeploymentProtectionRulesResponse| pagination::WrappedPage {
+                items: body.custom_deployment_protection_rules,
+                total_count: None,
+            },
+        )
+        .await
     }
 
     /// As [`Client::list_deployment_protection_rules`], classified.
@@ -454,29 +454,24 @@ impl Client {
         environment_name: &str,
     ) -> Result<Vec<AvailableDeploymentProtectionRuleApp>> {
         let env = encode_path_segment(environment_name);
-        let mut items = Vec::new();
-        let mut page = 1u32;
-        loop {
-            let path = format!(
-                "/repos/{}/{repo}/environments/{env}/deployment_protection_rules/apps?per_page=30&page={page}",
-                self.org()
-            );
-            let body: AvailableDeploymentProtectionRuleAppsResponse =
-                response::expect_json(self.get(&path).await?, "GET", &path)
-                    .await
-                    .context(
-                        "Failed to parse available deployment protection rule apps response",
-                    )?;
-            let count = body
-                .available_custom_deployment_protection_rule_integrations
-                .len();
-            items.extend(body.available_custom_deployment_protection_rule_integrations);
-            if count < 30 {
-                break;
-            }
-            page += 1;
-        }
-        Ok(items)
+        pagination::collect_paginated_wrapped(
+            self,
+            30,
+            "Failed to parse available deployment protection rule apps response",
+            |page| {
+                format!(
+                    "/repos/{}/{repo}/environments/{env}/deployment_protection_rules/apps?per_page={}&page={}",
+                    self.org(),
+                    page.per_page,
+                    page.number
+                )
+            },
+            |body: AvailableDeploymentProtectionRuleAppsResponse| pagination::WrappedPage {
+                items: body.available_custom_deployment_protection_rule_integrations,
+                total_count: None,
+            },
+        )
+        .await
     }
 
     /// `POST /repos/{owner}/{repo}/environments/{environment_name}/deployment_protection_rules`.

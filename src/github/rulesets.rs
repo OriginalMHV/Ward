@@ -214,36 +214,22 @@ impl Client {
     }
 
     async fn fetch_org_installations(&self) -> Result<Vec<InstalledApp>> {
-        let mut page = pagination::Page::default();
-        let mut installations = Vec::new();
-
-        loop {
-            let path = format!(
-                "/orgs/{}/installations?per_page={}&page={}",
-                self.org, page.per_page, page.number
-            );
-            let payload: InstallationsResponse =
-                response::expect_json(self.get(&path).await?, "GET", &path)
-                    .await
-                    .context("Failed to parse organization installations response")?;
-            let item_count = payload.installations.len();
-            installations.extend(payload.installations);
-
-            if item_count < page.per_page as usize
-                || payload
-                    .total_count
-                    .is_some_and(|total_count| installations.len() >= total_count)
-            {
-                break;
-            }
-
-            page = pagination::Page {
-                number: page.number + 1,
-                ..page
-            };
-        }
-
-        Ok(installations)
+        pagination::collect_paginated_wrapped(
+            self,
+            pagination::PAGE_SIZE,
+            "Failed to parse organization installations response",
+            |page| {
+                format!(
+                    "/orgs/{}/installations?per_page={}&page={}",
+                    self.org, page.per_page, page.number
+                )
+            },
+            |payload: InstallationsResponse| pagination::WrappedPage {
+                items: payload.installations,
+                total_count: payload.total_count,
+            },
+        )
+        .await
     }
 
     pub async fn create_copilot_review_ruleset(&self, repo: &str) -> Result<()> {

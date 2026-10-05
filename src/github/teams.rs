@@ -1,11 +1,10 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use serde::de::DeserializeOwned;
 
 use crate::config::manifest::TeamAccess;
 
 use super::Client;
-use super::actions::{ReadOutcome, classify_read};
+use super::actions::ReadOutcome;
 use super::environments::encode_path_segment;
 use super::pagination;
 use super::response;
@@ -94,7 +93,7 @@ impl Client {
     }
 
     async fn fetch_org_teams_checked(&self) -> Result<ReadOutcome<Vec<Team>>> {
-        collect_paginated_checked(self, |page| {
+        pagination::collect_paginated_checked(self, |page| {
             format!(
                 "/orgs/{}/teams?per_page={}&page={}",
                 self.org, page.per_page, page.number
@@ -117,7 +116,7 @@ impl Client {
     }
 
     pub async fn list_repo_teams_checked(&self, repo: &str) -> Result<ReadOutcome<Vec<Team>>> {
-        collect_paginated_checked(self, |page| {
+        pagination::collect_paginated_checked(self, |page| {
             format!(
                 "/repos/{}/{repo}/teams?per_page={}&page={}",
                 self.org, page.per_page, page.number
@@ -152,41 +151,4 @@ impl Client {
         );
         response::expect_empty(self.delete(&path).await?, "DELETE", &path).await
     }
-}
-
-async fn collect_paginated_checked<T, F>(
-    client: &Client,
-    mut build_path: F,
-) -> Result<ReadOutcome<Vec<T>>>
-where
-    T: DeserializeOwned,
-    F: FnMut(pagination::Page) -> String,
-{
-    let mut page = pagination::Page::default();
-    let mut items = Vec::new();
-
-    loop {
-        let path = build_path(page);
-        let page_items: Vec<T> = match classify_read(client.get(&path).await?, "GET", &path, false)
-            .await?
-        {
-            ReadOutcome::Available(values) => values,
-            ReadOutcome::NotApplicable(reason) => return Ok(ReadOutcome::NotApplicable(reason)),
-            ReadOutcome::PermissionDenied(reason) => {
-                return Ok(ReadOutcome::PermissionDenied(reason));
-            }
-            ReadOutcome::Unavailable(reason) => return Ok(ReadOutcome::Unavailable(reason)),
-        };
-        let count = page_items.len();
-        items.extend(page_items);
-        if count < page.per_page as usize {
-            break;
-        }
-        page = pagination::Page {
-            number: page.number + 1,
-            ..page
-        };
-    }
-
-    Ok(ReadOutcome::Available(items))
 }
