@@ -726,15 +726,23 @@ async fn commit_apply_reports_collection_failures_for_every_repository() {
         parse_commit_command(&["ward", "commit", "apply", "--yes", "--system", "sys"]);
 
     let client = Client::new_for_test("test-org", &server.uri());
+    let audit_dir = tempfile::tempdir().unwrap();
+    let audit_path = audit_dir.path().join("audit.log");
     let result = command
-        .run(
+        .run_with_audit(
             &client,
             &manifest,
             system.as_deref(),
             repo.as_deref(),
             false,
+            || ward::engine::audit_log::AuditLog::open(&audit_path),
         )
         .await;
+    let audit = std::fs::read_to_string(&audit_path).unwrap();
+    assert!(
+        audit.contains("repo-a") && audit.contains("repo-b"),
+        "the injected audit log must receive the entries, got: {audit}"
+    );
 
     assert!(
         result.is_err(),

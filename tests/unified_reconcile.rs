@@ -369,7 +369,9 @@ async fn apply_files_routes_through_dedicated_branch_and_pull_request() {
     )]));
 
     let client = Client::new_for_test("test-org", &server.uri());
-    let audit = ward::engine::audit_log::AuditLog::new().unwrap();
+    let audit_dir = tempfile::tempdir().unwrap();
+    let audit =
+        ward::engine::audit_log::AuditLog::open(audit_dir.path().join("audit.log")).unwrap();
     let repos = vec![test_repo(repo)];
     let report = unified::apply(
         &client,

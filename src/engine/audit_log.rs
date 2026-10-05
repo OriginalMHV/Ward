@@ -27,7 +27,12 @@ impl AuditLog {
         let dir = dirs_path()?;
         fs::create_dir_all(&dir).context("Failed to create ~/.ward/ directory")?;
 
-        let path = dir.join("audit.log");
+        Self::open(dir.join("audit.log"))
+    }
+
+    /// Open (or create) an audit log at `path`, appending to existing entries.
+    pub fn open(path: impl Into<PathBuf>) -> Result<Self> {
+        let path = path.into();
         let file = OpenOptions::new()
             .create(true)
             .append(true)

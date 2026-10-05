@@ -42,6 +42,20 @@ impl ApplyCommand {
         repo: Option<&str>,
         json: bool,
     ) -> Result<()> {
+        self.run_with_audit(client, manifest, system, repo, json, AuditLog::new)
+            .await
+    }
+
+    /// As [`Self::run`], with the audit log opened by `open_audit` when an apply starts.
+    pub async fn run_with_audit(
+        &self,
+        client: &Client,
+        manifest: &Manifest,
+        system: Option<&str>,
+        repo: Option<&str>,
+        json: bool,
+        open_audit: impl FnOnce() -> Result<AuditLog>,
+    ) -> Result<()> {
         let options = UnifiedOptions {
             categories: unified::parse_categories(&self.categories)?,
             allow_high_impact: self.allow_high_impact,
@@ -52,6 +66,7 @@ impl ApplyCommand {
             manifest,
             self.yes,
             options,
+            open_audit,
             CategoryRun {
                 system,
                 repo,
@@ -71,6 +86,7 @@ pub(crate) async fn run_canonical_apply(
     manifest: &Manifest,
     yes: bool,
     options: UnifiedOptions,
+    open_audit: impl FnOnce() -> Result<AuditLog>,
     run: CategoryRun<'_>,
 ) -> Result<UnifiedReport> {
     crate::cli::plan::require_canonical_categories(manifest, run.command)?;
@@ -108,7 +124,7 @@ pub(crate) async fn run_canonical_apply(
         }
     }
 
-    let audit = AuditLog::new()?;
+    let audit = open_audit()?;
     let report = unified::apply_prepared(client, manifest, prepared, &options, &audit).await;
 
     if run.json {
