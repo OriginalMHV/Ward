@@ -508,7 +508,7 @@ pub fn plan_files_category(
         };
 
         if actual_file.kind != ScopedRepoFileKind::Managed {
-            upserts.push(desired_file.clone());
+            issues.push(unsupported_blocker(actual_file, "overwrite"));
             continue;
         }
 
@@ -534,19 +534,16 @@ pub fn plan_files_category(
 
         for file in &actual.scoped_files {
             if desired_paths.contains(&file.path) {
-                if file.kind != ScopedRepoFileKind::Managed {
-                    issues.push(prune_blocker_for_unsupported(file));
-                }
                 continue;
             }
 
             if file.kind != ScopedRepoFileKind::Managed {
-                issues.push(prune_blocker_for_unsupported(file));
+                issues.push(unsupported_blocker(file, "prune"));
                 continue;
             }
 
             let Some(mode) = file.mode else {
-                issues.push(prune_blocker_for_unsupported(file));
+                issues.push(unsupported_blocker(file, "prune"));
                 continue;
             };
 
@@ -818,9 +815,11 @@ fn coverage_entry(
     }
 }
 
-fn prune_blocker_for_unsupported(file: &ScopedRepoFile) -> FilesIssue {
+fn unsupported_blocker(file: &ScopedRepoFile, action: &str) -> FilesIssue {
     let (kind, subject) = match file.kind {
-        ScopedRepoFileKind::Managed => unreachable!("managed file cannot be a prune blocker"),
+        ScopedRepoFileKind::Managed => {
+            unreachable!("managed file cannot be an unsupported-entry blocker")
+        }
         ScopedRepoFileKind::UnsupportedMode => (
             FilesIssueKind::UnknownMode,
             format!("unsupported Git mode {}", file.raw_mode),
@@ -839,7 +838,7 @@ fn prune_blocker_for_unsupported(file: &ScopedRepoFile) -> FilesIssue {
         kind,
         severity: FilesIssueSeverity::Blocker,
         message: format!(
-            "Refusing to prune {} because Ward collected it as {subject} and cannot faithfully round-trip it",
+            "Refusing to {action} {} because Ward collected it as {subject} and cannot faithfully round-trip it",
             file.path
         ),
     }
