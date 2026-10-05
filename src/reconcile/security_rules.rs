@@ -845,10 +845,10 @@ pub fn plan_security_category(
             dependabot_security_updates = Some(value);
         }
 
-        if let Some(value) = desired.private_vulnerability_reporting {
-            if actual.private_vulnerability_reporting != Some(value) {
-                private_vulnerability_reporting = Some(value);
-            }
+        if let Some(value) = desired.private_vulnerability_reporting
+            && actual.private_vulnerability_reporting != Some(value)
+        {
+            private_vulnerability_reporting = Some(value);
         }
 
         if let Some(codeql) = &desired.codeql_default_setup {

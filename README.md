@@ -47,7 +47,7 @@ cd Ward
 cargo install --path .
 ```
 
-Source installation requires Rust 1.85 or newer. Ward reads authentication from `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`.
+Source installation requires Rust 1.88 or newer. Ward reads authentication from `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`.
 
 ```bash
 gh auth status
