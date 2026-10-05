@@ -1,3 +1,4 @@
+use crate::outcome::Outcome;
 use anyhow::Result;
 use clap::Args;
 
@@ -69,7 +70,7 @@ fn fail_when_drifted(report: &UnifiedReport) -> Result<()> {
         return Ok(());
     }
 
-    anyhow::bail!(
+    Err(Outcome::Drift(format!(
         "Drift check found {} actionable change(s), {} deferred change(s), {} blocked category result(s){}; see report above",
         report.actionable,
         report.deferred,
@@ -79,7 +80,8 @@ fn fail_when_drifted(report: &UnifiedReport) -> Result<()> {
         } else {
             ""
         }
-    );
+    ))
+    .into())
 }
 
 #[cfg(test)]
@@ -87,6 +89,20 @@ mod tests {
     use clap::Parser;
 
     use super::*;
+
+    #[test]
+    fn drift_is_an_outcome_and_a_clean_report_is_not() {
+        let clean = UnifiedReport::from_repos(Vec::new());
+        assert!(fail_when_drifted(&clean).is_ok());
+
+        let mut drifted = UnifiedReport::from_repos(Vec::new());
+        drifted.actionable = 1;
+        let error = fail_when_drifted(&drifted).unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<Outcome>(),
+            Some(Outcome::Drift(_))
+        ));
+    }
 
     #[test]
     fn drift_check_defaults_to_all_categories() {

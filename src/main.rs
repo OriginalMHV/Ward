@@ -1,3 +1,5 @@
+use std::process::ExitCode;
+
 use anyhow::Result;
 use clap::Parser;
 use clap_complete::generate;
@@ -8,7 +10,17 @@ use ward::config::Manifest;
 use ward::github::Client;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> ExitCode {
+    match run().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("Error: {error:?}");
+            ward::outcome::exit_code(&error)
+        }
+    }
+}
+
+async fn run() -> Result<()> {
     let cli = Cli::parse();
 
     // Handle completions early, before initializing tracing

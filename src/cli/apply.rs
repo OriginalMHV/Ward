@@ -7,6 +7,7 @@ use crate::cli::plan::CategoryRun;
 use crate::config::Manifest;
 use crate::engine::audit_log::AuditLog;
 use crate::github::Client;
+use crate::outcome::Outcome;
 use crate::reconcile::unified::{self, UnifiedOptions, UnifiedReport};
 
 /// Apply the desired manifest state to existing repositories.
@@ -134,10 +135,11 @@ pub(crate) async fn run_canonical_apply(
     }
 
     if report.has_failures() {
-        anyhow::bail!(
+        return Err(Outcome::ApplyFailed(format!(
             "Apply completed with {} blocked category result(s) and failures; see report above",
             report.blocked
-        );
+        ))
+        .into());
     }
 
     Ok(report)

@@ -4,6 +4,7 @@ use console::style;
 
 use crate::config::auth;
 use crate::config::manifest::Manifest;
+use crate::outcome::Outcome;
 
 #[derive(Args)]
 pub struct DoctorCommand;
@@ -92,6 +93,9 @@ impl DoctorCommand {
         }
 
         println!();
+        if fail > 0 {
+            return Err(Outcome::ChecksFailed(format!("{fail} doctor check(s) failed")).into());
+        }
         Ok(())
     }
 }

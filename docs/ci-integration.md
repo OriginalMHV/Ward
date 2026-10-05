@@ -53,6 +53,9 @@ For organization-wide operations, a personal access token or GitHub App token wi
 |------|---------|
 | `0` | All repos match desired state |
 | `1` | Drift detected |
+| `2` | Ward could not run the check (authentication, network, configuration, arguments) |
+
+All Ward commands share these codes. See [Exit codes](commands.md#exit-codes).
 
 ### What it checks
 

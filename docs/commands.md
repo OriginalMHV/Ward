@@ -18,6 +18,18 @@ These flags are available on all commands:
 | `--config <PATH>` | string | `./ward.toml` | Path to config file |
 | `-v` / `-vv` / `-vvv` | count | `0` | Increase log verbosity |
 
+## Exit codes
+
+Every command uses the same exit codes.
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success. The state is clean, or the command finished without a problem. |
+| `1` | Ward ran and found a problem: drift found, a failed check (`ward doctor`), or a failed or blocked apply category. |
+| `2` | Ward could not run: authentication, network, configuration parse error, or invalid arguments. |
+
+`ward doctor` exits `0` when it reports only warnings. `ward settings apply` and `ward teams apply` print failed repositories but still exit `0`.
+
 ---
 
 ## `ward repos`
@@ -220,9 +232,7 @@ ward drift check --repo my-service
 ward drift check --system backend --json
 ```
 
-Exit codes:
-- `0` -- all repos in sync with `ward.toml`
-- `1` -- drift detected: actionable, blocked, or deferred changes, or state in a managed category that Ward could not read
+Exit code `0` means all repos are in sync with `ward.toml`. Exit code `1` means drift: actionable, blocked, or deferred changes, or state in a managed category that Ward could not read. Exit code `2` means Ward could not run the check. See [Exit codes](#exit-codes).
 
 Checks every configured category by default. Use repeatable `--category <CATEGORY>` filters to narrow the drift gate.
 
@@ -543,7 +553,7 @@ Ward Doctor
   Everything looks good.
 ```
 
-Exit codes: `0` all passed, `1` any errors, `2` warnings only.
+Exit code `1` means at least one check failed. Warnings alone exit `0`. See [Exit codes](#exit-codes).
 
 ## `ward plan`
 
