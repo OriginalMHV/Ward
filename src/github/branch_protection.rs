@@ -356,43 +356,6 @@ impl Client {
         response::expect_empty(self.put_json(&path, &body).await?, "PUT", &path).await
     }
 
-    pub async fn update_branch_protection(
-        &self,
-        repo: &str,
-        branch: &str,
-        config: &crate::config::manifest::BranchProtectionConfig,
-    ) -> Result<()> {
-        self.update_branch_protection_detailed(
-            repo,
-            branch,
-            &DesiredBranchProtection {
-                required_pull_request_reviews: config.enabled,
-                required_approving_review_count: config.required_approvals,
-                dismiss_stale_reviews: config.dismiss_stale_reviews,
-                require_code_owner_reviews: config.require_code_owner_reviews,
-                require_last_push_approval: None,
-                required_status_checks: config.require_status_checks,
-                strict_status_checks: config.strict_status_checks,
-                status_check_contexts: Vec::new(),
-                status_checks: Vec::new(),
-                push_restrictions: ActorSet::default(),
-                dismissal_restrictions: ActorSet::default(),
-                pull_request_bypass_allowances: ActorSet::default(),
-                enforce_admins: config.enforce_admins,
-                required_linear_history: config.required_linear_history,
-                allow_force_pushes: config.allow_force_pushes,
-                allow_deletions: config.allow_deletions,
-                block_creations: None,
-                require_conversation_resolution: None,
-                require_signed_commits: None,
-                lock_branch: None,
-                allow_fork_syncing: None,
-                required_reviewers: None,
-            },
-        )
-        .await
-    }
-
     pub async fn delete_branch_protection(&self, repo: &str, branch: &str) -> Result<()> {
         let branch = encode_branch(branch);
         let path = format!("/repos/{}/{repo}/branches/{branch}/protection", self.org);

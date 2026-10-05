@@ -118,12 +118,6 @@ fn status_is_enabled(status: Option<&SecurityFeatureStatus>) -> bool {
     status.is_some_and(|value| value.status == "enabled")
 }
 
-fn security_status(status: bool) -> serde_json::Value {
-    json!({
-        "status": if status { "enabled" } else { "disabled" }
-    })
-}
-
 /// Extract secret-scanning fields from a pre-fetched `security_and_analysis` JSON value.
 #[cfg(test)]
 fn extract_scanning_from_json(sa_value: &serde_json::Value) -> (bool, bool, bool) {
@@ -430,23 +424,6 @@ impl Client {
     pub async fn disable_dependabot_security_updates(&self, repo: &str) -> Result<()> {
         let path = format!("/repos/{}/{repo}/automated-security-fixes", self.org);
         response::expect_empty(self.delete(&path).await?, "DELETE", &path).await
-    }
-
-    pub async fn set_security_features(
-        &self,
-        repo: &str,
-        secret_scanning: bool,
-        ai_detection: bool,
-        push_protection: bool,
-    ) -> Result<()> {
-        let body = json!({
-            "secret_scanning": security_status(secret_scanning),
-            "secret_scanning_ai_detection": security_status(ai_detection),
-            "secret_scanning_push_protection": security_status(push_protection),
-            "advanced_security": security_status(secret_scanning || ai_detection || push_protection),
-        });
-        self.update_repository_security_and_analysis(repo, &body)
-            .await
     }
 }
 

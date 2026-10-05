@@ -104,30 +104,6 @@ async fn test_enable_dependabot_alerts() {
 }
 
 #[tokio::test]
-async fn test_set_security_features() {
-    let server = MockServer::start().await;
-
-    Mock::given(method("PATCH"))
-        .and(path("/repos/test-org/my-repo"))
-        .and(body_partial_json(json!({
-            "security_and_analysis": {
-                "secret_scanning": { "status": "enabled" },
-                "secret_scanning_ai_detection": { "status": "enabled" },
-                "secret_scanning_push_protection": { "status": "enabled" }
-            }
-        })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"name": "my-repo"})))
-        .mount(&server)
-        .await;
-
-    let client = Client::new_for_test("test-org", &server.uri());
-    client
-        .set_security_features("my-repo", true, true, true)
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
 async fn test_detach_code_security_configurations_sends_json_through_shared_client() {
     let server = MockServer::start().await;
 

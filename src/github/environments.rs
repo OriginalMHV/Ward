@@ -241,20 +241,6 @@ impl Client {
         Ok(ReadOutcome::Available(items))
     }
 
-    /// `GET /repos/{owner}/{repo}/environments/{environment_name}`.
-    /// Returns `Ok(None)` on 404 (no such environment).
-    pub async fn get_environment(
-        &self,
-        repo: &str,
-        environment_name: &str,
-    ) -> Result<Option<Environment>> {
-        let env = encode_path_segment(environment_name);
-        let path = format!("/repos/{}/{repo}/environments/{env}", self.org());
-        response::optional_json(self.get(&path).await?, "GET", &path)
-            .await
-            .context("Failed to parse environment response")
-    }
-
     /// `PUT /repos/{owner}/{repo}/environments/{environment_name}`. Creates the
     /// environment if it does not already exist. May respond `422` if the
     /// requested configuration is invalid (e.g. reviewers exceed the allowed

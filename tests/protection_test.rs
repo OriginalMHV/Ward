@@ -4,7 +4,6 @@ use serde_json::json;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use ward::config::manifest::BranchProtectionConfig;
 use ward::github::Client;
 
 #[tokio::test]
@@ -69,38 +68,6 @@ async fn test_get_branch_protection_none() {
         .unwrap();
 
     assert!(protection.is_none());
-}
-
-#[tokio::test]
-async fn test_update_branch_protection() {
-    let server = MockServer::start().await;
-
-    Mock::given(method("PUT"))
-        .and(path("/repos/test-org/my-repo/branches/main/protection"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "url": "https://api.github.com/repos/test-org/my-repo/branches/main/protection"
-        })))
-        .mount(&server)
-        .await;
-
-    let config = BranchProtectionConfig {
-        enabled: true,
-        required_approvals: 1,
-        dismiss_stale_reviews: true,
-        require_code_owner_reviews: false,
-        require_status_checks: true,
-        strict_status_checks: true,
-        enforce_admins: false,
-        required_linear_history: false,
-        allow_force_pushes: false,
-        allow_deletions: false,
-    };
-
-    let client = Client::new_for_test("test-org", &server.uri());
-    client
-        .update_branch_protection("my-repo", "main", &config)
-        .await
-        .unwrap();
 }
 
 #[tokio::test]

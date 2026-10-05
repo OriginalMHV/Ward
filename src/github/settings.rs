@@ -305,26 +305,6 @@ impl Client {
         response::expect_empty(self.put_json(&path, &body).await?, "PUT", &path).await
     }
 
-    pub async fn get_repository_graphql_settings(
-        &self,
-        repo: &str,
-    ) -> Result<GraphqlRepositorySettings> {
-        match self
-            .get_repository_graphql_settings_classified(repo)
-            .await?
-        {
-            ClassifiedApiResponse::Success(settings) => Ok(settings),
-            ClassifiedApiResponse::NoContent => Err(anyhow::anyhow!(
-                "POST /graphql repository settings returned no content"
-            )),
-            ClassifiedApiResponse::Forbidden(message)
-            | ClassifiedApiResponse::NotFound(message)
-            | ClassifiedApiResponse::Unprocessable(message)
-            | ClassifiedApiResponse::Conflict(message)
-            | ClassifiedApiResponse::Other(message) => Err(anyhow::Error::msg(message)),
-        }
-    }
-
     pub async fn get_repository_graphql_settings_classified(
         &self,
         repo: &str,
