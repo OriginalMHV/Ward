@@ -63,3 +63,21 @@ fn removed_config_subcommands_exit_with_two_and_name_the_replacement() {
         assert!(stderr.contains("ward config edit"), "{stderr}");
     }
 }
+
+#[test]
+fn removed_repos_inspect_exits_with_two_and_names_the_replacement() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ward.toml");
+    std::fs::write(&path, "[org]\nname = \"test-org\"\n").unwrap();
+    let home = tempfile::tempdir().unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ward"))
+        .args(["--config", path.to_str().unwrap(), "repos", "inspect", "x"])
+        .env("HOME", home.path())
+        .env("GH_TOKEN", "dummy-token")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("ward audit --repo"));
+}

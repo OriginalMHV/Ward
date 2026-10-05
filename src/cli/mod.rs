@@ -95,7 +95,7 @@ pub enum Command {
     Config(config_cmd::ConfigCommand),
 
     // --- Inspect ---
-    /// List and inspect repositories
+    /// List repositories
     #[command(display_order = 10)]
     Repos(repos::ReposCommand),
 

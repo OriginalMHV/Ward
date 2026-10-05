@@ -34,7 +34,7 @@ Every command uses the same exit codes.
 
 ## `ward repos`
 
-List and inspect repositories.
+List repositories.
 
 ### `ward repos list`
 
@@ -47,15 +47,9 @@ ward repos list --org my-org
 
 Output columns: Repository, Language, Visibility, Default Branch.
 
-### `ward repos inspect`
+### Removed: `ward repos inspect`
 
-Deep inspection of a single repository, including security feature status.
-
-```bash
-ward repos inspect my-service
-```
-
-Shows: full repo metadata, Dependabot Alerts, Dependabot Security Updates, Secret Scanning, AI Detection, Push Protection.
+`ward repos inspect` was removed. It exits with code 2. Use `ward audit --repo NAME` instead.
 
 ---
 
