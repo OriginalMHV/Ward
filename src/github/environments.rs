@@ -8,22 +8,15 @@
 //! since GitHub's reference docs only describe the field as "array of object".
 
 use anyhow::{Context, Result};
-use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
 
 use super::Client;
 use super::actions::{
     ReadOutcome, WriteOutcome, classify_read, write_delete, write_empty, write_json,
 };
+use super::encoding::encode_path_segment;
 use super::pagination;
 use super::response;
-
-/// Percent-encode a single path segment (e.g. an environment name), which may
-/// legally contain characters such as `/`, spaces, or other symbols that must
-/// not be interpreted as path separators or otherwise misparsed by the API.
-pub(crate) fn encode_path_segment(segment: &str) -> String {
-    utf8_percent_encode(segment, NON_ALPHANUMERIC).to_string()
-}
 
 /// A reviewer entry on a `required_reviewers` protection rule.
 #[derive(Debug, Clone, Deserialize)]

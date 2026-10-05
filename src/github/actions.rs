@@ -11,7 +11,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use super::Client;
-use super::environments::encode_path_segment;
+use super::encoding::encode_path_segment;
 use super::pagination;
 use super::response::{self, ClassifiedResponse};
 

@@ -5,7 +5,7 @@ use crate::config::manifest::TeamAccess;
 
 use super::Client;
 use super::actions::ReadOutcome;
-use super::environments::encode_path_segment;
+use super::encoding::encode_path_segment;
 use super::pagination;
 use super::response;
 

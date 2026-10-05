@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use super::Client;
 use super::actions::{ReadOutcome, WriteOutcome, classify_read, write_delete, write_empty};
-use super::environments::encode_path_segment;
+use super::encoding::encode_path_segment;
 use super::pagination;
 use super::response;
 

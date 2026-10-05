@@ -4,6 +4,7 @@ use serde_json::json;
 
 use super::Client;
 use super::actions::{ReadOutcome, classify_read};
+use super::encoding::encode_unreserved;
 use super::pagination;
 use super::response;
 
@@ -145,19 +146,6 @@ pub struct DesiredBranchProtection {
     pub required_reviewers: Option<serde_json::Value>,
 }
 
-fn encode_branch(branch: &str) -> String {
-    let mut encoded = String::with_capacity(branch.len());
-    for byte in branch.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(byte as char)
-            }
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
-}
-
 fn actor_slugs(actors: &[AppActor]) -> Vec<String> {
     actors.iter().map(|actor| actor.slug.clone()).collect()
 }
@@ -198,7 +186,7 @@ impl Client {
         repo: &str,
         branch: &str,
     ) -> Result<ReadOutcome<DetailedBranchProtection>> {
-        let branch = encode_branch(branch);
+        let branch = encode_unreserved(branch);
         let path = format!("/repos/{}/{repo}/branches/{branch}/protection", self.org);
         classify_read(self.get(&path).await?, "GET", &path, true)
             .await
@@ -351,13 +339,13 @@ impl Client {
             body["allow_fork_syncing"] = json!(value);
         }
 
-        let branch = encode_branch(branch);
+        let branch = encode_unreserved(branch);
         let path = format!("/repos/{}/{repo}/branches/{branch}/protection", self.org);
         response::expect_empty(self.put_json(&path, &body).await?, "PUT", &path).await
     }
 
     pub async fn delete_branch_protection(&self, repo: &str, branch: &str) -> Result<()> {
-        let branch = encode_branch(branch);
+        let branch = encode_unreserved(branch);
         let path = format!("/repos/{}/{repo}/branches/{branch}/protection", self.org);
         response::expect_empty(self.delete(&path).await?, "DELETE", &path).await
     }
@@ -368,7 +356,7 @@ impl Client {
         branch: &str,
         enabled: bool,
     ) -> Result<()> {
-        let branch = encode_branch(branch);
+        let branch = encode_unreserved(branch);
         let path = format!(
             "/repos/{}/{repo}/branches/{branch}/protection/required_signatures",
             self.org

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value, json};
 
 use super::Client;
+use super::encoding::encode_unreserved;
 use super::response;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -552,7 +553,7 @@ impl Client {
             body.insert("description".to_owned(), json!(description));
         }
 
-        let encoded_name = encode_path_segment(name);
+        let encoded_name = encode_unreserved(name);
         let path = format!("/repos/{}/{repo}/labels/{encoded_name}", self.org);
         response::expect_json(
             self.patch_json(&path, &Value::Object(body)).await?,
@@ -564,13 +565,13 @@ impl Client {
     }
 
     pub async fn delete_label(&self, repo: &str, name: &str) -> Result<()> {
-        let encoded_name = encode_path_segment(name);
+        let encoded_name = encode_unreserved(name);
         let path = format!("/repos/{}/{repo}/labels/{encoded_name}", self.org);
         response::expect_empty(self.delete(&path).await?, "DELETE", &path).await
     }
 
     pub async fn branch_exists(&self, repo: &str, branch: &str) -> Result<bool> {
-        let encoded_branch = encode_path_segment(branch);
+        let encoded_branch = encode_unreserved(branch);
         let path = format!("/repos/{}/{repo}/branches/{encoded_branch}", self.org);
         Ok(
             response::optional_json::<Value>(self.get(&path).await?, "GET", &path)
@@ -658,26 +659,4 @@ async fn conflict_message(response: reqwest::Response, method: &str, path: &str)
     } else {
         format!("{method} {path} failed with HTTP {status}: {message}")
     }
-}
-
-fn encode_path_segment(segment: &str) -> String {
-    let mut encoded = String::with_capacity(segment.len());
-    for byte in segment.as_bytes() {
-        if matches!(
-            byte,
-            b'A'..=b'Z'
-                | b'a'..=b'z'
-                | b'0'..=b'9'
-                | b'-'
-                | b'.'
-                | b'_'
-                | b'~'
-        ) {
-            encoded.push(char::from(*byte));
-        } else {
-            encoded.push('%');
-            encoded.push_str(&format!("{byte:02X}"));
-        }
-    }
-    encoded
 }

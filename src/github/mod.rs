@@ -5,6 +5,7 @@ pub mod client;
 pub mod commits;
 pub mod contents;
 pub mod dependency_graph;
+mod encoding;
 pub mod environments;
 pub mod integrations;
 mod metadata;
