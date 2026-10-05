@@ -1167,13 +1167,10 @@ pub fn plan_actions_category(
         if wants_change(
             &wanted.fork_pull_request_contributor_approval,
             &current.fork_pull_request_contributor_approval,
-        ) {
-            settings_changes.push(ActionsSettingChange::ForkPrContributorApproval {
-                approval_policy: wanted
-                    .fork_pull_request_contributor_approval
-                    .clone()
-                    .unwrap(),
-            });
+        ) && let Some(approval_policy) = wanted.fork_pull_request_contributor_approval.clone()
+        {
+            settings_changes
+                .push(ActionsSettingChange::ForkPrContributorApproval { approval_policy });
         }
 
         // Private/internal-repo-only fork PR workflow policy. Both manifest
