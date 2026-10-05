@@ -560,11 +560,9 @@ pub async fn plan(
     repos: &[Repository],
     options: &UnifiedOptions,
 ) -> Result<UnifiedReport> {
-    let mut repo_reports = Vec::with_capacity(repos.len());
     let branch = sync_branch(manifest);
-    for repository in repos {
-        let plan = plan_repo(client, manifest, repository, options).await;
-        let mut plan = plan;
+    let repo_reports = crate::reconcile::map_buffered(repos, |repository| async {
+        let mut plan = plan_repo(client, manifest, repository, options).await;
         let existing_config_pr =
             if !plan.plans_config_pull_request() && plan.has_file_dependent_changes() {
                 match client.find_open_pull_request(&plan.repo, &branch).await {
@@ -577,8 +575,9 @@ pub async fn plan(
             } else {
                 false
             };
-        repo_reports.push(plan.to_report_with_config_pr(existing_config_pr));
-    }
+        plan.to_report_with_config_pr(existing_config_pr)
+    })
+    .await;
     Ok(UnifiedReport::from_repos(repo_reports))
 }
 
@@ -590,15 +589,42 @@ async fn plan_repo(
 ) -> RepoPlan {
     let repo = repository.name.clone();
     let desired_categories = manifest.categories_for_repo(&repo);
-    let mut categories = Vec::new();
+    let selected: Vec<Category> = Category::apply_order()
+        .into_iter()
+        .filter(|category| options.includes(*category))
+        .collect();
 
-    for category in Category::apply_order() {
-        if !options.includes(category) {
-            continue;
-        }
-        let planned = plan_category(client, &desired_categories, &repo, category, options).await;
-        categories.push(planned);
-    }
+    // The repository and security categories both read `GET /repos/{repo}`.
+    // Fetch it once. On failure each category falls back to its own read.
+    let needs_repo_read = (selected.contains(&Category::Repository)
+        && desired_categories.repository.is_some())
+        || (selected.contains(&Category::Security) && desired_categories.security.is_some());
+    let repo_data = if needs_repo_read {
+        client.get_repo_value(&repo).await.ok()
+    } else {
+        None
+    };
+    let shared = SharedRepoData {
+        general: repo_data
+            .as_ref()
+            .and_then(|value| serde_json::from_value(value.clone()).ok()),
+        security: repo_data
+            .as_ref()
+            .and_then(|value| serde_json::from_value(value.clone()).ok()),
+        default_branch: &repository.default_branch,
+    };
+
+    let categories = futures_util::future::join_all(selected.iter().map(|category| {
+        plan_category(
+            client,
+            &desired_categories,
+            &repo,
+            *category,
+            options,
+            &shared,
+        )
+    }))
+    .await;
 
     RepoPlan {
         repo,
@@ -607,19 +633,33 @@ async fn plan_repo(
     }
 }
 
+/// Views of one repository fetch, shared by the categories planned for it.
+struct SharedRepoData<'a> {
+    general: Option<crate::github::settings::RepositoryGeneralSettings>,
+    security: Option<crate::github::security::RepositorySecurityBaseline>,
+    default_branch: &'a str,
+}
+
 async fn plan_category(
     client: &Client,
     categories: &ManifestCategories,
     repo: &str,
     category: Category,
     options: &UnifiedOptions,
+    shared: &SharedRepoData<'_>,
 ) -> CategoryPlan {
     match category {
-        Category::Repository => plan_repository(client, categories, repo, options).await,
+        Category::Repository => {
+            plan_repository(client, categories, repo, options, shared.general.clone()).await
+        }
         Category::Files => plan_files(client, categories, repo).await,
-        Category::Security => plan_security(client, categories, repo).await,
+        Category::Security => {
+            plan_security(client, categories, repo, shared.security.clone()).await
+        }
         Category::Rulesets => plan_rulesets(client, categories, repo).await,
-        Category::BranchProtection => plan_branch_protection(client, categories, repo).await,
+        Category::BranchProtection => {
+            plan_branch_protection(client, categories, repo, shared.default_branch).await
+        }
         Category::Actions => plan_actions(client, categories, repo).await,
         Category::Environments => plan_environments(client, categories, repo).await,
         Category::Access => plan_access(client, categories, repo).await,
@@ -665,12 +705,17 @@ async fn plan_repository(
     categories: &ManifestCategories,
     repo: &str,
     options: &UnifiedOptions,
+    prefetched: Option<crate::github::settings::RepositoryGeneralSettings>,
 ) -> CategoryPlan {
     let Some(desired) = build_general_desired(categories) else {
         return absent_category(Category::Repository);
     };
     let disposition = desired.repository.policy.disposition;
-    let current = match general::collect(client, repo).await {
+    let collected = match prefetched {
+        Some(rest) => general::collect_with_rest(client, repo, rest).await,
+        None => general::collect(client, repo).await,
+    };
+    let current = match collected {
         Ok(state) => state,
         Err(error) => return collection_failed(Category::Repository, disposition, error),
     };
@@ -761,16 +806,28 @@ async fn plan_security(
     client: &Client,
     categories: &ManifestCategories,
     repo: &str,
+    prefetched: Option<crate::github::security::RepositorySecurityBaseline>,
 ) -> CategoryPlan {
     let Some(desired) = categories.security.clone() else {
         return absent_category(Category::Security);
     };
     let disposition = desired.policy.disposition;
-    let collection =
-        match security_rules::collect_security_category(client, repo, Some(&desired)).await {
-            Ok(collection) => collection,
-            Err(error) => return collection_failed(Category::Security, disposition, error),
-        };
+    let collected = match prefetched {
+        Some(baseline) => {
+            security_rules::collect_security_category_with_baseline(
+                client,
+                repo,
+                baseline,
+                Some(&desired),
+            )
+            .await
+        }
+        None => security_rules::collect_security_category(client, repo, Some(&desired)).await,
+    };
+    let collection = match collected {
+        Ok(collection) => collection,
+        Err(error) => return collection_failed(Category::Security, disposition, error),
+    };
     let coverage = collection.coverage.clone();
     let plan = match security_rules::plan_security_category(&desired, &collection) {
         Ok(plan) => plan,
@@ -841,14 +898,16 @@ async fn plan_branch_protection(
     client: &Client,
     categories: &ManifestCategories,
     repo: &str,
+    default_branch: &str,
 ) -> CategoryPlan {
     let Some(desired) = categories.branch_protection.clone() else {
         return absent_category(Category::BranchProtection);
     };
     let disposition = desired.policy.disposition;
-    let collection = match security_rules::collect_branch_protection_category(
+    let collection = match security_rules::collect_branch_protection_category_for_branch(
         client,
         repo,
+        default_branch.to_owned(),
         Some(&desired),
     )
     .await
@@ -1083,14 +1142,9 @@ pub async fn prepare_apply(
     repos: &[Repository],
     options: &UnifiedOptions,
 ) -> Result<PreparedApply> {
-    let mut plans = Vec::with_capacity(repos.len());
-    for repository in repos {
-        plans.push(plan_repo(client, manifest, repository, options).await);
-    }
-
     let branch = sync_branch(manifest);
-    let mut prepared = Vec::with_capacity(plans.len());
-    for plan in plans {
+    let prepared = crate::reconcile::map_buffered(repos, |repository| async {
+        let plan = plan_repo(client, manifest, repository, options).await;
         let existing_config_pr = if plan.has_file_dependent_changes() {
             client
                 .find_open_pull_request(&plan.repo, &branch)
@@ -1099,8 +1153,11 @@ pub async fn prepare_apply(
         } else {
             false
         };
-        prepared.push((plan, existing_config_pr));
-    }
+        Ok::<_, anyhow::Error>((plan, existing_config_pr))
+    })
+    .await
+    .into_iter()
+    .collect::<Result<Vec<_>>>()?;
     Ok(PreparedApply { prepared })
 }
 

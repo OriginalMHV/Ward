@@ -314,6 +314,15 @@ pub struct GeneralVerification {
 
 pub async fn collect(client: &Client, repo: &str) -> Result<CollectedGeneralState> {
     let rest = client.get_repository_general_settings(repo).await?;
+    collect_with_rest(client, repo, rest).await
+}
+
+/// Collect general state from an already fetched `GET /repos/{repo}` response.
+pub async fn collect_with_rest(
+    client: &Client,
+    repo: &str,
+    rest: RepositoryGeneralSettings,
+) -> Result<CollectedGeneralState> {
     let mut coverage = unsupported_repository_settings_coverage();
 
     let graphql = match client

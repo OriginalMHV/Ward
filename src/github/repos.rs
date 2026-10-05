@@ -140,6 +140,15 @@ impl Client {
         Ok(matched)
     }
 
+    /// Get a single repository as raw JSON, for callers that deserialize it
+    /// into several views and want one request instead of one per view.
+    pub async fn get_repo_value(&self, repo_name: &str) -> Result<serde_json::Value> {
+        let path = format!("/repos/{}/{repo_name}", self.org);
+        response::expect_json(self.get(&path).await?, "GET", &path)
+            .await
+            .context("Failed to parse repo response")
+    }
+
     /// Get a single repository.
     pub async fn get_repo(&self, repo_name: &str) -> Result<Repository> {
         let path = format!("/repos/{}/{repo_name}", self.org);

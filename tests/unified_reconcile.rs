@@ -648,3 +648,71 @@ async fn prepare_apply_reports_the_plan_without_mutating() {
         .count();
     assert_eq!(mutations, 0, "preparing the apply must not mutate");
 }
+
+#[tokio::test]
+async fn plan_reads_the_repository_endpoint_once_per_repository() {
+    use ward::config::manifest::BranchProtectionCategoryV2;
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/my-repo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 1,
+            "name": "my-repo",
+            "full_name": "test-org/my-repo",
+            "archived": false,
+            "default_branch": "main",
+            "visibility": "private"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+
+    let mut manifest = base_manifest();
+    manifest.categories.repository = Some(RepositoryCategoryV2 {
+        policy: CategoryPolicy::observe(),
+        settings: None,
+        metadata: None,
+        custom_properties: Vec::new(),
+        immutable_releases: None,
+        references: Vec::new(),
+    });
+    manifest.categories.security = Some(SecurityCategoryV2::observe_sensitive());
+    manifest.categories.branch_protection = Some(BranchProtectionCategoryV2::observe());
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let repos = vec![test_repo("my-repo")];
+    let _ = unified::plan(
+        &client,
+        &manifest,
+        &repos,
+        &options(
+            vec![
+                Category::Repository,
+                Category::Security,
+                Category::BranchProtection,
+            ],
+            false,
+        ),
+    )
+    .await
+    .unwrap();
+
+    let repo_reads = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|request| {
+            request.method.as_str() == "GET" && request.url.path() == "/repos/test-org/my-repo"
+        })
+        .count();
+    assert_eq!(repo_reads, 1);
+}

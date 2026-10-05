@@ -227,10 +227,21 @@ pub async fn collect_security_category(
     repo: &str,
     category: Option<&SecurityCategoryV2>,
 ) -> Result<SecurityCollection> {
+    let baseline = client.get_repository_security_baseline(repo).await?;
+    collect_security_category_with_baseline(client, repo, baseline, category).await
+}
+
+/// Collect security state from an already fetched `GET /repos/{repo}` response.
+pub async fn collect_security_category_with_baseline(
+    client: &Client,
+    repo: &str,
+    baseline: RepositorySecurityBaseline,
+    category: Option<&SecurityCategoryV2>,
+) -> Result<SecurityCollection> {
     let RepositorySecurityBaseline {
         id: repository_id,
         security_and_analysis,
-    } = client.get_repository_security_baseline(repo).await?;
+    } = baseline;
     let mut issues = Vec::new();
     let mut coverage = vec![collected_entry(
         ManifestCategoryName::Security,
@@ -1401,7 +1412,17 @@ pub async fn collect_branch_protection_category(
     category: Option<&BranchProtectionCategoryV2>,
 ) -> Result<BranchProtectionCollection> {
     let repository = client.get_repo(repo).await?;
-    let default_branch_name = repository.default_branch;
+    collect_branch_protection_category_for_branch(client, repo, repository.default_branch, category)
+        .await
+}
+
+/// Collect branch protection when the default branch is already known.
+pub async fn collect_branch_protection_category_for_branch(
+    client: &Client,
+    repo: &str,
+    default_branch_name: String,
+    category: Option<&BranchProtectionCategoryV2>,
+) -> Result<BranchProtectionCollection> {
     let branches = client.list_protected_branches(repo).await?;
 
     let issues = Vec::new();
