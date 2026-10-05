@@ -2202,6 +2202,7 @@ dependencies = [
  "console",
  "crypto_box",
  "dialoguer",
+ "futures-util",
  "glob-match",
  "percent-encoding",
  "regex",

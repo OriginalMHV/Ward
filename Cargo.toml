@@ -67,6 +67,9 @@ crypto_box = { version = "0.9", features = ["seal"] }
 # Percent-encoding for environment names in Actions/environments API paths
 percent-encoding = "2.3"
 
+# Ordered, bounded concurrency for per-repository planning
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+
 [dev-dependencies]
 tempfile = "3"
 wiremock = "0.6"
