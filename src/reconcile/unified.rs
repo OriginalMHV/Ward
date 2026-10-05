@@ -1242,12 +1242,11 @@ async fn apply_files(
 
     let message = format!("{commit_prefix}sync managed files");
 
-    if !branch_plan.atomic_entries.is_empty() {
-        if let Err(error) =
+    if !branch_plan.atomic_entries.is_empty()
+        && let Err(error) =
             files::apply_files_plan(client, repo, branch, &message, &branch_plan).await
-        {
-            return failure(audit, repo, category, error);
-        }
+    {
+        return failure(audit, repo, category, error);
     }
 
     let pr = match client

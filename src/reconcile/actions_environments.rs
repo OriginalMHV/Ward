@@ -466,8 +466,8 @@ pub async fn collect_actions_category(
         settings.allowed_actions = permissions.allowed_actions.clone();
         settings.requires_pinned_actions = permissions.sha_pinning_required;
 
-        if permissions.allowed_actions.as_deref() == Some("selected") {
-            if let Some(selected) = record_read_outcome(
+        if permissions.allowed_actions.as_deref() == Some("selected")
+            && let Some(selected) = record_read_outcome(
                 &mut coverage,
                 ManifestCategoryName::Actions,
                 "actions/permissions/selected-actions",
@@ -475,11 +475,11 @@ pub async fn collect_actions_category(
                     .get_selected_actions_checked(repo)
                     .await
                     .context("Failed to collect selected Actions allowlist")?,
-            ) {
-                settings.selected_actions = selected.patterns_allowed;
-                settings.allow_github_owned_actions = Some(selected.github_owned_allowed);
-                settings.allow_verified_creator_actions = Some(selected.verified_allowed);
-            }
+            )
+        {
+            settings.selected_actions = selected.patterns_allowed;
+            settings.allow_github_owned_actions = Some(selected.github_owned_allowed);
+            settings.allow_verified_creator_actions = Some(selected.verified_allowed);
         }
     }
 
@@ -1149,22 +1149,19 @@ pub fn plan_actions_category(
         if wants_change(
             &wanted.cache_retention_limit_days,
             &current.cache_retention_limit_days,
-        ) {
-            if let Some(max_cache_retention_days) = wanted.cache_retention_limit_days {
-                settings_changes.push(ActionsSettingChange::CacheRetentionLimit {
-                    max_cache_retention_days,
-                });
-            }
+        ) && let Some(max_cache_retention_days) = wanted.cache_retention_limit_days
+        {
+            settings_changes.push(ActionsSettingChange::CacheRetentionLimit {
+                max_cache_retention_days,
+            });
         }
 
         if wants_change(
             &wanted.cache_storage_limit_gb,
             &current.cache_storage_limit_gb,
-        ) {
-            if let Some(max_cache_size_gb) = wanted.cache_storage_limit_gb {
-                settings_changes
-                    .push(ActionsSettingChange::CacheStorageLimit { max_cache_size_gb });
-            }
+        ) && let Some(max_cache_size_gb) = wanted.cache_storage_limit_gb
+        {
+            settings_changes.push(ActionsSettingChange::CacheStorageLimit { max_cache_size_gb });
         }
 
         if wants_change(
@@ -1968,10 +1965,10 @@ pub async fn collect_environments_category(
 
     let mut entries = Vec::new();
     for env in &observed {
-        if let Some(names) = &wanted_names {
-            if !names.contains(env.name.as_str()) {
-                continue;
-            }
+        if let Some(names) = &wanted_names
+            && !names.contains(env.name.as_str())
+        {
+            continue;
         }
 
         let (prevent_self_review, reviewers) = reviewers_from_protection_rules(env);
