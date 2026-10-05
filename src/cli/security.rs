@@ -109,8 +109,18 @@ async fn audit(
     let mut total_ok = 0;
     let mut total_issues = 0;
 
-    for repository in &repositories {
-        let state = client.get_security_state(&repository.name).await?;
+    let states = crate::reconcile::map_buffered(&repositories, |repository| async {
+        client
+            .get_security_state_with_repo_data(
+                &repository.name,
+                repository.security_and_analysis.as_ref(),
+            )
+            .await
+    })
+    .await;
+
+    for (repository, state) in repositories.iter().zip(states) {
+        let state = state?;
         let features = [
             state.dependabot_alerts,
             state.dependabot_security_updates,

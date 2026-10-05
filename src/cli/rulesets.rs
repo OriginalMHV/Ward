@@ -113,8 +113,13 @@ async fn audit(
     );
     println!("  {}", style("\u{2500}".repeat(70)).dim());
 
-    for repo_name in &repos {
-        let rulesets = client.list_rulesets(repo_name).await?;
+    let listings = crate::reconcile::map_buffered(&repos, |repo_name| async move {
+        client.list_rulesets(repo_name).await
+    })
+    .await;
+
+    for (repo_name, rulesets) in repos.iter().zip(listings) {
+        let rulesets = rulesets?;
 
         let summary = if rulesets.is_empty() {
             style("(none)").dim().to_string()

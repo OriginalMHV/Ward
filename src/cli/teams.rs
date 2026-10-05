@@ -148,8 +148,13 @@ async fn list(
     );
     println!("  {}", style("\u{2500}".repeat(70)).dim());
 
-    for repo_name in &repos {
-        let teams = client.list_repo_teams(repo_name).await?;
+    let listings = crate::reconcile::map_buffered(&repos, |repo_name| async move {
+        client.list_repo_teams(repo_name).await
+    })
+    .await;
+
+    for (repo_name, teams) in repos.iter().zip(listings) {
+        let teams = teams?;
 
         let summary = if teams.is_empty() {
             style("(none)").dim().to_string()
@@ -398,9 +403,14 @@ async fn audit(
     let mut total_ok = 0;
     let mut total_issues = 0;
 
-    for repo_name in &repos {
+    let listings = crate::reconcile::map_buffered(&repos, |repo_name| async move {
+        client.list_repo_teams(repo_name).await
+    })
+    .await;
+
+    for (repo_name, teams) in repos.iter().zip(listings) {
         let desired = teams_for_repo(manifest, repo_name).unwrap_or(&[]);
-        let teams = client.list_repo_teams(repo_name).await?;
+        let teams = teams?;
 
         let all_desired_present = desired.iter().all(|d| {
             teams

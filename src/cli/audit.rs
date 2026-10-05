@@ -86,13 +86,13 @@ impl AuditCommand {
             );
         }
 
-        let mut audits = Vec::new();
-
-        for repo in &repos {
+        let audits = crate::reconcile::map_buffered(&repos, |repo| async {
             tracing::info!("Auditing {}...", repo.name);
-            let audit = audit_repo(client, repo, system_id.as_deref()).await?;
-            audits.push(audit);
-        }
+            audit_repo(client, repo, system_id.as_deref()).await
+        })
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>>>()?;
 
         if json_output {
             let report = AuditReport {

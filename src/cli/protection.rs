@@ -127,11 +127,15 @@ async fn audit(
     let mut total_ok = 0;
     let mut total_issues = 0;
 
-    for (repo_name, default_branch) in &repos {
-        let state = client
+    let states = crate::reconcile::map_buffered(&repos, |(repo_name, default_branch)| async move {
+        client
             .get_branch_protection(repo_name, default_branch)
-            .await?
-            .unwrap_or_default();
+            .await
+    })
+    .await;
+
+    for ((repo_name, default_branch), state) in repos.iter().zip(states) {
+        let state = state?.unwrap_or_default();
 
         let protected = state.required_pull_request_reviews;
         if protected {

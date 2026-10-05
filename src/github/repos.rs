@@ -123,16 +123,20 @@ impl Client {
             })
             .collect();
 
-        // Add explicit repos (fetch individually, skip if already matched by search)
-        for repo_name in explicit_repos {
-            if matched.iter().any(|r| r.name == *repo_name) {
-                continue;
-            }
-            let repo = self
-                .get_repo(repo_name)
-                .await
-                .with_context(|| format!("Failed to fetch explicit repository {repo_name}"))?;
-            if !repo.archived {
+        // Add explicit repos (fetch concurrently, skip if already matched by search)
+        let pending: Vec<&String> = explicit_repos
+            .iter()
+            .filter(|repo_name| !matched.iter().any(|r| r.name == **repo_name))
+            .collect();
+        let fetched =
+            futures_util::future::try_join_all(pending.into_iter().map(|repo_name| async move {
+                self.get_repo(repo_name)
+                    .await
+                    .with_context(|| format!("Failed to fetch explicit repository {repo_name}"))
+            }))
+            .await?;
+        for repo in fetched {
+            if !repo.archived && !matched.iter().any(|r| r.name == repo.name) {
                 matched.push(repo);
             }
         }

@@ -325,10 +325,15 @@ pub async fn collect_with_rest(
 ) -> Result<CollectedGeneralState> {
     let mut coverage = unsupported_repository_settings_coverage();
 
-    let graphql = match client
-        .get_repository_graphql_settings_classified(repo)
-        .await?
-    {
+    let (graphql_result, topics_result, properties_result, immutable_result, labels_result) = tokio::join!(
+        client.get_repository_graphql_settings_classified(repo),
+        client.get_topics_classified(repo),
+        client.get_custom_property_values(repo),
+        client.get_immutable_releases_state_classified(repo),
+        client.list_labels_classified(repo),
+    );
+
+    let graphql = match graphql_result? {
         ClassifiedApiResponse::Success(settings) => Some(settings),
         ClassifiedApiResponse::Other(message) => {
             coverage.push(coverage_entry(
@@ -383,7 +388,7 @@ pub async fn collect_with_rest(
         ClassifiedApiResponse::NoContent => None,
     };
 
-    let topics = match client.get_topics_classified(repo).await? {
+    let topics = match topics_result? {
         ClassifiedApiResponse::Success(values) => Some(normalize_topics(&values)),
         ClassifiedApiResponse::Forbidden(message) => {
             coverage.push(coverage_entry(
@@ -420,7 +425,7 @@ pub async fn collect_with_rest(
         ClassifiedApiResponse::NoContent => Some(Vec::new()),
     };
 
-    let custom_properties = match client.get_custom_property_values(repo).await? {
+    let custom_properties = match properties_result? {
         ClassifiedApiResponse::Success(values) => collect_custom_properties(&values),
         ClassifiedApiResponse::Forbidden(message) => {
             coverage.push(coverage_entry(
@@ -457,7 +462,7 @@ pub async fn collect_with_rest(
         ClassifiedApiResponse::NoContent => Vec::new(),
     };
 
-    let immutable_releases = match client.get_immutable_releases_state_classified(repo).await? {
+    let immutable_releases = match immutable_result? {
         ClassifiedApiResponse::Success(state) => Some(state),
         ClassifiedApiResponse::Forbidden(message) => {
             coverage.push(coverage_entry(
@@ -497,7 +502,7 @@ pub async fn collect_with_rest(
         }),
     };
 
-    let labels = match client.list_labels_classified(repo).await? {
+    let labels = match labels_result? {
         ClassifiedApiResponse::Success(labels) => collect_labels(labels),
         ClassifiedApiResponse::Forbidden(message) => {
             coverage.push(coverage_entry(

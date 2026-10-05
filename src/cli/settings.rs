@@ -184,6 +184,20 @@ async fn scan_repo(
     })
 }
 
+async fn scan_repos(
+    client: &Client,
+    manifest: &Manifest,
+    repos: &[String],
+    managed_only: bool,
+    check_copilot_review: bool,
+) -> Vec<Result<RepoRulesetState>> {
+    crate::reconcile::map_buffered(repos, |repo_name| async move {
+        let desired = settings_desired_for_repo(manifest, repo_name, managed_only);
+        scan_repo(client, repo_name, desired, check_copilot_review).await
+    })
+    .await
+}
+
 async fn resolve_repos(
     client: &Client,
     manifest: &Manifest,
@@ -228,9 +242,10 @@ async fn plan(
     let mut repository_settings_needed = 0;
     let mut up_to_date = 0;
 
-    for repo_name in &repos {
-        let desired = settings_desired_for_repo(manifest, repo_name, true);
-        let state = scan_repo(client, repo_name, desired, do_ruleset).await?;
+    let states = scan_repos(client, manifest, &repos, true, do_ruleset).await;
+
+    for (repo_name, state) in repos.iter().zip(states) {
+        let state = state?;
         let mut changes: Vec<String> = state
             .repository_changes
             .iter()
@@ -308,9 +323,8 @@ async fn apply(
 
     // Scan all repos
     let mut work: Vec<RepoRulesetState> = Vec::new();
-    for repo_name in &repos {
-        let desired = settings_desired_for_repo(manifest, repo_name, true);
-        let state = scan_repo(client, repo_name, desired, do_ruleset).await?;
+    for state in scan_repos(client, manifest, &repos, true, do_ruleset).await {
+        let state = state?;
         let needs_work =
             !state.repository_changes.is_empty() || (do_ruleset && !state.has_copilot_review);
         if needs_work {
@@ -464,9 +478,10 @@ async fn audit(
     let mut all_ok = 0;
     let mut issues = 0;
 
-    for repo_name in &repos {
-        let desired = settings_desired_for_repo(manifest, repo_name, false);
-        let state = scan_repo(client, repo_name, desired, true).await?;
+    let states = scan_repos(client, manifest, &repos, false, true).await;
+
+    for (repo_name, state) in repos.iter().zip(states) {
+        let state = state?;
 
         let repository_icon = if state.repository_changes.is_empty() {
             format!("{}", style("[ok]").green())
