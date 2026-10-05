@@ -271,10 +271,11 @@ impl Client {
                     .status_checks
                     .iter()
                     .map(|check| {
-                        json!({
-                            "context": check.context,
-                            "app_id": check.app_id,
-                        })
+                        let mut entry = json!({ "context": check.context });
+                        if let Some(app_id) = check.app_id {
+                            entry["app_id"] = json!(app_id);
+                        }
+                        entry
                     })
                     .collect::<Vec<_>>()
             };
