@@ -35,6 +35,7 @@ impl ProtectionCommand {
         manifest: &Manifest,
         system: Option<&str>,
         repo: Option<&str>,
+        json: bool,
     ) -> Result<()> {
         let options = UnifiedOptions {
             categories: vec![Category::BranchProtection],
@@ -49,7 +50,7 @@ impl ProtectionCommand {
                 crate::cli::plan::CategoryRun {
                     system,
                     repo,
-                    json: false,
+                    json,
                     command: "protection plan",
                     title: "Ward Protection Plan",
                 },
@@ -64,7 +65,7 @@ impl ProtectionCommand {
                 crate::cli::plan::CategoryRun {
                     system,
                     repo,
-                    json: false,
+                    json,
                     command: "protection apply",
                     title: "Ward Protection Apply",
                 },

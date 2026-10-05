@@ -39,6 +39,7 @@ impl SecurityCommand {
         manifest: &Manifest,
         system: Option<&str>,
         repo: Option<&str>,
+        json: bool,
     ) -> Result<()> {
         match &self.action {
             SecurityAction::Plan => crate::cli::plan::run_canonical_plan(
@@ -48,7 +49,7 @@ impl SecurityCommand {
                 crate::cli::plan::CategoryRun {
                     system,
                     repo,
-                    json: false,
+                    json,
                     command: "security plan",
                     title: "Ward Security Plan",
                 },
@@ -63,7 +64,7 @@ impl SecurityCommand {
                 crate::cli::plan::CategoryRun {
                     system,
                     repo,
-                    json: false,
+                    json,
                     command: "security apply",
                     title: "Ward Security Apply",
                 },
@@ -190,5 +191,12 @@ mod tests {
     #[test]
     fn skip_verify_is_preserved_by_focused_security_apply() {
         assert!(!options(false).verify);
+    }
+
+    #[test]
+    fn global_json_flag_is_accepted_after_the_focused_subcommand() {
+        use clap::Parser;
+        let cli = crate::cli::Cli::parse_from(["ward", "security", "plan", "--json"]);
+        assert!(cli.json);
     }
 }

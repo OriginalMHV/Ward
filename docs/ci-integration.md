@@ -85,7 +85,7 @@ jobs:
         run: ward drift check --system backend --json
 ```
 
-If drift is detected, the step fails with exit code 1.
+If drift is detected, the step fails with exit code 1. Deferred changes and unreadable state in managed categories also count as drift.
 
 ---
 
@@ -97,10 +97,10 @@ If drift is detected, the step fails with exit code 1.
 ward security plan --system backend --json
 ```
 
-Pipe through `jq` to filter for repos that need changes:
+The report is an object with a `repos` array and top-level `actionable`, `blocked`, `warnings`, and `deferred` counts. Pipe through `jq` to list repos that need changes:
 
 ```bash
-ward security plan --system backend --json | jq '.[] | select(.changes | length > 0)'
+ward security plan --system backend --json | jq '.repos[] | select(.actionable > 0) | .repo'
 ```
 
 ### Full audit as JSON

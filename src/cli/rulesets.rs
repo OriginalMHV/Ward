@@ -35,6 +35,7 @@ impl RulesetsCommand {
         manifest: &Manifest,
         system: Option<&str>,
         repo: Option<&str>,
+        json: bool,
     ) -> Result<()> {
         let options = UnifiedOptions {
             categories: vec![Category::Rulesets],
@@ -49,7 +50,7 @@ impl RulesetsCommand {
                 crate::cli::plan::CategoryRun {
                     system,
                     repo,
-                    json: false,
+                    json,
                     command: "rulesets plan",
                     title: "Ward Rulesets Plan",
                 },
@@ -64,7 +65,7 @@ impl RulesetsCommand {
                 crate::cli::plan::CategoryRun {
                     system,
                     repo,
-                    json: false,
+                    json,
                     command: "rulesets apply",
                     title: "Ward Rulesets Apply",
                 },

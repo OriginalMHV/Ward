@@ -31,6 +31,7 @@ impl CommitCommand {
         manifest: &Manifest,
         system: Option<&str>,
         repo: Option<&str>,
+        json: bool,
     ) -> Result<()> {
         let options = UnifiedOptions {
             categories: vec![Category::Files],
@@ -45,7 +46,7 @@ impl CommitCommand {
                 crate::cli::plan::CategoryRun {
                     system,
                     repo,
-                    json: false,
+                    json,
                     command: "commit plan",
                     title: "Ward Commit Plan",
                 },
@@ -60,7 +61,7 @@ impl CommitCommand {
                 crate::cli::plan::CategoryRun {
                     system,
                     repo,
-                    json: false,
+                    json,
                     command: "commit apply",
                     title: "Ward Commit Apply",
                 },

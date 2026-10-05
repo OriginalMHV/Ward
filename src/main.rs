@@ -58,6 +58,7 @@ async fn main() -> Result<()> {
                 &manifest,
                 cli.system.as_deref(),
                 cli.repo.as_deref(),
+                cli.json,
             )
             .await
         }
@@ -76,6 +77,7 @@ async fn main() -> Result<()> {
                 &manifest,
                 cli.system.as_deref(),
                 cli.repo.as_deref(),
+                cli.json,
             )
             .await
         }
@@ -85,6 +87,7 @@ async fn main() -> Result<()> {
                 &manifest,
                 cli.system.as_deref(),
                 cli.repo.as_deref(),
+                cli.json,
             )
             .await
         }
@@ -104,6 +107,7 @@ async fn main() -> Result<()> {
                 &manifest,
                 cli.system.as_deref(),
                 cli.repo.as_deref(),
+                cli.json,
             )
             .await
         }

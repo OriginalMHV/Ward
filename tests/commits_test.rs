@@ -884,7 +884,13 @@ async fn commit_apply_reports_collection_failures_for_every_repository() {
 
     let client = Client::new_for_test("test-org", &server.uri());
     let result = command
-        .run(&client, &manifest, system.as_deref(), repo.as_deref())
+        .run(
+            &client,
+            &manifest,
+            system.as_deref(),
+            repo.as_deref(),
+            false,
+        )
         .await;
 
     assert!(

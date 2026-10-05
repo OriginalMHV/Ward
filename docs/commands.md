@@ -13,7 +13,7 @@ These flags are available on all commands:
 | `--org <ORG>` | string | from `ward.toml` | GitHub organization (overrides config) |
 | `--system <ID>` | string | -- | Filter to a specific system |
 | `--repo <REPO>` | string | -- | Target a single repository |
-| `--json` | bool | `false` | Output as JSON |
+| `--json` | bool | `false` | Output the unified report as JSON. Honored by `plan`, `apply`, `drift check`, and the focused `plan` and `apply` subcommands. Audit and list commands ignore it (`audit` uses `--format`) |
 | `--parallelism <N>` | integer | `5` | Max concurrent API calls |
 | `--config <PATH>` | string | `./ward.toml` | Path to config file |
 | `-v` / `-vv` / `-vvv` | count | `0` | Increase log verbosity |
@@ -30,7 +30,6 @@ List all repositories matched by a system, with metadata.
 
 ```bash
 ward repos list --system backend
-ward repos list --system backend --json
 ward repos list --org my-org
 ```
 
@@ -42,7 +41,6 @@ Deep inspection of a single repository, including security feature status.
 
 ```bash
 ward repos inspect my-service
-ward repos inspect my-service --json
 ```
 
 Shows: full repo metadata, Dependabot Alerts, Dependabot Security Updates, Secret Scanning, AI Detection, Push Protection.
@@ -86,7 +84,6 @@ Report current security state for all repos in a system.
 ```bash
 ward security audit --system backend
 ward security audit --repo my-service
-ward security audit --system backend --json
 ```
 
 Output columns: Dependabot Alerts, Dependabot Security Updates, Secret Scanning, AI Detection, Push Protection.
@@ -225,7 +222,7 @@ ward drift check --system backend --json
 
 Exit codes:
 - `0` -- all repos in sync with `ward.toml`
-- `1` -- drift detected
+- `1` -- drift detected: actionable, blocked, or deferred changes, or state in a managed category that Ward could not read
 
 Checks every configured category by default. Use repeatable `--category <CATEGORY>` filters to narrow the drift gate.
 
