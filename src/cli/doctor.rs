@@ -198,7 +198,7 @@ fn check_audit_log() -> Check {
             }
             Err(_) => Check {
                 name: "Audit log",
-                status: CheckStatus::Pass,
+                status: CheckStatus::Warn,
                 detail: "exists but unreadable".to_string(),
             },
         }
