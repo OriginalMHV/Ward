@@ -104,14 +104,25 @@ pub struct ResolvedSecret {
     pub value: SecretValue,
 }
 
+/// Looks up an environment variable by name. Production code passes [`process_env`].
+pub type EnvLookup<'a> = &'a dyn Fn(&str) -> Option<String>;
+
+/// Read a variable from the process environment. Non-Unicode values count as unset.
+pub fn process_env(key: &str) -> Option<String> {
+    std::env::var(key).ok()
+}
+
 /// Resolve a [`ExternalValueReference`] to a plaintext value. Returns `Err`
 /// with a safe (non-sensitive) reason string on failure; the reason never
 /// contains any resolved value.
-fn resolve_external_value(reference: &ExternalValueReference) -> Result<SecretValue, String> {
+fn resolve_external_value_with(
+    reference: &ExternalValueReference,
+    lookup: EnvLookup<'_>,
+) -> Result<SecretValue, String> {
     match reference {
-        ExternalValueReference::Env { key } => std::env::var(key)
+        ExternalValueReference::Env { key } => lookup(key)
             .map(SecretValue)
-            .map_err(|_| format!("environment variable `{key}` is not set")),
+            .ok_or_else(|| format!("environment variable `{key}` is not set")),
         ExternalValueReference::Manual { hint } => Err(match hint {
             Some(hint) => format!("value must be provided manually ({hint})"),
             None => "value must be provided manually".to_owned(),
@@ -123,10 +134,11 @@ fn resolve_secrets(
     placeholders: &[SecretPlaceholderConfig],
     scope_prefix: &str,
     issues: &mut Vec<ReconcileIssue>,
+    lookup: EnvLookup<'_>,
 ) -> Vec<ResolvedSecret> {
     let mut resolved = Vec::new();
     for placeholder in placeholders {
-        match resolve_external_value(&placeholder.value_from) {
+        match resolve_external_value_with(&placeholder.value_from, lookup) {
             Ok(value) => resolved.push(ResolvedSecret {
                 name: placeholder.name.clone(),
                 value,
@@ -1024,6 +1036,15 @@ pub fn plan_actions_category(
     desired: &ActionsCategoryV2,
     actual: &ActionsCollection,
 ) -> ActionsPlan {
+    plan_actions_category_with_env(desired, actual, &process_env)
+}
+
+/// As [`plan_actions_category`], resolving secret values through `env`.
+pub fn plan_actions_category_with_env(
+    desired: &ActionsCategoryV2,
+    actual: &ActionsCollection,
+    env: EnvLookup<'_>,
+) -> ActionsPlan {
     let mut issues = actual.issues.clone();
 
     if desired.policy.disposition != ManagementDisposition::Managed {
@@ -1332,7 +1353,7 @@ pub fn plan_actions_category(
         .filter(|secret| !current_secret_names.contains(secret.name.as_str()))
         .cloned()
         .collect();
-    let mut secret_upserts = resolve_secrets(&missing_secrets, "actions", &mut issues);
+    let mut secret_upserts = resolve_secrets(&missing_secrets, "actions", &mut issues, env);
     secret_upserts.retain(|secret| !secret.name.is_empty());
     let mut secret_deletions = Vec::new();
     if desired.policy.prune {
@@ -2199,6 +2220,15 @@ pub fn plan_environments_category(
     desired: &EnvironmentsCategoryV2,
     actual: &EnvironmentsCollection,
 ) -> EnvironmentsPlan {
+    plan_environments_category_with_env(desired, actual, &process_env)
+}
+
+/// As [`plan_environments_category`], resolving secret values through `env`.
+pub fn plan_environments_category_with_env(
+    desired: &EnvironmentsCategoryV2,
+    actual: &EnvironmentsCollection,
+    env: EnvLookup<'_>,
+) -> EnvironmentsPlan {
     let mut issues = actual.issues.clone();
 
     if desired.policy.disposition != ManagementDisposition::Managed {
@@ -2450,7 +2480,7 @@ pub fn plan_environments_category(
             .filter(|secret| !current_secret_names.contains(secret.name.as_str()))
             .cloned()
             .collect();
-        plan.secret_upserts = resolve_secrets(&missing_secrets, &scope_prefix, &mut issues);
+        plan.secret_upserts = resolve_secrets(&missing_secrets, &scope_prefix, &mut issues, env);
         if desired.policy.prune {
             let desired_secret_names: std::collections::BTreeSet<&str> = wanted
                 .secrets

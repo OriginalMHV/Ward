@@ -495,9 +495,7 @@ async fn omitted_webhook_fields_apply_github_defaults_and_verify_cleanly() {
 
 #[tokio::test]
 async fn deploy_key_replace_creates_before_delete() {
-    unsafe {
-        std::env::set_var("WARD_DEPLOY_KEY", "ssh-rsa AAA");
-    }
+    // PATH is set in every environment, so the env-backed replacement key resolves without set_var.
     let current = IntegrationsCollection {
         category: RepositoryIntegrationsCategoryV2::default(),
         state: CollectedIntegrationsState {
@@ -528,7 +526,7 @@ async fn deploy_key_replace_creates_before_delete() {
             read_only: Some(false),
             fingerprint: Some("aa:bb".to_owned()),
             replacement_key: Some(ExternalValueReference::Env {
-                key: "WARD_DEPLOY_KEY".to_owned(),
+                key: "PATH".to_owned(),
             }),
         }],
         ..RepositoryIntegrationsCategoryV2::default()
@@ -565,9 +563,6 @@ async fn deploy_key_replace_creates_before_delete() {
             "/repos/test-org/my-repo/keys/5"
         ]
     );
-    unsafe {
-        std::env::remove_var("WARD_DEPLOY_KEY");
-    }
 }
 
 #[test]

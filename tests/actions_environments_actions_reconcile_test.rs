@@ -14,7 +14,8 @@ use ward::config::manifest::{
 use ward::github::Client;
 use ward::reconcile::actions_environments::{
     ActionsPlan, ActionsSettingChange, IssueSeverity, OrgReferenceAction, apply_actions_plan,
-    collect_actions_category, plan_actions_category, verify_actions_category,
+    collect_actions_category, plan_actions_category, plan_actions_category_with_env,
+    verify_actions_category,
 };
 
 fn client(server: &MockServer) -> Client {
@@ -517,10 +518,8 @@ async fn secret_resolved_from_env_is_encrypted_and_never_logs_plaintext() {
     let server = MockServer::start().await;
     mount_actions_baseline(&server, "my-repo", BaselineOverrides::default()).await;
 
-    // SAFETY: test-local; no other thread in this test reads/writes this key.
-    unsafe {
-        std::env::set_var("WARD_TEST_DEPLOY_TOKEN", "plaintext-secret-value");
-    }
+    let env =
+        |key: &str| (key == "WARD_TEST_DEPLOY_TOKEN").then(|| "plaintext-secret-value".to_owned());
 
     let desired = ActionsCategoryV2 {
         policy: managed_policy(false),
@@ -536,7 +535,7 @@ async fn secret_resolved_from_env_is_encrypted_and_never_logs_plaintext() {
     let collected = collect_actions_category(&client(&server), "my-repo", Some(&desired))
         .await
         .unwrap();
-    let plan = plan_actions_category(&desired, &collected);
+    let plan = plan_actions_category_with_env(&desired, &collected, &env);
 
     assert_eq!(plan.secret_upserts.len(), 1);
     let resolved = &plan.secret_upserts[0];
@@ -550,10 +549,6 @@ async fn secret_resolved_from_env_is_encrypted_and_never_logs_plaintext() {
     let debug_output = format!("{resolved:?}");
     assert!(!debug_output.contains("plaintext-secret-value"));
     assert!(debug_output.contains("REDACTED"));
-
-    unsafe {
-        std::env::remove_var("WARD_TEST_DEPLOY_TOKEN");
-    }
 }
 
 #[tokio::test]
@@ -582,9 +577,8 @@ async fn apply_encrypts_secret_with_target_public_key_before_put() {
         .mount(&server)
         .await;
 
-    unsafe {
-        std::env::set_var("WARD_TEST_APPLY_TOKEN", "another-plaintext-value");
-    }
+    let env =
+        |key: &str| (key == "WARD_TEST_APPLY_TOKEN").then(|| "another-plaintext-value".to_owned());
 
     let desired = ActionsCategoryV2 {
         policy: managed_policy(false),
@@ -601,7 +595,7 @@ async fn apply_encrypts_secret_with_target_public_key_before_put() {
     let collected = collect_actions_category(&client, "my-repo", Some(&desired))
         .await
         .unwrap();
-    let plan = plan_actions_category(&desired, &collected);
+    let plan = plan_actions_category_with_env(&desired, &collected, &env);
     let result = apply_actions_plan(&client, "my-repo", &plan).await.unwrap();
 
     assert!(
@@ -615,10 +609,6 @@ async fn apply_encrypts_secret_with_target_public_key_before_put() {
             .iter()
             .any(|scope| scope.contains("DEPLOY_TOKEN"))
     );
-
-    unsafe {
-        std::env::remove_var("WARD_TEST_APPLY_TOKEN");
-    }
 }
 
 #[tokio::test]
@@ -1199,9 +1189,7 @@ async fn missing_secret_is_still_resolved_when_another_secret_already_exists() {
     )
     .await;
 
-    unsafe {
-        std::env::set_var("WARD_TEST_NEW_TOKEN", "brand-new-value");
-    }
+    let env = |key: &str| (key == "WARD_TEST_NEW_TOKEN").then(|| "brand-new-value".to_owned());
 
     let desired = ActionsCategoryV2 {
         policy: managed_policy(false),
@@ -1223,14 +1211,10 @@ async fn missing_secret_is_still_resolved_when_another_secret_already_exists() {
     let collected = collect_actions_category(&client(&server), "my-repo", Some(&desired))
         .await
         .unwrap();
-    let plan = plan_actions_category(&desired, &collected);
+    let plan = plan_actions_category_with_env(&desired, &collected, &env);
 
     assert_eq!(plan.secret_upserts.len(), 1);
     assert_eq!(plan.secret_upserts[0].name, "NEW_TOKEN");
-
-    unsafe {
-        std::env::remove_var("WARD_TEST_NEW_TOKEN");
-    }
 }
 
 // ---------------------------------------------------------------------------
