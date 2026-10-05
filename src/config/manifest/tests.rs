@@ -275,3 +275,100 @@ fn checked_in_example_is_a_valid_canonical_manifest() {
         Some("DEPLOY_TOKEN")
     );
 }
+
+fn parse_error(source: &str) -> String {
+    toml::from_str::<Manifest>(source).unwrap_err().to_string()
+}
+
+#[test]
+fn unknown_key_in_category_policy_is_rejected_with_location() {
+    let error = parse_error(
+        r#"
+        [org]
+        name = "acme"
+
+        [categories.security.policy]
+        disposition = "managed"
+        prunee = true
+        "#,
+    );
+
+    assert!(error.contains("unknown field `prunee`"), "{error}");
+    assert!(error.contains("line 7"), "{error}");
+    assert!(error.contains("`disposition`"), "{error}");
+}
+
+#[test]
+fn unknown_key_in_category_is_rejected() {
+    let error = parse_error(
+        r#"
+        [org]
+        name = "acme"
+
+        [categories.security]
+        dependabot_alert = true
+        "#,
+    );
+
+    assert!(
+        error.contains("unknown field `dependabot_alert`"),
+        "{error}"
+    );
+}
+
+#[test]
+fn unknown_keys_are_rejected_in_nested_tables_and_tagged_enums() {
+    for fragment in [
+        "[file_delivery]\nbranchh = \"x\"",
+        "[[systems]]\nid = \"a\"\nname = \"A\"\nrepo = [\"x\"]",
+        "[schema]\nversion = 2\nextra = 1",
+        "[categories.repository.settings]\nhas_issue = true",
+        "[categories.branch_protection.default]\nenabeld = true",
+        "[[categories.integrations.webhooks]]\nurl_from = { source = \"env\", key = \"K\", extra = 1 }",
+    ] {
+        let source = format!("[org]\nname = \"acme\"\n\n{fragment}\n");
+        assert!(
+            toml::from_str::<Manifest>(&source).is_err(),
+            "accepted unknown key in:\n{fragment}"
+        );
+    }
+}
+
+#[test]
+fn unknown_disposition_names_valid_values() {
+    let error = parse_error(
+        r#"
+        [org]
+        name = "acme"
+
+        [categories.security.policy]
+        disposition = "manage"
+        "#,
+    );
+
+    for expected in ["manage", "managed", "reference", "placeholder", "observe"] {
+        assert!(error.contains(expected), "{error}");
+    }
+}
+
+#[test]
+fn misspelled_disposition_key_is_not_a_silent_observe() {
+    let error = parse_error(
+        r#"
+        [org]
+        name = "acme"
+
+        [categories.security.policy]
+        dispostion = "managed"
+        "#,
+    );
+
+    assert!(error.contains("unknown field `dispostion`"), "{error}");
+}
+
+#[test]
+fn shipped_example_manifest_parses() {
+    let source = include_str!("../../../ward.example.toml");
+
+    toml::from_str::<Manifest>(source).unwrap();
+}

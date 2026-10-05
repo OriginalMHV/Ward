@@ -9,6 +9,8 @@ ward config show
 
 The Ward manifest can be authored directly or generated through repository bootstrap. Every command reads the same category-based desired state.
 
+Ward rejects unknown keys in every table. The error names the key and its line.
+
 ## Identity and optional provenance
 
 ```toml

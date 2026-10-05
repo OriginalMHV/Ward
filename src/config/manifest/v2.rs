@@ -48,6 +48,7 @@ impl Manifest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ManifestSchema {
     pub version: u32,
 }
@@ -61,6 +62,7 @@ impl ManifestSchema {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ManifestProvenance {
     pub repository: String,
 
@@ -75,6 +77,7 @@ pub struct ManifestProvenance {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ManifestCategories {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security: Option<SecurityCategoryV2>,
@@ -111,6 +114,7 @@ impl ManifestCategories {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CategoryPolicy {
     #[serde(default)]
     pub disposition: ManagementDisposition,
@@ -164,6 +168,7 @@ pub enum ManagementDisposition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CoverageEntry {
     pub category: ManifestCategoryName,
     pub endpoint: String,
@@ -202,6 +207,7 @@ pub enum CoverageOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SecurityCategoryV2 {
     #[serde(default)]
     pub policy: CategoryPolicy,
@@ -292,12 +298,14 @@ impl SecurityCategoryV2 {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SecurityReviewerOptionsConfigV2 {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reviewers: Vec<SecurityReviewerConfigV2>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SecurityReviewerConfigV2 {
     pub actor: ActorReference,
 
@@ -306,6 +314,7 @@ pub struct SecurityReviewerConfigV2 {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CodeqlDefaultSetupConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
@@ -327,6 +336,7 @@ pub struct CodeqlDefaultSetupConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RepositoryCategoryV2 {
     #[serde(default)]
     pub policy: CategoryPolicy,
@@ -348,6 +358,7 @@ pub struct RepositoryCategoryV2 {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RepositoryMetadataConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -372,12 +383,14 @@ pub struct RepositoryMetadataConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CustomPropertyValueConfig {
     pub property_name: String,
     pub value: Value,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ImmutableReleasesConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
@@ -387,6 +400,7 @@ pub struct ImmutableReleasesConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct BranchProtectionCategoryV2 {
     #[serde(default)]
     pub policy: CategoryPolicy,
@@ -413,6 +427,7 @@ impl BranchProtectionCategoryV2 {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct DetailedBranchProtectionConfigV2 {
     #[serde(default)]
     pub protection: BranchProtectionConfig,
@@ -455,6 +470,7 @@ pub struct DetailedBranchProtectionConfigV2 {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProtectedBranchConfig {
     pub name: String,
 
@@ -499,6 +515,7 @@ pub struct ProtectedBranchConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct BranchStatusCheckConfigV2 {
     pub context: String,
 
@@ -510,6 +527,7 @@ pub struct BranchStatusCheckConfigV2 {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RulesetsCategoryV2 {
     #[serde(default)]
     pub policy: CategoryPolicy,
@@ -532,6 +550,7 @@ impl RulesetsCategoryV2 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RulesetReferenceV2 {
     pub name: String,
     pub target: String,
@@ -541,6 +560,7 @@ pub struct RulesetReferenceV2 {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RepositoryRulesetV2 {
     pub name: String,
     pub target: String,
@@ -557,6 +577,7 @@ pub struct RepositoryRulesetV2 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RulesetBypassActorV2 {
     pub actor: ActorReference,
 
@@ -569,6 +590,7 @@ fn default_bypass_mode() -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct FilesCategoryV2 {
     #[serde(default)]
     pub policy: CategoryPolicy,
@@ -584,6 +606,7 @@ pub struct FilesCategoryV2 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ManagedFileV2 {
     pub path: String,
     pub content: String,
@@ -612,6 +635,7 @@ fn default_file_mode() -> String {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ActionsCategoryV2 {
     #[serde(default)]
     pub policy: CategoryPolicy,
@@ -648,6 +672,7 @@ impl ActionsCategoryV2 {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ActionsSettingsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
@@ -732,6 +757,7 @@ pub struct ActionsSettingsConfig {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct EnvironmentsCategoryV2 {
     #[serde(default)]
     pub policy: CategoryPolicy,
@@ -750,6 +776,7 @@ impl EnvironmentsCategoryV2 {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct EnvironmentConfigV2 {
     pub name: String,
 
@@ -776,6 +803,7 @@ pub struct EnvironmentConfigV2 {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct EnvironmentDeploymentPolicyConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protected_branches: Option<bool>,
@@ -791,11 +819,13 @@ pub struct EnvironmentDeploymentPolicyConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct EnvironmentReviewerConfig {
     pub actor: ActorReference,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RepositoryAccessCategoryV2 {
     #[serde(default)]
     pub policy: CategoryPolicy,
@@ -820,12 +850,14 @@ impl RepositoryAccessCategoryV2 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CollaboratorAccessConfig {
     pub actor: ActorReference,
     pub permission: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RepositoryIntegrationsCategoryV2 {
     #[serde(default)]
     pub policy: CategoryPolicy,
@@ -856,6 +888,7 @@ impl RepositoryIntegrationsCategoryV2 {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct WebhookConfigV2 {
     pub url: String,
 
@@ -879,6 +912,7 @@ pub struct WebhookConfigV2 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeployKeyConfigV2 {
     pub title: String,
 
@@ -893,6 +927,7 @@ pub struct DeployKeyConfigV2 {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PagesConfigV2 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub build_type: Option<String>,
@@ -911,6 +946,7 @@ pub struct PagesConfigV2 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AutolinkConfigV2 {
     pub key_prefix: String,
     pub url_template: String,
@@ -920,6 +956,7 @@ pub struct AutolinkConfigV2 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct LabelConfigV2 {
     pub name: String,
 
@@ -934,12 +971,14 @@ pub struct LabelConfigV2 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct NamedValueConfig {
     pub name: String,
     pub value: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SecretPlaceholderConfig {
     pub name: String,
     pub value_from: ExternalValueReference,
@@ -947,6 +986,7 @@ pub struct SecretPlaceholderConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(tag = "source", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum ExternalValueReference {
     Env {
         key: String,
@@ -958,6 +998,7 @@ pub enum ExternalValueReference {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct WorkflowStateConfig {
     pub path: String,
 
@@ -966,6 +1007,7 @@ pub struct WorkflowStateConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReferencedResourceConfig {
     #[serde(rename = "type")]
     pub resource_type: ReferencedResourceType,
@@ -991,6 +1033,7 @@ pub enum ReferencedResourceType {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum ActorReference {
     OrganizationAdmin,
     Team {
