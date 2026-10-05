@@ -31,24 +31,29 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+
+    use tokio::sync::Barrier;
 
     use super::map_buffered;
 
     #[tokio::test]
     async fn map_buffered_runs_concurrently_and_keeps_input_order() {
         let delays = [60u64, 10, 40, 20];
-        let started = Instant::now();
-        let results = map_buffered(delays, |delay| async move {
-            tokio::time::sleep(Duration::from_millis(delay)).await;
-            delay
-        })
-        .await;
+        // Every item waits for all the others, so the run completes only if they overlap.
+        let barrier = Barrier::new(delays.len());
+        let run = map_buffered(delays, |delay| {
+            let barrier = &barrier;
+            async move {
+                barrier.wait().await;
+                delay
+            }
+        });
+
+        let results = tokio::time::timeout(Duration::from_secs(10), run)
+            .await
+            .expect("items did not run concurrently");
 
         assert_eq!(results, delays);
-        assert!(
-            started.elapsed() < Duration::from_millis(120),
-            "sequential execution would take 130 ms"
-        );
     }
 }

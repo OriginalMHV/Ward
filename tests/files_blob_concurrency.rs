@@ -1,8 +1,15 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helpers outside #[test] functions"
+)]
+
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::json;
 use wiremock::matchers::{method, path, query_param};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
 use ward::config::manifest::{
     CategoryPolicy, FileEncoding, FilesCategoryV2, ManagedFileV2, ManagementDisposition,
@@ -41,20 +48,63 @@ async fn mount_tree(server: &MockServer, entries: serde_json::Value) {
         .await;
 }
 
-async fn mount_blob(server: &MockServer, sha: &str, bytes: &[u8], delay: Duration) {
+/// Records when each blob request arrives, then answers after `delay`.
+#[derive(Clone, Default)]
+struct Arrivals(Arc<Mutex<Vec<Instant>>>);
+
+impl Arrivals {
+    /// The time between the first and the last arrival.
+    fn spread(&self) -> Duration {
+        let arrivals = self.0.lock().unwrap();
+        let first = arrivals.iter().min().unwrap();
+        let last = arrivals.iter().max().unwrap();
+        last.duration_since(*first)
+    }
+
+    fn count(&self) -> usize {
+        self.0.lock().unwrap().len()
+    }
+}
+
+struct BlobResponder {
+    body: serde_json::Value,
+    delay: Duration,
+    arrivals: Arrivals,
+}
+
+impl Respond for BlobResponder {
+    fn respond(&self, _request: &Request) -> ResponseTemplate {
+        self.arrivals.0.lock().unwrap().push(Instant::now());
+        ResponseTemplate::new(200)
+            .set_delay(self.delay)
+            .set_body_json(self.body.clone())
+    }
+}
+
+/// The delay each blob response is held. Serial fetching would spread the arrivals
+/// by at least this much per request, concurrent fetching by far less.
+const BLOB_DELAY: Duration = Duration::from_secs(1);
+
+async fn mount_blob(
+    server: &MockServer,
+    sha: &str,
+    bytes: &[u8],
+    delay: Duration,
+    arrivals: &Arrivals,
+) {
     Mock::given(method("GET"))
         .and(path(format!("/repos/test-org/my-repo/git/blobs/{sha}")))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_delay(delay)
-                .set_body_json(json!({
-                    "content": base64::Engine::encode(
-                        &base64::engine::general_purpose::STANDARD,
-                        bytes
-                    ),
-                    "encoding": "base64"
-                })),
-        )
+        .respond_with(BlobResponder {
+            body: json!({
+                "content": base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    bytes
+                ),
+                "encoding": "base64"
+            }),
+            delay,
+            arrivals: arrivals.clone(),
+        })
         .mount(server)
         .await;
 }
@@ -72,6 +122,7 @@ fn blob_entry(name: &str) -> serde_json::Value {
 #[tokio::test]
 async fn collect_fetches_blobs_concurrently_and_keeps_order() {
     let server = MockServer::start().await;
+    let arrivals = Arrivals::default();
     let names: Vec<String> = (0..8).map(|i| format!("f{i}.txt")).collect();
     mount_tree(
         &server,
@@ -83,21 +134,22 @@ async fn collect_fetches_blobs_concurrently_and_keeps_order() {
             &server,
             &format!("blob-{name}"),
             name.as_bytes(),
-            Duration::from_millis(300),
+            BLOB_DELAY,
+            &arrivals,
         )
         .await;
     }
 
     let client = Client::new_for_test("test-org", &server.uri());
-    let started = Instant::now();
     let collected = collect_files_category(&client, "my-repo", Some("main"), None)
         .await
         .unwrap();
 
+    assert_eq!(arrivals.count(), 8);
     assert!(
-        started.elapsed() < Duration::from_millis(1500),
-        "blob fetches ran serially: {:?}",
-        started.elapsed()
+        arrivals.spread() < BLOB_DELAY,
+        "blob fetches ran serially: spread {:?}",
+        arrivals.spread()
     );
     let paths: Vec<_> = collected
         .category
@@ -122,8 +174,23 @@ async fn collect_keeps_issue_order_across_early_and_fetched_entries() {
         ]),
     )
     .await;
-    mount_blob(&server, "blob-a-lfs", LFS.as_bytes(), Duration::ZERO).await;
-    mount_blob(&server, "blob-c-lfs", LFS.as_bytes(), Duration::ZERO).await;
+    let arrivals = Arrivals::default();
+    mount_blob(
+        &server,
+        "blob-a-lfs",
+        LFS.as_bytes(),
+        Duration::ZERO,
+        &arrivals,
+    )
+    .await;
+    mount_blob(
+        &server,
+        "blob-c-lfs",
+        LFS.as_bytes(),
+        Duration::ZERO,
+        &arrivals,
+    )
+    .await;
 
     let client = Client::new_for_test("test-org", &server.uri());
     let collected = collect_files_category(&client, "my-repo", Some("main"), None)
@@ -141,6 +208,7 @@ async fn collect_keeps_issue_order_across_early_and_fetched_entries() {
 #[tokio::test]
 async fn verify_fetches_blobs_concurrently() {
     let server = MockServer::start().await;
+    let arrivals = Arrivals::default();
     let names: Vec<String> = (0..8).map(|i| format!("f{i}.txt")).collect();
     mount_tree(
         &server,
@@ -152,7 +220,8 @@ async fn verify_fetches_blobs_concurrently() {
             &server,
             &format!("blob-{name}"),
             name.as_bytes(),
-            Duration::from_millis(300),
+            BLOB_DELAY,
+            &arrivals,
         )
         .await;
     }
@@ -177,11 +246,15 @@ async fn verify_fetches_blobs_concurrently() {
     };
 
     let client = Client::new_for_test("test-org", &server.uri());
-    let started = Instant::now();
     let result = verify_files_category(&client, "my-repo", Some("main"), &desired)
         .await
         .unwrap();
 
     assert!(result.matches);
-    assert!(started.elapsed() < Duration::from_millis(1500));
+    assert_eq!(arrivals.count(), 8);
+    assert!(
+        arrivals.spread() < BLOB_DELAY,
+        "blob fetches ran serially: spread {:?}",
+        arrivals.spread()
+    );
 }
