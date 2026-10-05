@@ -253,7 +253,7 @@ impl Client {
             )
         })
         .await
-        .context("Failed to parse code security configurations response")
+        .context("Failed to read code security configurations response")
     }
 
     pub async fn read_repository_code_security_configuration(

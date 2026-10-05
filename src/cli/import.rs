@@ -674,7 +674,7 @@ fn record_collector_failure(
     coverage: &mut Vec<CoverageEntry>,
     warnings: &mut Vec<String>,
 ) {
-    let message = error.to_string();
+    let message = format!("{error:#}");
     coverage.push(CoverageEntry {
         category,
         endpoint: collector.to_owned(),

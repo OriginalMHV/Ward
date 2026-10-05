@@ -302,3 +302,25 @@ async fn forbidden_lookups_the_manifest_does_not_need_are_not_unknown_state() {
         CoverageOutcome::PermissionDenied | CoverageOutcome::Unavailable
     )));
 }
+
+#[tokio::test]
+async fn plan_limit_403_on_rulesets_names_the_status_and_github_message() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/example/rulesets"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({
+            "message": "Upgrade to GitHub Pro or make this repository public to enable this feature."
+        })))
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let error = collect_rulesets_category(&client, "example", None)
+        .await
+        .unwrap_err();
+    let message = format!("{error:#}");
+
+    assert!(message.contains("403"), "{message}");
+    assert!(message.contains("Upgrade to GitHub Pro"), "{message}");
+    assert!(!message.contains("Failed to parse"), "{message}");
+}

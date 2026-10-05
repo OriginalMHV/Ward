@@ -439,7 +439,7 @@ pub async fn collect_security_category_with_baseline(
             coverage.push(unavailable_entry(
                 ManifestCategoryName::Security,
                 "GET /orgs/{org}/code-security/configurations",
-                error.to_string(),
+                format!("{error:#}"),
             ));
             Vec::new()
         }
@@ -466,7 +466,7 @@ pub async fn collect_security_category_with_baseline(
                 coverage.push(unavailable_entry(
                     ManifestCategoryName::Security,
                     "GET /orgs/{org}/teams",
-                    error.to_string(),
+                    format!("{error:#}"),
                 ));
                 issues.push(warning_issue(
                     Some(repo.to_owned()),
@@ -485,7 +485,7 @@ pub async fn collect_security_category_with_baseline(
                 coverage.push(unavailable_entry(
                     ManifestCategoryName::Security,
                     "GET /orgs/{org}/custom-repository-roles",
-                    error.to_string(),
+                    format!("{error:#}"),
                 ));
                 issues.push(warning_issue(
                     Some(repo.to_owned()),
@@ -1053,7 +1053,7 @@ pub async fn collect_rulesets_category(
             coverage.push(lookup_failure_entry(
                 ManifestCategoryName::Rulesets,
                 "GET /orgs/{org}/teams",
-                error.to_string(),
+                format!("{error:#}"),
                 needs_teams,
             ));
             Vec::new()
@@ -1071,7 +1071,7 @@ pub async fn collect_rulesets_category(
             coverage.push(lookup_failure_entry(
                 ManifestCategoryName::Rulesets,
                 "GET /orgs/{org}/custom-repository-roles",
-                error.to_string(),
+                format!("{error:#}"),
                 needs_roles,
             ));
             Vec::new()
@@ -1089,7 +1089,7 @@ pub async fn collect_rulesets_category(
             coverage.push(lookup_failure_entry(
                 ManifestCategoryName::Rulesets,
                 "GET /orgs/{org}/installations",
-                error.to_string(),
+                format!("{error:#}"),
                 needs_apps,
             ));
             Vec::new()
@@ -1121,7 +1121,7 @@ pub async fn collect_rulesets_category(
             coverage.push(lookup_failure_entry(
                 ManifestCategoryName::Rulesets,
                 "GET /repos/{owner}/{repo}/collaborators?affiliation=all",
-                error.to_string(),
+                format!("{error:#}"),
                 needs_users,
             ));
             HashMap::new()
@@ -1150,7 +1150,7 @@ pub async fn collect_rulesets_category(
                 coverage.push(unavailable_entry(
                     ManifestCategoryName::Rulesets,
                     "GET /repos/{owner}/{repo}/rulesets/{ruleset_id}",
-                    error.to_string(),
+                    format!("{error:#}"),
                 ));
                 issues.push(blocker_issue(
                     Some(ruleset.name.clone()),
@@ -1477,7 +1477,7 @@ pub async fn collect_branch_protection_category_for_branch(
             coverage.push(unavailable_entry(
                 ManifestCategoryName::BranchProtection,
                 "GET /orgs/{org}/installations",
-                error.to_string(),
+                format!("{error:#}"),
             ));
             HashMap::new()
         }

@@ -98,7 +98,7 @@ impl Client {
             )
         })
         .await
-        .context("Failed to parse rulesets response")
+        .context("Failed to read rulesets response")
     }
 
     pub async fn get_ruleset(&self, repo: &str, ruleset_id: u64) -> Result<RulesetDetail> {
