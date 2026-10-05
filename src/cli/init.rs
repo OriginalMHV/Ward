@@ -110,13 +110,32 @@ impl InitCommand {
     }
 }
 
+/// Write `content` to `path` only if the file does not exist.
+/// Returns `false` when it already exists. The check and the write are one atomic step.
+fn create_new_file(path: &std::path::Path, content: &str) -> Result<bool> {
+    use std::io::Write;
+
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(mut file) => {
+            file.write_all(content.as_bytes())
+                .with_context(|| format!("Failed to write {}", path.display()))?;
+            Ok(true)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(error) => Err(error).with_context(|| format!("Failed to create {}", path.display())),
+    }
+}
+
 fn write_default() -> Result<()> {
-    if std::path::Path::new(OUTPUT_PATH).exists() {
+    if !create_new_file(std::path::Path::new(OUTPUT_PATH), EXAMPLE_MANIFEST)? {
         println!("  {} ward.toml already exists.", style("warning").yellow());
         return Ok(());
     }
 
-    std::fs::write(OUTPUT_PATH, EXAMPLE_MANIFEST)?;
     println!(
         "  {} Created ward.toml - edit it to configure your org and systems.",
         style("ok").green()
@@ -541,7 +560,9 @@ fn ask_file_delivery() -> Result<FileDeliverySettings> {
 // TOML generation
 
 fn write_toml(state: &WizardState) -> Result<()> {
-    std::fs::write(OUTPUT_PATH, render_manifest(state)).context("Failed to write ward.toml")?;
+    if !create_new_file(std::path::Path::new(OUTPUT_PATH), &render_manifest(state))? {
+        anyhow::bail!("ward.toml was created while the wizard ran. Ward did not overwrite it.");
+    }
     Ok(())
 }
 
@@ -676,6 +697,28 @@ mod tests {
     use super::*;
     use crate::config::Manifest;
     use crate::config::manifest::ManagementDisposition;
+
+    #[test]
+    fn create_new_file_never_overwrites_an_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ward.toml");
+
+        assert!(create_new_file(&path, "first").unwrap());
+        assert!(!create_new_file(&path, "second").unwrap());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "first");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_new_file_does_not_follow_a_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.txt");
+        let link = dir.path().join("ward.toml");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        assert!(!create_new_file(&link, "content").unwrap());
+        assert!(!target.exists());
+    }
 
     fn make_repo(name: &str, archived: bool) -> MinimalRepo {
         MinimalRepo {
