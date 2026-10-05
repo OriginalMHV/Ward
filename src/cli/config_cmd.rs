@@ -41,36 +41,70 @@ pub enum ConfigAction {
     },
 }
 
-const VALID_KEYS: &[(&str, ValueKind)] = &[
-    ("org.name", ValueKind::Str),
-    ("categories.security.secret_scanning", ValueKind::Bool),
+/// Where a settable key lives in the manifest.
+#[derive(Clone, Copy)]
+enum ConfigKey {
+    OrgName,
+    FileDeliveryBranch,
+    FileDeliveryCommitMessagePrefix,
+    /// A field of `[categories.security]`.
+    Security(&'static str),
+    /// A field of `[categories.branch_protection.default_branch]`.
+    DefaultBranch(&'static str),
+}
+
+const VALID_KEYS: &[(&str, ValueKind, ConfigKey)] = &[
+    ("org.name", ValueKind::Str, ConfigKey::OrgName),
+    (
+        "categories.security.secret_scanning",
+        ValueKind::Bool,
+        ConfigKey::Security("secret_scanning"),
+    ),
     (
         "categories.security.secret_scanning_push_protection",
         ValueKind::Bool,
+        ConfigKey::Security("secret_scanning_push_protection"),
     ),
-    ("categories.security.dependabot_alerts", ValueKind::Bool),
+    (
+        "categories.security.dependabot_alerts",
+        ValueKind::Bool,
+        ConfigKey::Security("dependabot_alerts"),
+    ),
     (
         "categories.security.dependabot_security_updates",
         ValueKind::Bool,
+        ConfigKey::Security("dependabot_security_updates"),
     ),
     (
         "categories.security.secret_scanning_ai_detection",
         ValueKind::Bool,
+        ConfigKey::Security("secret_scanning_ai_detection"),
     ),
     (
         "categories.branch_protection.default_branch.enabled",
         ValueKind::Bool,
+        ConfigKey::DefaultBranch("enabled"),
     ),
     (
         "categories.branch_protection.default_branch.required_approvals",
         ValueKind::Int,
+        ConfigKey::DefaultBranch("required_approvals"),
     ),
     (
         "categories.branch_protection.default_branch.dismiss_stale_reviews",
         ValueKind::Bool,
+        ConfigKey::DefaultBranch("dismiss_stale_reviews"),
     ),
-    ("file_delivery.branch", ValueKind::Str),
-    ("file_delivery.commit_message_prefix", ValueKind::Str),
+    (
+        "file_delivery.branch",
+        ValueKind::Str,
+        ConfigKey::FileDeliveryBranch,
+    ),
+    (
+        "file_delivery.commit_message_prefix",
+        ValueKind::Str,
+        ConfigKey::FileDeliveryCommitMessagePrefix,
+    ),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -327,17 +361,20 @@ fn run_path(config_override: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn lookup_key(key: &str) -> Option<ValueKind> {
-    VALID_KEYS.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
+fn lookup_key(key: &str) -> Option<(ValueKind, ConfigKey)> {
+    VALID_KEYS
+        .iter()
+        .find(|(name, _, _)| *name == key)
+        .map(|(_, kind, target)| (*kind, *target))
 }
 
 pub fn apply_set(path: &Path, key: &str, value: &str) -> Result<()> {
-    let kind = lookup_key(key).ok_or_else(|| {
+    let (kind, target) = lookup_key(key).ok_or_else(|| {
         anyhow::anyhow!(
             "Unknown config key '{key}'. Valid keys:\n  {}",
             VALID_KEYS
                 .iter()
-                .map(|(k, _)| *k)
+                .map(|(name, _, _)| *name)
                 .collect::<Vec<_>>()
                 .join("\n  ")
         )
@@ -365,21 +402,16 @@ pub fn apply_set(path: &Path, key: &str, value: &str) -> Result<()> {
         ValueKind::Str => toml_edit::value(value),
     };
 
-    match key {
-        "org.name" => doc["org"]["name"] = item,
-        "file_delivery.branch" => doc["file_delivery"]["branch"] = item,
-        "file_delivery.commit_message_prefix" => {
-            doc["file_delivery"]["commit_message_prefix"] = item
+    match target {
+        ConfigKey::OrgName => doc["org"]["name"] = item,
+        ConfigKey::FileDeliveryBranch => doc["file_delivery"]["branch"] = item,
+        ConfigKey::FileDeliveryCommitMessagePrefix => {
+            doc["file_delivery"]["commit_message_prefix"] = item;
         }
-        key if key.starts_with("categories.security.") => {
-            let field = key.rsplit('.').next().unwrap();
-            canonical_category(&mut doc, "security")?[field] = item;
-        }
-        key if key.starts_with("categories.branch_protection.default_branch.") => {
-            let field = key.rsplit('.').next().unwrap();
+        ConfigKey::Security(field) => canonical_category(&mut doc, "security")?[field] = item,
+        ConfigKey::DefaultBranch(field) => {
             canonical_category(&mut doc, "branch_protection")?["default_branch"][field] = item;
         }
-        _ => unreachable!("validated configuration key"),
     }
 
     std::fs::write(path, doc.to_string())
@@ -587,6 +619,23 @@ exclude = ["operations?"]
         let file = NamedTempFile::new().unwrap();
         std::fs::write(file.path(), content).unwrap();
         file
+    }
+
+    #[test]
+    fn every_valid_key_can_be_set() {
+        for (name, kind, _) in VALID_KEYS {
+            let file = write_temp(SAMPLE_TOML);
+            let value = match kind {
+                ValueKind::Bool => "true",
+                ValueKind::Int => "2",
+                ValueKind::Str => "value",
+            };
+            apply_set(file.path(), name, value)
+                .unwrap_or_else(|error| panic!("setting {name} failed: {error:#}"));
+            let updated = std::fs::read_to_string(file.path()).unwrap();
+            toml::from_str::<Manifest>(&updated)
+                .unwrap_or_else(|error| panic!("{name} produced an invalid manifest: {error}"));
+        }
     }
 
     #[test]
