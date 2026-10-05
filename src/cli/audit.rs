@@ -34,6 +34,9 @@ struct RepoAudit {
     security: SecurityAudit,
     dependency_graph: DependencyGraphAudit,
     settings: SettingsAudit,
+    /// Data that could not be read for this repository, for example a 403.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    unavailable: Vec<String>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -139,23 +142,39 @@ async fn audit_repo(
     let has_dependabot_config = client
         .get_file(repo, ".github/dependabot.yml", None)
         .await?
-        .is_some();
+        .is_some()
+        || client
+            .get_file(repo, ".github/dependabot.yaml", None)
+            .await?
+            .is_some();
     let has_codeql = client
         .get_file(repo, ".github/workflows/codeql.yml", None)
         .await?
         .is_some();
 
-    let rulesets = client
-        .list_rulesets(repo)
-        .await
-        .with_context(|| format!("Failed to audit rulesets for repository {repo}"))?;
+    let mut unavailable = Vec::new();
+    let rulesets = match client.list_rulesets(repo).await {
+        Ok(rulesets) => rulesets,
+        Err(error) => {
+            tracing::warn!("Rulesets unavailable for {repo}: {error:#}");
+            unavailable.push(format!("rulesets: {error:#}"));
+            Vec::new()
+        }
+    };
     let has_copilot_review = rulesets.iter().any(|r| r.name == "Copilot Code Review");
     let has_copilot_instructions = client
         .get_file(repo, ".github/copilot-instructions.md", None)
         .await?
         .is_some();
 
-    let alert_counts = get_alert_counts(client, repo).await?;
+    let alert_counts = match get_alert_counts(client, repo).await {
+        Ok(counts) => counts,
+        Err(error) => {
+            tracing::warn!("Dependabot alerts unavailable for {repo}: {error:#}");
+            unavailable.push(format!("dependabot alerts: {error:#}"));
+            AlertCounts::default()
+        }
+    };
     let dependency_graph = client.audit_dependency_graph(repo).await;
 
     Ok(RepoAudit {
@@ -178,50 +197,73 @@ async fn audit_repo(
             has_copilot_review_ruleset: has_copilot_review,
             has_copilot_instructions,
         },
+        unavailable,
     })
 }
 
 async fn get_alert_counts(client: &Client, repo: &str) -> Result<AlertCounts> {
-    let path = format!(
+    let mut path = format!(
         "/repos/{}/{repo}/dependabot/alerts?state=open&per_page=100",
         client.org()
     );
-    let response = client
-        .get(&path)
-        .await
-        .with_context(|| format!("GET {path} for repository {repo} failed"))?;
-    let status = response.status();
-    if status == StatusCode::NOT_FOUND {
-        return Ok(AlertCounts::default());
-    }
-    if !status.is_success() {
-        return Err(anyhow::anyhow!(
-            "GET {path} for repository {repo} returned unexpected HTTP status {status}"
-        ));
-    }
-
-    let alerts: Vec<serde_json::Value> = response
-        .json()
-        .await
-        .with_context(|| format!("Failed to decode JSON from GET {path} for repository {repo}"))?;
-
     let mut counts = AlertCounts::default();
-    for alert in &alerts {
-        let severity = alert
-            .get("security_vulnerability")
-            .and_then(|v| v.get("severity"))
-            .and_then(|s| s.as_str())
-            .unwrap_or("unknown");
-        match severity {
-            "critical" => counts.critical += 1,
-            "high" => counts.high += 1,
-            "medium" => counts.medium += 1,
-            "low" => counts.low += 1,
-            _ => {}
+
+    loop {
+        let response = client
+            .get(&path)
+            .await
+            .with_context(|| format!("GET {path} for repository {repo} failed"))?;
+        let status = response.status();
+        if status == StatusCode::NOT_FOUND {
+            return Ok(AlertCounts::default());
+        }
+        if !status.is_success() {
+            return Err(anyhow::anyhow!(
+                "GET {path} for repository {repo} returned unexpected HTTP status {status}"
+            ));
+        }
+        let next = next_page_path(response.headers());
+
+        let alerts: Vec<serde_json::Value> = response.json().await.with_context(|| {
+            format!("Failed to decode JSON from GET {path} for repository {repo}")
+        })?;
+
+        for alert in &alerts {
+            let severity = alert
+                .get("security_vulnerability")
+                .and_then(|v| v.get("severity"))
+                .and_then(|s| s.as_str())
+                .unwrap_or("unknown");
+            match severity {
+                "critical" => counts.critical += 1,
+                "high" => counts.high += 1,
+                "medium" => counts.medium += 1,
+                "low" => counts.low += 1,
+                _ => {}
+            }
+        }
+
+        match next {
+            Some(next) => path = next,
+            None => return Ok(counts),
         }
     }
+}
 
-    Ok(counts)
+/// Dependabot alerts use cursor pagination, so follow the `Link: rel="next"`
+/// header instead of page numbers. Returns the path and query of the next page.
+fn next_page_path(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    let link = headers.get(reqwest::header::LINK)?.to_str().ok()?;
+    link.split(',').find_map(|part| {
+        let (url, rel) = part.split_once(';')?;
+        if !rel.contains("rel=\"next\"") {
+            return None;
+        }
+        let url = url.trim().trim_start_matches('<').trim_end_matches('>');
+        let after_scheme = url.split_once("://")?.1;
+        let path_start = after_scheme.find('/')?;
+        Some(after_scheme[path_start..].to_owned())
+    })
 }
 
 fn is_json_format(format: &str) -> bool {
@@ -265,7 +307,13 @@ fn print_table(audits: &[RepoAudit]) {
             + a.security.alert_counts.low;
         total_alerts += alert_total;
 
-        let alert_str = if alert_total == 0 {
+        let alert_str = if a
+            .unavailable
+            .iter()
+            .any(|entry| entry.starts_with("dependabot alerts"))
+        {
+            format!("{}", style("?").yellow())
+        } else if alert_total == 0 {
             format!("{}", style("0").green())
         } else if a.security.alert_counts.critical > 0 {
             format!("{}", style(alert_total).red().bold())
@@ -322,6 +370,18 @@ fn print_table(audits: &[RepoAudit]) {
     println!();
     for line in table.lines() {
         println!("  {line}");
+    }
+
+    for audit in audits.iter().filter(|a| !a.unavailable.is_empty()) {
+        println!();
+        println!(
+            "  {} {}: data unavailable",
+            style("[??]").yellow(),
+            audit.name
+        );
+        for entry in &audit.unavailable {
+            println!("      {entry}");
+        }
     }
 
     println!();
@@ -492,5 +552,83 @@ mod tests {
         assert!(message.contains("GET"));
         assert!(message.contains("my-repo"));
         assert!(message.contains("/dependabot/alerts"));
+    }
+
+    #[tokio::test]
+    async fn alert_counts_follow_link_header_pages() {
+        let server = MockServer::start().await;
+        let alert = |severity: &str| json!({"security_vulnerability": {"severity": severity}});
+        Mock::given(method("GET"))
+            .and(path("/repos/test-org/my-repo/dependabot/alerts"))
+            .and(wiremock::matchers::query_param("after", "cursor1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([alert("high")])))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/repos/test-org/my-repo/dependabot/alerts"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header(
+                        "link",
+                        format!(
+                            "<{}/repos/test-org/my-repo/dependabot/alerts?state=open&per_page=100&after=cursor1>; rel=\"next\"",
+                            server.uri()
+                        ),
+                    )
+                    .set_body_json(json!([alert("critical"), alert("low")])),
+            )
+            .mount(&server)
+            .await;
+
+        let client = Client::new_for_test("test-org", &server.uri());
+        let counts = get_alert_counts(&client, "my-repo").await.unwrap();
+
+        assert_eq!((counts.critical, counts.high, counts.low), (1, 1, 1));
+    }
+
+    #[tokio::test]
+    async fn forbidden_alerts_and_rulesets_do_not_abort_the_audit() {
+        let server = MockServer::start().await;
+        for suffix in ["dependabot/alerts", "rulesets"] {
+            Mock::given(method("GET"))
+                .and(path(format!("/repos/test-org/my-repo/{suffix}")))
+                .respond_with(
+                    ResponseTemplate::new(403).set_body_json(json!({"message": "Forbidden"})),
+                )
+                .mount(&server)
+                .await;
+        }
+        Mock::given(method("GET"))
+            .and(path(
+                "/repos/test-org/my-repo/contents/.github/dependabot.yaml",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "name": "dependabot.yaml",
+                "path": ".github/dependabot.yaml",
+                "sha": "abc",
+                "type": "file",
+                "content": "dmVyc2lvbjogMg==",
+                "encoding": "base64"
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let client = Client::new_for_test("test-org", &server.uri());
+        let repo: crate::github::repos::Repository = serde_json::from_value(json!({
+            "name": "my-repo",
+            "full_name": "test-org/my-repo",
+            "archived": false,
+            "default_branch": "main",
+            "visibility": "private"
+        }))
+        .unwrap();
+
+        let audit = super::audit_repo(&client, &repo, None).await.unwrap();
+        assert_eq!(audit.unavailable.len(), 2, "{:?}", audit.unavailable);
+        assert!(audit.security.has_dependabot_config);
     }
 }
