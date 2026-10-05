@@ -1,4 +1,4 @@
 pub mod auth;
 pub mod manifest;
 
-pub use manifest::{Manifest, ManifestDocument};
+pub use manifest::Manifest;

@@ -12,10 +12,6 @@ const MANIFEST_SCHEMA_VERSION: u32 = 2;
 pub struct ManifestDocument(pub Manifest);
 
 impl ManifestDocument {
-    pub fn into_manifest(self) -> Manifest {
-        self.0
-    }
-
     pub fn render(&self) -> Result<String, toml::ser::Error> {
         toml::to_string_pretty(self)
     }
@@ -415,17 +411,6 @@ pub struct BranchProtectionCategoryV2 {
     pub protected_branches: Vec<ProtectedBranchConfig>,
 }
 
-impl BranchProtectionCategoryV2 {
-    pub fn observe() -> Self {
-        Self {
-            policy: CategoryPolicy::observe(),
-            default_branch: None,
-            default_branch_detailed: None,
-            protected_branches: Vec::new(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DetailedBranchProtectionConfigV2 {
@@ -537,16 +522,6 @@ pub struct RulesetsCategoryV2 {
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repository_rulesets: Vec<RepositoryRulesetV2>,
-}
-
-impl RulesetsCategoryV2 {
-    pub fn observe() -> Self {
-        Self {
-            policy: CategoryPolicy::observe(),
-            references: Vec::new(),
-            repository_rulesets: Vec::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]

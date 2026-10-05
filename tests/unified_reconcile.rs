@@ -685,7 +685,12 @@ async fn plan_reads_the_repository_endpoint_once_per_repository() {
         references: Vec::new(),
     });
     manifest.categories.security = Some(SecurityCategoryV2::observe_sensitive());
-    manifest.categories.branch_protection = Some(BranchProtectionCategoryV2::observe());
+    manifest.categories.branch_protection = Some(BranchProtectionCategoryV2 {
+        policy: CategoryPolicy::observe(),
+        default_branch: None,
+        default_branch_detailed: None,
+        protected_branches: Vec::new(),
+    });
 
     let client = Client::new_for_test("test-org", &server.uri());
     let repos = vec![test_repo("my-repo")];

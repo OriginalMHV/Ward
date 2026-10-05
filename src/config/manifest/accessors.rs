@@ -110,10 +110,6 @@ impl Manifest {
         }
         categories
     }
-
-    pub fn categories(&self) -> &ManifestCategories {
-        &self.categories
-    }
 }
 
 impl Default for Manifest {
