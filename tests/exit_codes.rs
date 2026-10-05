@@ -52,3 +52,14 @@ fn successful_commands_exit_with_zero() {
 
     assert_eq!(output.status.code(), Some(0));
 }
+
+#[test]
+fn removed_config_subcommands_exit_with_two_and_name_the_replacement() {
+    for name in ["set", "add-system", "remove-system"] {
+        let output = ward(&["config", name, "org.name", "x"]);
+
+        assert_eq!(output.status.code(), Some(2), "{name}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("ward config edit"), "{stderr}");
+    }
+}

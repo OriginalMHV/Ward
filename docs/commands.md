@@ -382,48 +382,11 @@ Open the config file in your editor (`$EDITOR`, `$VISUAL`, or `vi`).
 ward config edit
 ```
 
-### `ward config set`
+### Removed config subcommands
 
-Set a configuration value using dot notation.
+`ward config set`, `ward config add-system` and `ward config remove-system` were removed. They exit with code 2 and name the replacement. Edit `ward.toml` directly, or run `ward config edit` to open it in `$EDITOR` and validate it on save.
 
-```bash
-ward config set org.name "my-org"
-ward config set categories.security.secret_scanning_push_protection true
-ward config set categories.branch_protection.default_branch.required_approvals 2
-ward config set categories.branch_protection.default_branch.dismiss_stale_reviews true
-ward config set file_delivery.branch "chore/ward-update"
-ward config set file_delivery.commit_message_prefix "ci: "
-```
-
-Valid key paths are limited to commonly adjusted canonical manifest fields:
-
-| Prefix | Keys |
-|--------|------|
-| `org.` | `name` |
-| `categories.security.` | `secret_scanning`, `secret_scanning_push_protection`, `secret_scanning_ai_detection`, `dependabot_alerts`, `dependabot_security_updates` |
-| `categories.branch_protection.default_branch.` | `enabled`, `required_approvals`, `dismiss_stale_reviews` |
-| `file_delivery.` | `branch`, `commit_message_prefix` |
-
-The selected category must already be present in the Ward manifest. Use `ward init` to create the initial categories, then edit more advanced category state directly.
-
-### `ward config add-system`
-
-Interactive wizard to add a new system.
-
-```bash
-ward config add-system
-```
-
-Prompts for: system ID, display name, exclude patterns, explicit repo names.
-
-### `ward config remove-system`
-
-Remove a system by ID.
-
-```bash
-ward config remove-system backend
-ward config remove-system backend --yes
-```
+---
 
 ## `ward init`
 
