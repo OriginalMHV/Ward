@@ -201,37 +201,87 @@ impl Client {
 
             check_rate_limit(&response);
 
-            let Some(delay) = response::retry_delay(
-                response.status(),
+            let (response, secondary_limit_body) = detect_secondary_limit(response).await?;
+            let status = response.status();
+
+            let Some(plan) = response::retry_delay(
+                status,
                 response.headers(),
+                secondary_limit_body,
                 attempt,
-                &self.retry_policy.backoff_schedule,
+                &self.retry_policy.timing(),
                 Utc::now(),
             ) else {
+                if response::is_rate_limit_status(status)
+                    && !response::needs_body_check(response.headers())
+                {
+                    tracing::warn!(
+                        "{method} {url} returned HTTP {status} with an exhausted rate limit that is too long to wait for"
+                    );
+                }
                 return Ok(response);
             };
+            let delay = plan.delay;
 
             let Some(next_request) = retry_request else {
                 tracing::debug!(
                     "{method} {url} returned HTTP {} but the request cannot be retried safely",
-                    response.status()
+                    status
                 );
                 return Ok(response);
             };
 
-            tracing::debug!(
-                "{method} {url} returned HTTP {} and will be retried after {:?} ({}/{})",
-                response.status(),
-                delay,
-                attempt + 1,
-                self.retry_policy.max_attempts
-            );
+            match plan.kind {
+                response::RetryKind::Transient => tracing::debug!(
+                    "{method} {url} returned HTTP {status} and will be retried after {delay:?} ({}/{})",
+                    attempt + 1,
+                    self.retry_policy.max_attempts
+                ),
+                response::RetryKind::PrimaryRateLimit | response::RetryKind::SecondaryRateLimit => {
+                    tracing::warn!(
+                        "GitHub {} rate limit hit on {method} {url} (HTTP {status}). Waiting {delay:?} before retry {}/{}",
+                        if plan.kind == response::RetryKind::PrimaryRateLimit {
+                            "primary"
+                        } else {
+                            "secondary"
+                        },
+                        attempt + 1,
+                        self.retry_policy.max_attempts
+                    );
+                }
+            }
 
             tokio::time::sleep(delay).await;
             request = next_request;
             attempt += 1;
         }
     }
+}
+
+/// Read a 403 body only when no rate limit header explains it, so a secondary
+/// rate limit without `retry-after` is still recognised. The response is rebuilt
+/// so callers can read the body again.
+async fn detect_secondary_limit(response: reqwest::Response) -> Result<(reqwest::Response, bool)> {
+    if response.status() != reqwest::StatusCode::FORBIDDEN
+        || !response::needs_body_check(response.headers())
+    {
+        return Ok((response, false));
+    }
+
+    let status = response.status();
+    let version = response.version();
+    let headers = response.headers().clone();
+    let body = response
+        .bytes()
+        .await
+        .context("Failed to read GitHub 403 response body")?;
+    let secondary = response::mentions_secondary_rate_limit(&body);
+
+    let mut rebuilt = http::Response::new(body);
+    *rebuilt.status_mut() = status;
+    *rebuilt.version_mut() = version;
+    *rebuilt.headers_mut() = headers;
+    Ok((reqwest::Response::from(rebuilt), secondary))
 }
 
 fn check_rate_limit(resp: &reqwest::Response) {
@@ -261,10 +311,15 @@ fn default_headers(authorization: HeaderValue) -> Result<HeaderMap> {
     Ok(headers)
 }
 
+const SECONDARY_RATE_LIMIT_WAIT: Duration = Duration::from_secs(60);
+const MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(300);
+
 #[derive(Clone, Copy, Debug)]
 struct RetryPolicy {
     max_attempts: usize,
     backoff_schedule: [Duration; 3],
+    secondary_wait: Duration,
+    max_rate_limit_wait: Duration,
 }
 
 impl Default for RetryPolicy {
@@ -272,6 +327,8 @@ impl Default for RetryPolicy {
         Self {
             max_attempts: metadata::MAX_RETRY_ATTEMPTS,
             backoff_schedule: metadata::RETRY_BACKOFF_SCHEDULE,
+            secondary_wait: SECONDARY_RATE_LIMIT_WAIT,
+            max_rate_limit_wait: MAX_RATE_LIMIT_WAIT,
         }
     }
 }
@@ -281,6 +338,16 @@ impl RetryPolicy {
         Self {
             max_attempts: metadata::MAX_RETRY_ATTEMPTS,
             backoff_schedule: [Duration::ZERO; 3],
+            secondary_wait: Duration::ZERO,
+            max_rate_limit_wait: MAX_RATE_LIMIT_WAIT,
+        }
+    }
+
+    fn timing(&self) -> response::RetryTiming<'_> {
+        response::RetryTiming {
+            backoff_schedule: &self.backoff_schedule,
+            secondary_wait: self.secondary_wait,
+            max_rate_limit_wait: self.max_rate_limit_wait,
         }
     }
 }
