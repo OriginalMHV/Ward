@@ -855,10 +855,19 @@ fn write_manifest(output: &Path, content: &str) -> Result<()> {
     }
 
     let temporary = output.with_extension(format!("tmp.{}", std::process::id()));
-    std::fs::write(&temporary, content)
-        .with_context(|| format!("Failed to write {}", temporary.display()))?;
-    std::fs::rename(&temporary, output)
-        .with_context(|| format!("Failed to replace {}", output.display()))?;
+    // `create_new` refuses to follow a pre-placed symlink at the predictable name.
+    let write_result = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .and_then(|mut file| std::io::Write::write_all(&mut file, content.as_bytes()));
+    if let Err(error) = write_result {
+        return Err(error).with_context(|| format!("Failed to write {}", temporary.display()));
+    }
+    if let Err(error) = std::fs::rename(&temporary, output) {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error).with_context(|| format!("Failed to replace {}", output.display()));
+    }
     Ok(())
 }
 
@@ -924,6 +933,31 @@ mod tests {
         SecretPlaceholderConfig,
     };
     use crate::reconcile::general::GeneralLabel;
+
+    #[test]
+    fn write_manifest_replaces_the_output_and_leaves_no_temporary_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("ward.toml");
+        std::fs::write(&output, "old").unwrap();
+
+        write_manifest(&output, "new").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&output).unwrap(), "new");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_manifest_does_not_follow_a_pre_placed_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("ward.toml");
+        let victim = dir.path().join("victim.txt");
+        let temporary = output.with_extension(format!("tmp.{}", std::process::id()));
+        std::os::unix::fs::symlink(&victim, &temporary).unwrap();
+
+        assert!(write_manifest(&output, "new").is_err());
+        assert!(!victim.exists());
+    }
 
     #[test]
     fn parses_supported_repository_references() {
