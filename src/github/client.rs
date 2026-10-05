@@ -69,7 +69,7 @@ impl Client {
     }
 
     /// Make a PATCH request with a JSON body.
-    pub async fn patch_json<T: serde::Serialize>(
+    pub async fn patch_json<T: serde::Serialize + Sync>(
         &self,
         path: &str,
         body: &T,
@@ -80,7 +80,7 @@ impl Client {
     }
 
     /// Make a POST request with a JSON body.
-    pub async fn post_json<T: serde::Serialize>(
+    pub async fn post_json<T: serde::Serialize + Sync>(
         &self,
         path: &str,
         body: &T,
@@ -91,7 +91,7 @@ impl Client {
     }
 
     /// Make a PUT request with a JSON body.
-    pub async fn put_json<T: serde::Serialize>(
+    pub async fn put_json<T: serde::Serialize + Sync>(
         &self,
         path: &str,
         body: &T,
@@ -107,7 +107,7 @@ impl Client {
     }
 
     /// Make a DELETE request with a JSON body.
-    pub async fn delete_json<T: serde::Serialize>(
+    pub async fn delete_json<T: serde::Serialize + Sync>(
         &self,
         path: &str,
         body: &T,
@@ -120,7 +120,7 @@ impl Client {
     pub async fn graphql<T, V>(&self, query: &str, variables: &V) -> Result<T>
     where
         T: DeserializeOwned,
-        V: Serialize,
+        V: Serialize + Sync,
     {
         #[derive(Serialize)]
         struct GraphqlRequest<'a, V> {
@@ -433,6 +433,21 @@ mod tests {
         assert!(is_read_only_query("{ viewer { login } }"));
         assert!(!is_read_only_query("mutation M { x }"));
         assert!(!is_read_only_query("# note\nmutation M { x }"));
+    }
+
+    fn assert_send<T: Send>(_: T) {}
+
+    #[allow(dead_code)]
+    fn request_futures_are_send<B: serde::Serialize + Sync, V: serde::Serialize + Sync>(
+        client: &Client,
+        body: &B,
+        variables: &V,
+    ) {
+        assert_send(client.patch_json("/", body));
+        assert_send(client.post_json("/", body));
+        assert_send(client.put_json("/", body));
+        assert_send(client.delete_json("/", body));
+        assert_send(client.graphql::<serde_json::Value, V>("query { x }", variables));
     }
 
     #[tokio::test]
