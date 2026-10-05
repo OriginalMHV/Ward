@@ -312,12 +312,24 @@ fn is_read_only_query(query: &str) -> bool {
 }
 
 fn check_rate_limit(resp: &reqwest::Response) {
-    if let Some(remaining) = resp.headers().get("x-ratelimit-remaining")
-        && let Ok(remaining) = remaining.to_str().unwrap_or("?").parse::<u32>()
-        && remaining < 100
-    {
-        tracing::warn!("GitHub API rate limit low: {remaining} remaining");
+    let headers = resp.headers();
+    if let Some(remaining) = low_rate_limit_remaining(headers) {
+        let resource = headers
+            .get("x-ratelimit-resource")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("unknown");
+        tracing::warn!("GitHub API rate limit low for {resource}: {remaining} remaining");
     }
+}
+
+/// Returns the remaining count when it is under 10% of the resource limit.
+/// Limits differ per resource (search allows 30 per minute, core 5000 per hour),
+/// so a fixed count would warn on every search run.
+fn low_rate_limit_remaining(headers: &HeaderMap) -> Option<u32> {
+    let number = |name: &str| headers.get(name)?.to_str().ok()?.trim().parse::<u32>().ok();
+    let remaining = number("x-ratelimit-remaining")?;
+    let limit = number("x-ratelimit-limit")?;
+    (u64::from(remaining) * 10 < u64::from(limit)).then_some(remaining)
 }
 
 fn default_headers(authorization: HeaderValue) -> Result<HeaderMap> {
@@ -389,7 +401,31 @@ fn validate_parallelism(parallelism: usize) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Client, is_read_only_query};
+    use reqwest::header::{HeaderMap, HeaderValue};
+
+    use super::{Client, is_read_only_query, low_rate_limit_remaining};
+
+    fn limit_headers(remaining: &'static str, limit: &'static str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-ratelimit-remaining", HeaderValue::from_static(remaining));
+        headers.insert("x-ratelimit-limit", HeaderValue::from_static(limit));
+        headers
+    }
+
+    #[test]
+    fn rate_limit_warning_scales_with_the_resource_limit() {
+        assert_eq!(low_rate_limit_remaining(&limit_headers("29", "30")), None);
+        assert_eq!(
+            low_rate_limit_remaining(&limit_headers("50", "5000")),
+            Some(50)
+        );
+        assert_eq!(low_rate_limit_remaining(&limit_headers("2", "30")), Some(2));
+        assert_eq!(
+            low_rate_limit_remaining(&limit_headers("4000", "5000")),
+            None
+        );
+        assert_eq!(low_rate_limit_remaining(&HeaderMap::new()), None);
+    }
 
     #[test]
     fn only_plain_queries_are_read_only() {
