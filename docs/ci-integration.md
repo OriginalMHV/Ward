@@ -59,8 +59,7 @@ All Ward commands share these codes. See [Exit codes](commands.md#exit-codes).
 
 ### What it checks
 
-- Security: secret scanning, push protection, Dependabot alerts, Dependabot security updates, AI detection
-- Branch protection: approvals, dismiss stale reviews, code owner reviews, status checks, strict checks, enforce admins, linear history, force pushes, deletions
+Drift check covers every category that the manifest configures: repository settings, files, security, rulesets, branch protection, actions, environments, access and integrations. Use `--category <CATEGORY>` to narrow the check. Deferred changes and unreadable state in managed categories also count as drift.
 
 ### Example: weekly drift check
 
