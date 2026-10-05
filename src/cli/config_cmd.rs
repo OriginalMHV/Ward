@@ -119,7 +119,10 @@ impl ConfigCommand {
         match self.action {
             ConfigAction::Show => run_show(config_override),
             ConfigAction::Edit => run_edit(config_override),
-            ConfigAction::Path => run_path(config_override),
+            ConfigAction::Path => {
+                run_path(config_override);
+                Ok(())
+            }
             ConfigAction::Set { key, value } => {
                 let path = resolve_config_path(config_override);
                 apply_set(&path, &key, &value)
@@ -349,7 +352,7 @@ fn run_edit(config_override: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn run_path(config_override: Option<&str>) -> Result<()> {
+fn run_path(config_override: Option<&str>) {
     let path = resolve_config_path(config_override);
     let abs = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
     println!("{}", abs.display());
@@ -358,7 +361,6 @@ fn run_path(config_override: Option<&str>) -> Result<()> {
     } else {
         println!("  {} File does not exist.", style("[..]").yellow());
     }
-    Ok(())
 }
 
 fn lookup_key(key: &str) -> Option<(ValueKind, ConfigKey)> {

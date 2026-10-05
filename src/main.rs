@@ -22,6 +22,10 @@ async fn main() -> ExitCode {
     }
 }
 
+#[allow(
+    clippy::unreachable,
+    reason = "commands handled before the client exists; the PR 3 dispatch refactor removes these arms"
+)]
 async fn run() -> Result<()> {
     let cli = Cli::parse();
 
@@ -62,7 +66,7 @@ async fn run() -> Result<()> {
         );
     }
 
-    let client = Client::new(org, cli.parallelism).await?;
+    let client = Client::new(org, cli.parallelism)?;
 
     match cli.command {
         Command::Repos(cmd) => cmd.run(&client, &manifest, cli.system.as_deref()).await,

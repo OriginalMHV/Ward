@@ -1,3 +1,10 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test helpers outside #[test] functions"
+)]
+
 mod common;
 
 use serde_json::json;

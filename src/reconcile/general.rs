@@ -687,9 +687,10 @@ pub fn plan_with_options(
         &mut changes,
         &mut rest_patch,
         "pull_request_creation_policy",
-        current.extensions.pull_request_creation_policy.clone(),
+        current.extensions.pull_request_creation_policy.as_deref(),
         desired_setting_string(desired, "pull_request_creation_policy")
-            .or_else(|| desired.extensions.pull_request_creation_policy.clone()),
+            .or_else(|| desired.extensions.pull_request_creation_policy.clone())
+            .as_deref(),
         false,
     );
     plan_bool_change(
@@ -760,7 +761,7 @@ pub fn plan_with_options(
         &mut changes,
         &mut rest_patch,
         "squash_merge_commit_title",
-        current_settings.squash_merge_commit_title.clone(),
+        current_settings.squash_merge_commit_title.as_deref(),
         desired_setting_string(desired, "squash_merge_commit_title"),
         false,
     );
@@ -768,7 +769,7 @@ pub fn plan_with_options(
         &mut changes,
         &mut rest_patch,
         "squash_merge_commit_message",
-        current_settings.squash_merge_commit_message.clone(),
+        current_settings.squash_merge_commit_message.as_deref(),
         desired_setting_string(desired, "squash_merge_commit_message"),
         false,
     );
@@ -776,7 +777,7 @@ pub fn plan_with_options(
         &mut changes,
         &mut rest_patch,
         "merge_commit_title",
-        current_settings.merge_commit_title.clone(),
+        current_settings.merge_commit_title.as_deref(),
         desired_setting_string(desired, "merge_commit_title"),
         false,
     );
@@ -784,7 +785,7 @@ pub fn plan_with_options(
         &mut changes,
         &mut rest_patch,
         "merge_commit_message",
-        current_settings.merge_commit_message.clone(),
+        current_settings.merge_commit_message.as_deref(),
         desired_setting_string(desired, "merge_commit_message"),
         false,
     );
@@ -812,9 +813,10 @@ pub fn plan_with_options(
         &mut blocked_changes,
         &mut graphql_patch.issue_creation_policy,
         "issue_creation_policy",
-        current.extensions.issue_creation_policy.clone(),
+        current.extensions.issue_creation_policy.as_deref(),
         desired_setting_string(desired, "issue_creation_policy")
-            .or_else(|| desired.extensions.issue_creation_policy.clone()),
+            .or_else(|| desired.extensions.issue_creation_policy.clone())
+            .as_deref(),
         current.extensions.graphql_settings_collected,
     );
 
@@ -822,7 +824,7 @@ pub fn plan_with_options(
         &mut changes,
         &mut rest_patch,
         "description",
-        current_metadata.description.clone(),
+        current_metadata.description.as_deref(),
         desired_metadata_string(desired, "description"),
         false,
     );
@@ -830,7 +832,7 @@ pub fn plan_with_options(
         &mut changes,
         &mut rest_patch,
         "homepage",
-        current_metadata.homepage.clone(),
+        current_metadata.homepage.as_deref(),
         desired_metadata_string(desired, "homepage"),
         false,
     );
@@ -838,7 +840,7 @@ pub fn plan_with_options(
         &mut changes,
         &mut rest_patch,
         "default_branch",
-        current_metadata.default_branch.clone(),
+        current_metadata.default_branch.as_deref(),
         desired_metadata_string(desired, "default_branch"),
         false,
     );
@@ -847,7 +849,7 @@ pub fn plan_with_options(
         &mut blocked_changes,
         &mut rest_patch,
         "visibility",
-        current_metadata.visibility.clone(),
+        current_metadata.visibility.as_deref(),
         desired_metadata_string(desired, "visibility"),
         allow_high_impact,
     );
@@ -1774,19 +1776,19 @@ fn plan_optional_string_change(
     changes: &mut Vec<GeneralChange>,
     rest_patch: &mut Map<String, Value>,
     field: &str,
-    current_value: Option<String>,
+    current_value: Option<&str>,
     desired_value: Option<String>,
     high_impact: bool,
 ) {
     if let Some(desired_value) = desired_value
-        && current_value.as_deref() != Some(desired_value.as_str())
+        && current_value != Some(desired_value.as_str())
     {
         rest_patch.insert(field.to_owned(), json!(desired_value));
         changes.push(GeneralChange {
             kind: GeneralChangeKind::RestField {
                 field: field.to_owned(),
             },
-            current: display_optional_string(current_value.as_deref()),
+            current: display_optional_string(current_value),
             desired: display_optional_string(Some(desired_value.as_str())),
             high_impact,
             reference_only: false,
@@ -1799,20 +1801,20 @@ fn plan_policy_change(
     changes: &mut Vec<GeneralChange>,
     rest_patch: &mut Map<String, Value>,
     field: &str,
-    current_value: Option<String>,
-    desired_value: Option<String>,
+    current_value: Option<&str>,
+    desired_value: Option<&str>,
     high_impact: bool,
 ) {
-    let desired_value = normalize_optional_policy(desired_value.as_deref());
+    let desired_value = normalize_optional_policy(desired_value);
     if let Some(desired_value) = desired_value
-        && current_value != Some(desired_value.clone())
+        && current_value != Some(desired_value.as_str())
     {
         rest_patch.insert(field.to_owned(), json!(desired_value));
         changes.push(GeneralChange {
             kind: GeneralChangeKind::RestField {
                 field: field.to_owned(),
             },
-            current: current_value.unwrap_or_else(|| "<unset>".to_owned()),
+            current: current_value.unwrap_or("<unset>").to_owned(),
             desired: desired_value,
             high_impact,
             reference_only: false,
@@ -1869,20 +1871,20 @@ fn plan_graphql_policy_change(
     blocked_changes: &mut Vec<GeneralChange>,
     patch_field: &mut Option<String>,
     field: &str,
-    current_value: Option<String>,
-    desired_value: Option<String>,
+    current_value: Option<&str>,
+    desired_value: Option<&str>,
     graphql_collected: bool,
 ) {
-    let desired_value = normalize_optional_policy(desired_value.as_deref());
+    let desired_value = normalize_optional_policy(desired_value);
     if let Some(desired_value) = desired_value
-        && current_value != Some(desired_value.clone())
+        && current_value != Some(desired_value.as_str())
     {
         if !graphql_collected {
             blocked_changes.push(blocked_change(
                 GeneralChangeKind::GraphqlField {
                     field: field.to_owned(),
                 },
-                current_value.unwrap_or_else(|| "<unavailable>".to_owned()),
+                current_value.unwrap_or("<unavailable>").to_owned(),
                 desired_value,
                 "GraphQL repository settings could not be collected",
                 false,
@@ -1895,7 +1897,7 @@ fn plan_graphql_policy_change(
             kind: GeneralChangeKind::GraphqlField {
                 field: field.to_owned(),
             },
-            current: current_value.unwrap_or_else(|| "<unset>".to_owned()),
+            current: current_value.unwrap_or("<unset>").to_owned(),
             desired: desired_value,
             high_impact: false,
             reference_only: false,
@@ -1951,12 +1953,12 @@ fn plan_high_impact_string_change(
     blocked_changes: &mut Vec<GeneralChange>,
     rest_patch: &mut Map<String, Value>,
     field: &str,
-    current_value: Option<String>,
+    current_value: Option<&str>,
     desired_value: Option<String>,
     allow_high_impact: bool,
 ) {
     if let Some(desired_value) = desired_value
-        && current_value.as_deref() != Some(desired_value.as_str())
+        && current_value != Some(desired_value.as_str())
     {
         if allow_high_impact {
             rest_patch.insert(field.to_owned(), json!(desired_value));
@@ -1964,7 +1966,7 @@ fn plan_high_impact_string_change(
                 kind: GeneralChangeKind::RestField {
                     field: field.to_owned(),
                 },
-                current: display_optional_string(current_value.as_deref()),
+                current: display_optional_string(current_value),
                 desired: display_optional_string(Some(desired_value.as_str())),
                 high_impact: true,
                 reference_only: false,
@@ -1975,7 +1977,7 @@ fn plan_high_impact_string_change(
                 GeneralChangeKind::RestField {
                     field: field.to_owned(),
                 },
-                display_optional_string(current_value.as_deref()),
+                display_optional_string(current_value),
                 display_optional_string(Some(desired_value.as_str())),
                 "High-impact repository changes require allow_high_impact or a sensitive policy opt-in",
                 true,

@@ -102,7 +102,7 @@ impl Client {
         &self.org
     }
 
-    pub async fn new(org: &str, parallelism: usize) -> Result<Self> {
+    pub fn new(org: &str, parallelism: usize) -> Result<Self> {
         validate_parallelism(parallelism)?;
         let token = auth::resolve_token()?;
         let headers = default_headers(
@@ -238,6 +238,10 @@ impl Client {
     }
 
     #[doc(hidden)]
+    #[allow(
+        clippy::unwrap_used,
+        reason = "test-only constructor with static inputs"
+    )]
     pub fn new_for_test(org: &str, base_url: &str) -> Self {
         let http = reqwest::Client::builder()
             .default_headers(
@@ -534,11 +538,10 @@ mod tests {
         assert_send(client.graphql::<serde_json::Value, V>("query { x }", variables));
     }
 
-    #[tokio::test]
-    async fn client_new_rejects_zero_parallelism() {
-        let error = match Client::new("test-org", 0).await {
-            Ok(_) => panic!("parallelism=0 must be rejected"),
-            Err(error) => error,
+    #[test]
+    fn client_new_rejects_zero_parallelism() {
+        let Err(error) = Client::new("test-org", 0) else {
+            panic!("parallelism=0 must be rejected");
         };
 
         assert!(

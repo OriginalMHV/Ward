@@ -290,7 +290,7 @@ async fn verify_org(token: &str, org: &str) -> Result<usize> {
     }
 
     // Org exists - consume the response body, then count repos via pagination
-    let _ = resp.bytes().await;
+    drop(resp.bytes().await);
     let repos = fetch_all_repos(token, org).await?;
     Ok(repos.len())
 }

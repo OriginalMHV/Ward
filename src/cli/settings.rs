@@ -551,11 +551,11 @@ mod tests {
     }
 
     fn changed_fields(
-        settings: RepositorySettingsConfig,
+        settings: &RepositorySettingsConfig,
         current: &general::CollectedGeneralState,
     ) -> Vec<String> {
         let category = managed_category(settings.clone());
-        let desired = settings_desired_state(&category, &settings);
+        let desired = settings_desired_state(&category, settings);
         general::plan("repo", &desired, current)
             .changes
             .iter()
@@ -566,7 +566,7 @@ mod tests {
     #[test]
     fn settings_plan_covers_pull_request_sponsorship_and_policy_fields() {
         let fields = changed_fields(
-            RepositorySettingsConfig {
+            &RepositorySettingsConfig {
                 has_pull_requests: Some(false),
                 pull_request_creation_policy: Some("collaborators_only".to_owned()),
                 has_sponsorships_enabled: Some(true),
@@ -593,7 +593,7 @@ mod tests {
     #[test]
     fn settings_plan_ignores_topic_order_and_case() {
         let fields = changed_fields(
-            RepositorySettingsConfig {
+            &RepositorySettingsConfig {
                 topics: Some(vec!["Beta".to_owned(), "alpha".to_owned()]),
                 ..RepositorySettingsConfig::default()
             },

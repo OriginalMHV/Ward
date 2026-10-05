@@ -554,23 +554,29 @@ pub async fn collect_security_category_with_baseline(
         repository_id,
         category: SecurityCategoryV2 {
             policy,
-            advanced_security: bool_field(&analysis.advanced_security),
-            code_security: bool_field(&analysis.code_security),
+            advanced_security: bool_field(analysis.advanced_security.as_ref()),
+            code_security: bool_field(analysis.code_security.as_ref()),
             dependabot_alerts,
             dependabot_security_updates: dependabot_security_updates_endpoint
-                .or_else(|| bool_field(&analysis.dependabot_security_updates)),
-            secret_scanning: bool_field(&analysis.secret_scanning),
-            secret_scanning_push_protection: bool_field(&analysis.secret_scanning_push_protection),
-            secret_scanning_validity_checks: bool_field(&analysis.secret_scanning_validity_checks),
-            secret_scanning_non_provider_patterns: bool_field(
-                &analysis.secret_scanning_non_provider_patterns,
+                .or_else(|| bool_field(analysis.dependabot_security_updates.as_ref())),
+            secret_scanning: bool_field(analysis.secret_scanning.as_ref()),
+            secret_scanning_push_protection: bool_field(
+                analysis.secret_scanning_push_protection.as_ref(),
             ),
-            secret_scanning_ai_detection: bool_field(&analysis.secret_scanning_ai_detection),
+            secret_scanning_validity_checks: bool_field(
+                analysis.secret_scanning_validity_checks.as_ref(),
+            ),
+            secret_scanning_non_provider_patterns: bool_field(
+                analysis.secret_scanning_non_provider_patterns.as_ref(),
+            ),
+            secret_scanning_ai_detection: bool_field(
+                analysis.secret_scanning_ai_detection.as_ref(),
+            ),
             secret_scanning_delegated_alert_dismissal: bool_field(
-                &analysis.secret_scanning_delegated_alert_dismissal,
+                analysis.secret_scanning_delegated_alert_dismissal.as_ref(),
             ),
             secret_scanning_delegated_bypass: bool_field(
-                &analysis.secret_scanning_delegated_bypass,
+                analysis.secret_scanning_delegated_bypass.as_ref(),
             ),
             secret_scanning_delegated_alert_dismissal_options: delegated_alert_dismissal_options,
             secret_scanning_delegated_bypass_options: delegated_bypass_options,
@@ -1246,7 +1252,7 @@ pub fn plan_rulesets_category(
     }
 
     for desired_ruleset in &desired.repository_rulesets {
-        validate_ruleset_bypass_actors(desired_ruleset, &mut issues)?;
+        validate_ruleset_bypass_actors(desired_ruleset, &mut issues);
         match actual_by_name.get(desired_ruleset.name.as_str()) {
             None => actions.push(RulesetPlanAction::Create {
                 ruleset: desired_ruleset.clone(),
@@ -2109,10 +2115,7 @@ fn normalize_ruleset_references(
     normalized
 }
 
-fn validate_ruleset_bypass_actors(
-    ruleset: &RepositoryRulesetV2,
-    issues: &mut Vec<ReconcileIssue>,
-) -> Result<()> {
+fn validate_ruleset_bypass_actors(ruleset: &RepositoryRulesetV2, issues: &mut Vec<ReconcileIssue>) {
     for actor in &ruleset.bypass_actors {
         match &actor.actor {
             ActorReference::Unresolved {
@@ -2139,7 +2142,6 @@ fn validate_ruleset_bypass_actors(
             _ => {}
         }
     }
-    Ok(())
 }
 
 fn ruleset_action_sort_key(action: &RulesetPlanAction) -> (u8, String) {
@@ -2445,11 +2447,11 @@ fn desired_branch_protection_from_parts(
     app_ids_by_slug: &HashMap<String, i64>,
     issues: &mut Vec<ReconcileIssue>,
 ) -> Result<DesiredBranchProtection> {
-    let push_restrictions = actor_refs_to_actor_set(branch_name, push_restrictions, issues)?;
+    let push_restrictions = actor_refs_to_actor_set(branch_name, push_restrictions, issues);
     let dismissal_restrictions =
-        actor_refs_to_actor_set(branch_name, dismissal_restrictions, issues)?;
+        actor_refs_to_actor_set(branch_name, dismissal_restrictions, issues);
     let pull_request_bypass_allowances =
-        actor_refs_to_actor_set(branch_name, pull_request_bypass_allowances, issues)?;
+        actor_refs_to_actor_set(branch_name, pull_request_bypass_allowances, issues);
     let desired_status_checks = desired_status_checks(
         branch_name,
         status_check_contexts,
@@ -2696,7 +2698,7 @@ fn actor_refs_to_actor_set(
     branch_name: &str,
     actors: &[ActorReference],
     issues: &mut Vec<ReconcileIssue>,
-) -> Result<ActorSet> {
+) -> ActorSet {
     let mut set = ActorSet::default();
     for actor in actors {
         match actor {
@@ -2719,7 +2721,7 @@ fn actor_refs_to_actor_set(
         .sort_by(|left, right| left.login.cmp(&right.login));
     set.teams.sort_by(|left, right| left.slug.cmp(&right.slug));
     set.apps.sort_by(|left, right| left.slug.cmp(&right.slug));
-    Ok(set)
+    set
 }
 
 fn protected_branch_matches(
@@ -2800,8 +2802,8 @@ fn normalize_strings(values: &[String]) -> Vec<String> {
     normalized
 }
 
-fn bool_field(value: &Option<crate::github::security::SecurityFeatureStatus>) -> Option<bool> {
-    value.as_ref().map(|status| status.status == "enabled")
+fn bool_field(value: Option<&crate::github::security::SecurityFeatureStatus>) -> Option<bool> {
+    value.map(|status| status.status == "enabled")
 }
 
 fn branch_action_sort_key(action: &BranchProtectionPlanAction) -> (u8, String) {

@@ -87,7 +87,11 @@ impl CollaboratorApiResponse {
     fn into_collaborator(self, outside: bool) -> RepositoryCollaborator {
         RepositoryCollaborator {
             login: self.login,
-            permission: effective_permission(self.permission, self.role_name, self.permissions),
+            permission: effective_permission(
+                self.permission,
+                self.role_name,
+                self.permissions.as_ref(),
+            ),
             outside,
         }
     }
@@ -110,7 +114,11 @@ impl RepositoryInvitationApiResponse {
         PendingCollaboratorInvitation {
             id: self.id,
             login: self.invitee.login,
-            permission: effective_permission(self.permission, self.role_name, self.permissions),
+            permission: effective_permission(
+                self.permission,
+                self.role_name,
+                self.permissions.as_ref(),
+            ),
         }
     }
 }
@@ -631,11 +639,11 @@ async fn classify_optional_metadata_checked(
 fn effective_permission(
     permission: Option<String>,
     role_name: Option<String>,
-    permissions: Option<Value>,
+    permissions: Option<&Value>,
 ) -> String {
     role_name
         .or(permission)
-        .or_else(|| permissions.as_ref().and_then(permission_from_value))
+        .or_else(|| permissions.and_then(permission_from_value))
         .unwrap_or_else(|| "pull".to_owned())
 }
 

@@ -276,7 +276,7 @@ impl Client {
         Ok(
             match map_classified_json::<Topics>(
                 response::classify_json(self.get(&path).await?, "GET", &path).await?,
-            )? {
+            ) {
                 ClassifiedApiResponse::Success(topics) => {
                     ClassifiedApiResponse::Success(topics.names)
                 }
@@ -332,7 +332,7 @@ impl Client {
 
         match map_classified_json::<GraphqlEnvelope<RepositoryResponse>>(
             response::classify_json(self.post_json(path, &request).await?, "POST", path).await?,
-        )? {
+        ) {
             ClassifiedApiResponse::Success(body) => {
                 if !body.errors.is_empty() {
                     return Ok(ClassifiedApiResponse::Other(
@@ -409,7 +409,9 @@ impl Client {
     ) -> Result<ClassifiedApiResponse<Vec<RepositoryCustomPropertyValue>>> {
         let path = format!("/repos/{}/{repo}/properties/values", self.org);
         let response = self.get(&path).await?;
-        map_classified_json(response::classify_json(response, "GET", &path).await?)
+        Ok(map_classified_json(
+            response::classify_json(response, "GET", &path).await?,
+        ))
     }
 
     pub async fn update_custom_property_values(
@@ -431,7 +433,9 @@ impl Client {
         let response = self
             .patch_json(&path, &json!({ "properties": properties }))
             .await?;
-        map_classified_empty(response::classify_empty(response, "PATCH", &path).await?)
+        Ok(map_classified_empty(
+            response::classify_empty(response, "PATCH", &path).await?,
+        ))
     }
 
     pub async fn get_immutable_releases_state_classified(
@@ -442,7 +446,7 @@ impl Client {
         Ok(
             match map_classified_json::<ImmutableReleasesState>(
                 response::classify_json(self.get(&path).await?, "GET", &path).await?,
-            )? {
+            ) {
                 ClassifiedApiResponse::Success(state) => ClassifiedApiResponse::Success(state),
                 ClassifiedApiResponse::NotFound(_) => {
                     ClassifiedApiResponse::Success(ImmutableReleasesState {
@@ -479,7 +483,7 @@ impl Client {
             let path = format!("/repos/{}/{repo}/labels?per_page=100&page={page}", self.org);
             match map_classified_json::<Vec<RepositoryLabel>>(
                 response::classify_json(self.get(&path).await?, "GET", &path).await?,
-            )? {
+            ) {
                 ClassifiedApiResponse::Success(mut page_items) => {
                     let item_count = page_items.len();
                     labels.append(&mut page_items);
@@ -585,10 +589,8 @@ fn graphql_enum_value(value: &str) -> String {
     value.trim().replace(['-', ' '], "_").to_ascii_uppercase()
 }
 
-fn map_classified_json<T>(
-    response: response::ClassifiedResponse<T>,
-) -> Result<ClassifiedApiResponse<T>> {
-    Ok(match response {
+fn map_classified_json<T>(response: response::ClassifiedResponse<T>) -> ClassifiedApiResponse<T> {
+    match response {
         response::ClassifiedResponse::Success(value) => ClassifiedApiResponse::Success(value),
         response::ClassifiedResponse::NoContent => ClassifiedApiResponse::NoContent,
         response::ClassifiedResponse::Forbidden(error) => {
@@ -603,13 +605,11 @@ fn map_classified_json<T>(
         response::ClassifiedResponse::Other(error) => {
             ClassifiedApiResponse::Other(error.to_string())
         }
-    })
+    }
 }
 
-fn map_classified_empty(
-    response: response::ClassifiedResponse<()>,
-) -> Result<ClassifiedApiResponse<()>> {
-    Ok(match response {
+fn map_classified_empty(response: response::ClassifiedResponse<()>) -> ClassifiedApiResponse<()> {
+    match response {
         response::ClassifiedResponse::Success(()) => ClassifiedApiResponse::Success(()),
         response::ClassifiedResponse::NoContent => ClassifiedApiResponse::NoContent,
         response::ClassifiedResponse::Forbidden(error) => {
@@ -624,7 +624,7 @@ fn map_classified_empty(
         response::ClassifiedResponse::Other(error) => {
             ClassifiedApiResponse::Other(error.to_string())
         }
-    })
+    }
 }
 
 async fn classify_empty_with_conflict(
@@ -638,7 +638,9 @@ async fn classify_empty_with_conflict(
         ));
     }
 
-    map_classified_empty(response::classify_empty(response, method, path).await?)
+    Ok(map_classified_empty(
+        response::classify_empty(response, method, path).await?,
+    ))
 }
 
 async fn conflict_message(response: reqwest::Response, method: &str, path: &str) -> String {

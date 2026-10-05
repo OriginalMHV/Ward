@@ -1,3 +1,10 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test helpers outside #[test] functions"
+)]
+
 //! Reconcile-layer tests for the Actions category:
 //! `collect_actions_category` / `plan_actions_category` / `apply_actions_plan`
 //! / `verify_actions_category`.

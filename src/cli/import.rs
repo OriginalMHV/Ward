@@ -174,14 +174,14 @@ pub async fn import_repository(options: ImportOptions<'_>) -> Result<()> {
 
     progress(
         options.stdout,
-        format!(
+        &format!(
             "{} Reading all documented repository configuration from {}...",
             style("[..]").dim(),
             style(source.to_string()).cyan().bold()
         ),
     );
 
-    let client = Client::new(&source.owner, options.parallelism).await?;
+    let client = Client::new(&source.owner, options.parallelism)?;
     let source_repository = client
         .get_repo(&source.repo)
         .await
@@ -346,7 +346,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::Repository,
                 "repository/general collector",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -370,7 +370,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::Security,
                 "security collector",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -394,7 +394,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::Rulesets,
                 "rulesets collector",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -418,7 +418,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::BranchProtection,
                 "branch-protection collector",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -442,7 +442,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::Files,
                 "configuration-files collector",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -467,7 +467,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::Actions,
                 "Actions collector",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -492,7 +492,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::Environments,
                 "environments collector",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -511,7 +511,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::Access,
                 "access collector",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -536,7 +536,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::Integrations,
                 "integrations collector",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -551,7 +551,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::Repository,
                 "default-branch head",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -670,7 +670,7 @@ fn absorb_coverage(target: &mut Vec<CoverageEntry>, entries: Vec<CoverageEntry>)
 fn record_collector_failure(
     category: ManifestCategoryName,
     collector: &str,
-    error: anyhow::Error,
+    error: &anyhow::Error,
     coverage: &mut Vec<CoverageEntry>,
     warnings: &mut Vec<String>,
 ) {
@@ -865,14 +865,16 @@ fn write_manifest(output: &Path, content: &str) -> Result<()> {
         return Err(error).with_context(|| format!("Failed to write {}", temporary.display()));
     }
     if let Err(error) = std::fs::rename(&temporary, output) {
-        let _ = std::fs::remove_file(&temporary);
+        if let Err(cleanup) = std::fs::remove_file(&temporary) {
+            tracing::debug!("Could not remove {}: {cleanup}", temporary.display());
+        }
         return Err(error).with_context(|| format!("Failed to replace {}", output.display()));
     }
     Ok(())
 }
 
 /// Print progress to stderr when the manifest goes to stdout, so it never mixes with the output.
-fn progress(manifest_on_stdout: bool, message: String) {
+fn progress(manifest_on_stdout: bool, message: &str) {
     if manifest_on_stdout {
         eprintln!("\n  {message}");
     } else {

@@ -684,7 +684,7 @@ fn absent_category(name: Category) -> CategoryPlan {
 fn collection_failed(
     name: Category,
     disposition: ManagementDisposition,
-    error: anyhow::Error,
+    error: &anyhow::Error,
 ) -> CategoryPlan {
     let message = format!("{error:#}");
     CategoryPlan {
@@ -717,7 +717,7 @@ async fn plan_repository(
     };
     let current = match collected {
         Ok(state) => state,
-        Err(error) => return collection_failed(Category::Repository, disposition, error),
+        Err(error) => return collection_failed(Category::Repository, disposition, &error),
     };
     let plan_options = general::GeneralPlanOptions {
         allow_high_impact: options.allow_high_impact,
@@ -761,12 +761,12 @@ async fn plan_files(client: &Client, categories: &ManifestCategories, repo: &str
     let disposition = desired.policy.disposition;
     let collection = match files::collect_files_category(client, repo, None, Some(&desired)).await {
         Ok(collection) => collection,
-        Err(error) => return collection_failed(Category::Files, disposition, error),
+        Err(error) => return collection_failed(Category::Files, disposition, &error),
     };
     let coverage = collection.coverage.clone();
     let plan = match files::plan_files_category(&desired, &collection) {
         Ok(plan) => plan,
-        Err(error) => return collection_failed(Category::Files, disposition, error),
+        Err(error) => return collection_failed(Category::Files, disposition, &error),
     };
 
     let actionable = plan.atomic_entries.len();
@@ -826,12 +826,12 @@ async fn plan_security(
     };
     let collection = match collected {
         Ok(collection) => collection,
-        Err(error) => return collection_failed(Category::Security, disposition, error),
+        Err(error) => return collection_failed(Category::Security, disposition, &error),
     };
     let coverage = collection.coverage.clone();
     let plan = match security_rules::plan_security_category(&desired, &collection) {
         Ok(plan) => plan,
-        Err(error) => return collection_failed(Category::Security, disposition, error),
+        Err(error) => return collection_failed(Category::Security, disposition, &error),
     };
 
     let actionable = usize::from(plan.has_changes());
@@ -864,12 +864,12 @@ async fn plan_rulesets(
     let collection =
         match security_rules::collect_rulesets_category(client, repo, Some(&desired)).await {
             Ok(collection) => collection,
-            Err(error) => return collection_failed(Category::Rulesets, disposition, error),
+            Err(error) => return collection_failed(Category::Rulesets, disposition, &error),
         };
     let coverage = collection.coverage.clone();
     let plan = match security_rules::plan_rulesets_category(&desired, &collection) {
         Ok(plan) => plan,
-        Err(error) => return collection_failed(Category::Rulesets, disposition, error),
+        Err(error) => return collection_failed(Category::Rulesets, disposition, &error),
     };
 
     let actionable = plan
@@ -913,12 +913,12 @@ async fn plan_branch_protection(
     .await
     {
         Ok(collection) => collection,
-        Err(error) => return collection_failed(Category::BranchProtection, disposition, error),
+        Err(error) => return collection_failed(Category::BranchProtection, disposition, &error),
     };
     let coverage = collection.coverage.clone();
     let plan = match security_rules::plan_branch_protection_category(&desired, &collection) {
         Ok(plan) => plan,
-        Err(error) => return collection_failed(Category::BranchProtection, disposition, error),
+        Err(error) => return collection_failed(Category::BranchProtection, disposition, &error),
     };
 
     let actionable = plan
@@ -960,7 +960,7 @@ async fn plan_actions(
     let collection =
         match actions_environments::collect_actions_category(client, repo, Some(&desired)).await {
             Ok(collection) => collection,
-            Err(error) => return collection_failed(Category::Actions, disposition, error),
+            Err(error) => return collection_failed(Category::Actions, disposition, &error),
         };
     let coverage = collection.coverage.clone();
     let plan = actions_environments::plan_actions_category(&desired, &collection);
@@ -997,7 +997,7 @@ async fn plan_environments(
             .await
         {
             Ok(collection) => collection,
-            Err(error) => return collection_failed(Category::Environments, disposition, error),
+            Err(error) => return collection_failed(Category::Environments, disposition, &error),
         };
     let coverage = collection.coverage.clone();
     let plan = actions_environments::plan_environments_category(&desired, &collection);
@@ -1035,7 +1035,7 @@ async fn plan_access(client: &Client, categories: &ManifestCategories, repo: &st
     let disposition = desired.policy.disposition;
     let collection = match access_integrations::collect_access(client, repo, &desired).await {
         Ok(collection) => collection,
-        Err(error) => return collection_failed(Category::Access, disposition, error),
+        Err(error) => return collection_failed(Category::Access, disposition, &error),
     };
     let coverage = collection.coverage.clone();
     let plan = access_integrations::plan_access(&collection, &desired);
@@ -1079,7 +1079,7 @@ async fn plan_integrations(
     let disposition = desired.policy.disposition;
     let collection = match access_integrations::collect_integrations(client, repo, &desired).await {
         Ok(collection) => collection,
-        Err(error) => return collection_failed(Category::Integrations, disposition, error),
+        Err(error) => return collection_failed(Category::Integrations, disposition, &error),
     };
     let coverage = collection.coverage.clone();
     let plan = access_integrations::plan_integrations(&collection, &desired);
@@ -1400,7 +1400,7 @@ async fn apply_repository(
             audit_category(audit, repo, category, "success", 0, None);
             category.to_report("success", 0, Some(verified))
         }
-        Err(error) => failure(audit, repo, category, error),
+        Err(error) => failure(audit, repo, category, &error),
     }
 }
 
@@ -1427,7 +1427,7 @@ async fn apply_files(
         .ensure_dedicated_branch(repo, branch, default_branch)
         .await
     {
-        return failure(audit, repo, category, error);
+        return failure(audit, repo, category, &error);
     }
 
     // Re-collect and re-plan against the dedicated branch so we only commit
@@ -1435,11 +1435,11 @@ async fn apply_files(
     let branch_collection =
         match files::collect_files_category(client, repo, Some(branch), Some(&desired)).await {
             Ok(collection) => collection,
-            Err(error) => return failure(audit, repo, category, error),
+            Err(error) => return failure(audit, repo, category, &error),
         };
     let branch_plan = match files::plan_files_category(&desired, &branch_collection) {
         Ok(plan) => plan,
-        Err(error) => return failure(audit, repo, category, error),
+        Err(error) => return failure(audit, repo, category, &error),
     };
 
     let message = format!("{commit_prefix}sync managed files");
@@ -1448,7 +1448,7 @@ async fn apply_files(
         && let Err(error) =
             files::apply_files_plan(client, repo, branch, &message, &branch_plan).await
     {
-        return failure(audit, repo, category, error);
+        return failure(audit, repo, category, &error);
     }
 
     let pr = match client
@@ -1463,7 +1463,7 @@ async fn apply_files(
         .await
     {
         Ok(pr) => pr,
-        Err(error) => return failure(audit, repo, category, error),
+        Err(error) => return failure(audit, repo, category, &error),
     };
 
     let mut details = category.details.clone();
@@ -1473,7 +1473,7 @@ async fn apply_files(
     let verified = match files::verify_files_category(client, repo, Some(branch), &desired).await {
         Ok(result) => result.matches,
         Err(error) => {
-            let mut report = failure(audit, repo, category, error);
+            let mut report = failure(audit, repo, category, &error);
             report.details = details;
             report.configuration_pull_request_pending = true;
             return report;
@@ -1522,14 +1522,14 @@ async fn apply_security(
     audit: &AuditLog,
 ) -> CategoryReport {
     if let Err(error) = security_rules::apply_security_plan(client, repo, plan).await {
-        return failure(audit, repo, category, error);
+        return failure(audit, repo, category, &error);
     }
     let verified = if !verify {
         None
     } else if let Some(desired) = desired_categories.security.as_ref() {
         match security_rules::verify_security_category(client, repo, desired).await {
             Ok(result) => Some(result.matches),
-            Err(error) => return failure(audit, repo, category, error),
+            Err(error) => return failure(audit, repo, category, &error),
         }
     } else {
         None
@@ -1561,19 +1561,19 @@ async fn apply_actions(
                 return blocked_with_message(audit, repo, category, issue.message.clone());
             }
         }
-        Err(error) => return failure(audit, repo, category, error),
+        Err(error) => return failure(audit, repo, category, &error),
     }
 
     let verified = if let Some(desired) = desired_categories.actions.as_ref() {
         if config_pr_pending {
             match verify_actions_safe_subset(client, repo, desired).await {
                 Ok(matches) => Some(matches),
-                Err(error) => return failure(audit, repo, category, error),
+                Err(error) => return failure(audit, repo, category, &error),
             }
         } else {
             match actions_environments::verify_actions_category(client, repo, desired).await {
                 Ok(result) => Some(result.compliant),
-                Err(error) => return failure(audit, repo, category, error),
+                Err(error) => return failure(audit, repo, category, &error),
             }
         }
     } else {
@@ -1601,12 +1601,12 @@ async fn apply_environments(
                 return blocked_with_message(audit, repo, category, issue.message.clone());
             }
         }
-        Err(error) => return failure(audit, repo, category, error),
+        Err(error) => return failure(audit, repo, category, &error),
     }
     let verified = if let Some(desired) = desired_categories.environments.as_ref() {
         match actions_environments::verify_environments_category(client, repo, desired).await {
             Ok(result) => Some(result.compliant),
-            Err(error) => return failure(audit, repo, category, error),
+            Err(error) => return failure(audit, repo, category, &error),
         }
     } else {
         None
@@ -1624,7 +1624,7 @@ async fn apply_access(
 ) -> CategoryReport {
     let report = match access_integrations::apply_access(client, repo, plan).await {
         Ok(report) => report,
-        Err(error) => return failure(audit, repo, category, error),
+        Err(error) => return failure(audit, repo, category, &error),
     };
     if !report.blocked.is_empty() {
         return blocked_with_message(audit, repo, category, report.blocked.join("; "));
@@ -1632,7 +1632,7 @@ async fn apply_access(
     let verified = if let Some(desired) = desired_categories.access.as_ref() {
         match access_integrations::verify_access(client, repo, desired).await {
             Ok(result) => Some(result.is_ok()),
-            Err(error) => return failure(audit, repo, category, error),
+            Err(error) => return failure(audit, repo, category, &error),
         }
     } else {
         None
@@ -1654,7 +1654,7 @@ async fn apply_integrations(
 
     let report = match access_integrations::apply_integrations(client, repo, &safe_plan).await {
         Ok(report) => report,
-        Err(error) => return failure(audit, repo, category, error),
+        Err(error) => return failure(audit, repo, category, &error),
     };
     if !report.blocked.is_empty() {
         return blocked_with_message(audit, repo, category, report.blocked.join("; "));
@@ -1663,12 +1663,12 @@ async fn apply_integrations(
         if config_pr_pending {
             match verify_integrations_safe_subset(client, repo, desired).await {
                 Ok(matches) => Some(matches),
-                Err(error) => return failure(audit, repo, category, error),
+                Err(error) => return failure(audit, repo, category, &error),
             }
         } else {
             match access_integrations::verify_integrations(client, repo, desired).await {
                 Ok(result) => Some(result.is_ok()),
-                Err(error) => return failure(audit, repo, category, error),
+                Err(error) => return failure(audit, repo, category, &error),
             }
         }
     } else {
@@ -1688,12 +1688,12 @@ async fn apply_rulesets(
     audit: &AuditLog,
 ) -> CategoryReport {
     if let Err(error) = security_rules::apply_rulesets_plan(client, repo, plan).await {
-        return failure(audit, repo, category, error);
+        return failure(audit, repo, category, &error);
     }
     let verified = if let Some(desired) = desired_categories.rulesets.as_ref() {
         match security_rules::verify_rulesets_category(client, repo, desired).await {
             Ok(result) => Some(result.matches),
-            Err(error) => return failure(audit, repo, category, error),
+            Err(error) => return failure(audit, repo, category, &error),
         }
     } else {
         None
@@ -1712,12 +1712,12 @@ async fn apply_branch_protection(
     audit: &AuditLog,
 ) -> CategoryReport {
     if let Err(error) = security_rules::apply_branch_protection_plan(client, repo, plan).await {
-        return failure(audit, repo, category, error);
+        return failure(audit, repo, category, &error);
     }
     let verified = if let Some(desired) = desired_categories.branch_protection.as_ref() {
         match security_rules::verify_branch_protection_category(client, repo, desired).await {
             Ok(result) => Some(result.matches),
-            Err(error) => return failure(audit, repo, category, error),
+            Err(error) => return failure(audit, repo, category, &error),
         }
     } else {
         None
@@ -1966,7 +1966,7 @@ fn failure(
     audit: &AuditLog,
     repo: &str,
     category: &CategoryPlan,
-    error: anyhow::Error,
+    error: &anyhow::Error,
 ) -> CategoryReport {
     let message = format!("{error:#}");
     audit_category(audit, repo, category, "failed", 0, Some(message.clone()));
@@ -2429,7 +2429,7 @@ mod tests {
             collection_failed(
                 Category::Files,
                 ManagementDisposition::Managed,
-                anyhow::anyhow!("boom"),
+                &anyhow::anyhow!("boom"),
             )
             .plan_status(),
             "blocked"
@@ -2451,7 +2451,7 @@ mod tests {
         let category = collection_failed(
             Category::Security,
             ManagementDisposition::Managed,
-            anyhow::anyhow!("HTTP 500"),
+            &anyhow::anyhow!("HTTP 500"),
         );
         let report = category.to_report("blocked", 0, None);
         assert_eq!(report.status, "blocked");
@@ -2470,7 +2470,7 @@ mod tests {
                 collection_failed(
                     Category::Security,
                     ManagementDisposition::Managed,
-                    anyhow::anyhow!("collect failed"),
+                    &anyhow::anyhow!("collect failed"),
                 ),
                 planned_category(Category::Files, ManagementDisposition::Managed, 1, 0),
             ],

@@ -246,56 +246,41 @@ fn check_systems(manifest: &Manifest) -> Check {
 }
 
 async fn check_api_connectivity(config_path: Option<&str>) -> Check {
-    let manifest = match Manifest::load(config_path) {
-        Ok(m) => m,
-        Err(_) => {
-            return Check {
-                name: "API connectivity",
-                status: CheckStatus::Fail,
-                detail: "cannot load config".to_string(),
-            };
-        }
+    let Ok(manifest) = Manifest::load(config_path) else {
+        return Check {
+            name: "API connectivity",
+            status: CheckStatus::Fail,
+            detail: "cannot load config".to_string(),
+        };
     };
 
-    let token = match auth::resolve_token() {
-        Ok(t) => t,
-        Err(_) => {
-            return Check {
-                name: "API connectivity",
-                status: CheckStatus::Fail,
-                detail: "no token available".to_string(),
-            };
-        }
+    let Ok(token) = auth::resolve_token() else {
+        return Check {
+            name: "API connectivity",
+            status: CheckStatus::Fail,
+            detail: "no token available".to_string(),
+        };
     };
 
-    let client = match reqwest::Client::builder()
-        .default_headers({
-            let mut headers = reqwest::header::HeaderMap::new();
-            headers.insert(
-                reqwest::header::AUTHORIZATION,
-                reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
-                    .unwrap_or_else(|_| reqwest::header::HeaderValue::from_static("")),
-            );
-            headers.insert(
-                reqwest::header::ACCEPT,
-                reqwest::header::HeaderValue::from_static("application/vnd.github+json"),
-            );
-            headers.insert(
-                reqwest::header::USER_AGENT,
-                reqwest::header::HeaderValue::from_static("ward-cli/doctor"),
-            );
-            headers
-        })
-        .build()
-    {
-        Ok(c) => c,
-        Err(_) => {
-            return Check {
-                name: "API connectivity",
-                status: CheckStatus::Fail,
-                detail: "cannot build HTTP client".to_string(),
-            };
-        }
+    let mut authorization = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
+        .unwrap_or_else(|_| reqwest::header::HeaderValue::from_static(""));
+    authorization.set_sensitive(true);
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(reqwest::header::AUTHORIZATION, authorization);
+    headers.insert(
+        reqwest::header::ACCEPT,
+        reqwest::header::HeaderValue::from_static("application/vnd.github+json"),
+    );
+    headers.insert(
+        reqwest::header::USER_AGENT,
+        reqwest::header::HeaderValue::from_static("ward-cli/doctor"),
+    );
+    let Ok(client) = reqwest::Client::builder().default_headers(headers).build() else {
+        return Check {
+            name: "API connectivity",
+            status: CheckStatus::Fail,
+            detail: "cannot build HTTP client".to_string(),
+        };
     };
 
     let url = format!("https://api.github.com/orgs/{}", manifest.org.name);

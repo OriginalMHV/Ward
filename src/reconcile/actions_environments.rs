@@ -160,11 +160,8 @@ fn seal_or_block(public_key: &str, name: &str, value: &SecretValue) -> Result<St
         .map_err(|_| format!("Failed to encrypt secret `{name}` with the target public key"))
 }
 
-fn wants_change<T: PartialEq>(desired: &Option<T>, current: &Option<T>) -> bool {
-    match desired {
-        Some(value) => current.as_ref() != Some(value),
-        None => false,
-    }
+fn wants_change<T: PartialEq>(desired: Option<&T>, current: Option<&T>) -> bool {
+    desired.is_some_and(|value| current != Some(value))
 }
 
 fn write_outcome_issue(
@@ -246,25 +243,22 @@ fn resolve_selected_repository_association(
     repositories: actions::ReadOutcome<Option<Vec<NamedRepository>>>,
     coverage: &mut Vec<CoverageEntry>,
 ) -> ResolvedOrgReference {
-    let metadata = match record_read_outcome(
+    let Some(metadata) = record_read_outcome(
         coverage,
         ManifestCategoryName::Actions,
         metadata_endpoint,
         metadata,
-    ) {
-        Some(value) => value,
-        None => {
-            return ResolvedOrgReference {
-                resource: resource.clone(),
-                present: None,
-                associated: None,
-                supported: true,
-                detail: Some(format!(
-                    "Could not resolve organization {:?} `{}`: the lookup was unavailable (see coverage); this must not be treated as absent.",
-                    resource.resource_type, resource.name
-                )),
-            };
-        }
+    ) else {
+        return ResolvedOrgReference {
+            resource: resource.clone(),
+            present: None,
+            associated: None,
+            supported: true,
+            detail: Some(format!(
+                "Could not resolve organization {:?} `{}`: the lookup was unavailable (see coverage); this must not be treated as absent.",
+                resource.resource_type, resource.name
+            )),
+        };
     };
 
     let Some(metadata) = metadata else {
@@ -293,25 +287,22 @@ fn resolve_selected_repository_association(
         };
     }
 
-    let repositories = match record_read_outcome(
+    let Some(repositories) = record_read_outcome(
         coverage,
         ManifestCategoryName::Actions,
         repositories_endpoint,
         repositories,
-    ) {
-        Some(value) => value,
-        None => {
-            return ResolvedOrgReference {
-                resource: resource.clone(),
-                present: Some(true),
-                associated: None,
-                supported: true,
-                detail: Some(format!(
-                    "Organization {:?} `{}` has `selected` visibility, but the selected-repository list could not be resolved (this endpoint requires org-admin scope); association state is unknown and must not be assumed.",
-                    resource.resource_type, resource.name
-                )),
-            };
-        }
+    ) else {
+        return ResolvedOrgReference {
+            resource: resource.clone(),
+            present: Some(true),
+            associated: None,
+            supported: true,
+            detail: Some(format!(
+                "Organization {:?} `{}` has `selected` visibility, but the selected-repository list could not be resolved (this endpoint requires org-admin scope); association state is unknown and must not be assumed.",
+                resource.resource_type, resource.name
+            )),
+        };
     };
 
     ResolvedOrgReference {
@@ -1065,11 +1056,14 @@ pub fn plan_actions_category_with_env(
 
     if let Some(wanted) = &desired.settings {
         // Repository Actions permissions (enabled/allowed_actions/sha pinning).
-        if wants_change(&wanted.enabled, &current.enabled)
-            || wants_change(&wanted.allowed_actions, &current.allowed_actions)
+        if wants_change(wanted.enabled.as_ref(), current.enabled.as_ref())
             || wants_change(
-                &wanted.requires_pinned_actions,
-                &current.requires_pinned_actions,
+                wanted.allowed_actions.as_ref(),
+                current.allowed_actions.as_ref(),
+            )
+            || wants_change(
+                wanted.requires_pinned_actions.as_ref(),
+                current.requires_pinned_actions.as_ref(),
             )
         {
             match wanted.enabled {
@@ -1097,11 +1091,11 @@ pub fn plan_actions_category_with_env(
             .or(current.allowed_actions.as_deref());
         if effective_allowed_actions == Some("selected")
             && (wants_change(
-                &wanted.allow_github_owned_actions,
-                &current.allow_github_owned_actions,
+                wanted.allow_github_owned_actions.as_ref(),
+                current.allow_github_owned_actions.as_ref(),
             ) || wants_change(
-                &wanted.allow_verified_creator_actions,
-                &current.allow_verified_creator_actions,
+                wanted.allow_verified_creator_actions.as_ref(),
+                current.allow_verified_creator_actions.as_ref(),
             ) || (!wanted.selected_actions.is_empty()
                 && wanted.selected_actions != current.selected_actions))
         {
@@ -1122,11 +1116,11 @@ pub fn plan_actions_category_with_env(
 
         // Workflow (default GITHUB_TOKEN) permissions.
         if wants_change(
-            &wanted.default_workflow_permissions,
-            &current.default_workflow_permissions,
+            wanted.default_workflow_permissions.as_ref(),
+            current.default_workflow_permissions.as_ref(),
         ) || wants_change(
-            &wanted.can_approve_pull_request_reviews,
-            &current.can_approve_pull_request_reviews,
+            wanted.can_approve_pull_request_reviews.as_ref(),
+            current.can_approve_pull_request_reviews.as_ref(),
         ) {
             let default_permissions = wanted
                 .default_workflow_permissions
@@ -1168,8 +1162,8 @@ pub fn plan_actions_category_with_env(
         }
 
         if wants_change(
-            &wanted.cache_retention_limit_days,
-            &current.cache_retention_limit_days,
+            wanted.cache_retention_limit_days.as_ref(),
+            current.cache_retention_limit_days.as_ref(),
         ) && let Some(max_cache_retention_days) = wanted.cache_retention_limit_days
         {
             settings_changes.push(ActionsSettingChange::CacheRetentionLimit {
@@ -1178,16 +1172,16 @@ pub fn plan_actions_category_with_env(
         }
 
         if wants_change(
-            &wanted.cache_storage_limit_gb,
-            &current.cache_storage_limit_gb,
+            wanted.cache_storage_limit_gb.as_ref(),
+            current.cache_storage_limit_gb.as_ref(),
         ) && let Some(max_cache_size_gb) = wanted.cache_storage_limit_gb
         {
             settings_changes.push(ActionsSettingChange::CacheStorageLimit { max_cache_size_gb });
         }
 
         if wants_change(
-            &wanted.fork_pull_request_contributor_approval,
-            &current.fork_pull_request_contributor_approval,
+            wanted.fork_pull_request_contributor_approval.as_ref(),
+            current.fork_pull_request_contributor_approval.as_ref(),
         ) && let Some(approval_policy) = wanted.fork_pull_request_contributor_approval.clone()
         {
             settings_changes
@@ -1948,7 +1942,7 @@ pub async fn collect_environments_category(
         .map(|desired| desired.policy.clone())
         .unwrap_or_else(CategoryPolicy::observe_sensitive);
 
-    let observed = match record_read_outcome(
+    let Some(observed) = record_read_outcome(
         &mut coverage,
         ManifestCategoryName::Environments,
         "environments",
@@ -1956,21 +1950,18 @@ pub async fn collect_environments_category(
             .list_environments_checked(repo)
             .await
             .context("Failed to list repository environments")?,
-    ) {
-        Some(observed) => observed,
-        None => {
-            return Ok(EnvironmentsCollection {
-                category: EnvironmentsCategoryV2 {
-                    policy,
-                    ..EnvironmentsCategoryV2::default()
-                },
-                observed_names: Vec::new(),
-                deployment_policy_ids: BTreeMap::new(),
-                deployment_policies_observed: std::collections::BTreeSet::new(),
-                coverage,
-                issues,
-            });
-        }
+    ) else {
+        return Ok(EnvironmentsCollection {
+            category: EnvironmentsCategoryV2 {
+                policy,
+                ..EnvironmentsCategoryV2::default()
+            },
+            observed_names: Vec::new(),
+            deployment_policy_ids: BTreeMap::new(),
+            deployment_policies_observed: std::collections::BTreeSet::new(),
+            coverage,
+            issues,
+        });
     };
 
     let wanted_names: Option<std::collections::BTreeSet<&str>> = desired.map(|desired| {

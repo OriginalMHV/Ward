@@ -84,3 +84,16 @@ strip = true
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+unreachable = "warn"
+let_underscore_must_use = "warn"
+needless_pass_by_value = "warn"
+redundant_clone = "warn"
+manual_let_else = "warn"
+ref_option = "warn"
+unnecessary_wraps = "warn"
+unused_async = "warn"
