@@ -150,7 +150,8 @@ async fn audit_repo(
     let has_codeql = client
         .get_file(repo, ".github/workflows/codeql.yml", None)
         .await?
-        .is_some();
+        .is_some()
+        || has_codeql_default_setup(client, repo).await;
 
     let mut unavailable = Vec::new();
     if !security_state.unknown.is_empty() {
@@ -205,6 +206,27 @@ async fn audit_repo(
         },
         unavailable,
     })
+}
+
+/// Default setup has no workflow file. An unreadable endpoint counts as not configured.
+async fn has_codeql_default_setup(client: &Client, repo: &str) -> bool {
+    let path = format!("/repos/{}/{repo}/code-scanning/default-setup", client.org());
+    let Ok(response) = client.get(&path).await else {
+        return false;
+    };
+    if !response.status().is_success() {
+        return false;
+    }
+    response
+        .json::<serde_json::Value>()
+        .await
+        .ok()
+        .and_then(|body| {
+            body.get("state")?
+                .as_str()
+                .map(|state| state == "configured")
+        })
+        .unwrap_or(false)
 }
 
 async fn get_alert_counts(client: &Client, repo: &str) -> Result<AlertCounts> {
@@ -638,5 +660,25 @@ mod tests {
         assert!(joined.contains("rulesets:"), "{joined}");
         assert!(joined.contains("dependabot alerts:"), "{joined}");
         assert!(audit.security.has_dependabot_config);
+    }
+
+    #[tokio::test]
+    async fn codeql_default_setup_counts_as_codeql() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/repos/test-org/my-repo/code-scanning/default-setup"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"state": "configured"})))
+            .mount(&server)
+            .await;
+        let client = Client::new_for_test("test-org", &server.uri());
+        assert!(super::has_codeql_default_setup(&client, "my-repo").await);
+
+        let other = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(403))
+            .mount(&other)
+            .await;
+        let client = Client::new_for_test("test-org", &other.uri());
+        assert!(!super::has_codeql_default_setup(&client, "my-repo").await);
     }
 }
