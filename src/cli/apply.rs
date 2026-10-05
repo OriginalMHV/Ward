@@ -87,17 +87,17 @@ pub(crate) async fn run_canonical_apply(
         return Ok(report);
     }
 
+    let prepared = unified::prepare_apply(client, manifest, &repos, &options).await?;
+
     if !yes {
+        unified::render_report(&prepared.report(), "Ward Plan (to apply)");
         println!();
         println!(
-            "  {} Apply managed categories to {} repositor{}:",
+            "  {} Apply this plan to {} repositor{}?",
             style("[!]").yellow().bold(),
             style(repos.len()).bold(),
             if repos.len() == 1 { "y" } else { "ies" }
         );
-        for repository in &repos {
-            println!("    - {}", repository.name);
-        }
         let proceed = Confirm::new()
             .with_prompt("  Proceed?")
             .default(false)
@@ -109,7 +109,7 @@ pub(crate) async fn run_canonical_apply(
     }
 
     let audit = AuditLog::new()?;
-    let report = unified::apply(client, manifest, &repos, &options, &audit).await?;
+    let report = unified::apply_prepared(client, manifest, prepared, &options, &audit).await;
 
     if run.json {
         println!("{}", serde_json::to_string_pretty(&report)?);

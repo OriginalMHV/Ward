@@ -610,3 +610,41 @@ async fn explicit_repository_fetch_failure_is_an_error() {
     let result = unified::resolve_target_repos(&client, &scoped_manifest(), None, None).await;
     assert!(result.is_err());
 }
+
+#[tokio::test]
+async fn prepare_apply_reports_the_plan_without_mutating() {
+    let server = MockServer::start().await;
+    mock_default_tree(
+        &server,
+        "my-repo",
+        json!([{ "path": "README.md", "mode": "100644", "type": "blob", "sha": "blob-readme", "size": 3 }]),
+    )
+    .await;
+
+    let mut manifest = base_manifest();
+    manifest.categories.files = Some(managed_files_category(vec![dependabot_entry(
+        "version: 2\n",
+    )]));
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let repos = vec![test_repo("my-repo")];
+    let prepared = unified::prepare_apply(
+        &client,
+        &manifest,
+        &repos,
+        &options(vec![Category::Files], false),
+    )
+    .await
+    .unwrap();
+
+    let report = prepared.report();
+    assert_eq!(report.actionable, 1);
+    let mutations = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|request| request.method.as_str() != "GET")
+        .count();
+    assert_eq!(mutations, 0, "preparing the apply must not mutate");
+}

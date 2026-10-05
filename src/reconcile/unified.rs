@@ -1026,17 +1026,33 @@ async fn plan_integrations(
 // Apply
 // ---------------------------------------------------------------------------
 
-/// Plan and apply every selected category for every target repository in the
-/// safe order, verify results, and emit a structured audit trail.
-pub async fn apply(
+/// Read-only plans for every target repository, ready to apply unchanged.
+pub struct PreparedApply {
+    prepared: Vec<(RepoPlan, bool)>,
+}
+
+impl PreparedApply {
+    /// The plan report for what `apply` would do.
+    pub fn report(&self) -> UnifiedReport {
+        UnifiedReport::from_repos(
+            self.prepared
+                .iter()
+                .map(|(plan, existing_config_pr)| {
+                    plan.to_report_with_config_pr(*existing_config_pr)
+                })
+                .collect(),
+        )
+    }
+}
+
+/// Complete every read-only plan and dependency preflight before the first
+/// mutation so a later repository cannot surprise a partially applied run.
+pub async fn prepare_apply(
     client: &Client,
     manifest: &Manifest,
     repos: &[Repository],
     options: &UnifiedOptions,
-    audit: &AuditLog,
-) -> Result<UnifiedReport> {
-    // Complete every read-only plan and dependency preflight before the first
-    // mutation so a later repository cannot surprise a partially applied run.
+) -> Result<PreparedApply> {
     let mut plans = Vec::with_capacity(repos.len());
     for repository in repos {
         plans.push(plan_repo(client, manifest, repository, options).await);
@@ -1055,9 +1071,20 @@ pub async fn apply(
         };
         prepared.push((plan, existing_config_pr));
     }
+    Ok(PreparedApply { prepared })
+}
 
-    let mut repo_reports = Vec::with_capacity(prepared.len());
-    for (plan, existing_config_pr) in prepared {
+/// Apply plans from [`prepare_apply`] in the safe order, verify results, and
+/// emit a structured audit trail.
+pub async fn apply_prepared(
+    client: &Client,
+    manifest: &Manifest,
+    prepared: PreparedApply,
+    options: &UnifiedOptions,
+    audit: &AuditLog,
+) -> UnifiedReport {
+    let mut repo_reports = Vec::with_capacity(prepared.prepared.len());
+    for (plan, existing_config_pr) in prepared.prepared {
         let report = apply_repo(
             client,
             manifest,
@@ -1069,7 +1096,19 @@ pub async fn apply(
         .await;
         repo_reports.push(report);
     }
-    Ok(UnifiedReport::from_repos(repo_reports))
+    UnifiedReport::from_repos(repo_reports)
+}
+
+/// Plan and apply every selected category for every target repository.
+pub async fn apply(
+    client: &Client,
+    manifest: &Manifest,
+    repos: &[Repository],
+    options: &UnifiedOptions,
+    audit: &AuditLog,
+) -> Result<UnifiedReport> {
+    let prepared = prepare_apply(client, manifest, repos, options).await?;
+    Ok(apply_prepared(client, manifest, prepared, options, audit).await)
 }
 
 async fn apply_repo(
