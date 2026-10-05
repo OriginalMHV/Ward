@@ -364,11 +364,11 @@ fn ask_branch_protection() -> Result<BranchProtectionSettings> {
         });
     }
 
-    let approvals: String = Input::new()
+    // Input<u32> asks again until the answer parses as a whole number.
+    let required_approvals: u32 = Input::<u32>::new()
         .with_prompt("  Required approvals")
-        .default("1".to_owned())
+        .default(1)
         .interact_text()?;
-    let required_approvals: u32 = approvals.parse().unwrap_or(1);
 
     let dismiss_stale_reviews = Confirm::new()
         .with_prompt("  Dismiss stale reviews?")
