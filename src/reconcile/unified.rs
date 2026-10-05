@@ -360,6 +360,32 @@ impl RepoPlan {
         })
     }
 
+    /// An unreadable PR list degrades the file-dependent categories to
+    /// unavailable coverage instead of aborting the whole plan.
+    fn record_config_pr_lookup_failure(&mut self, message: &str) {
+        for category in &mut self.categories {
+            if dependency_deferral(category, true).total == 0 {
+                continue;
+            }
+            let name = match category.name {
+                Category::Actions => crate::config::manifest::ManifestCategoryName::Actions,
+                Category::Integrations => {
+                    crate::config::manifest::ManifestCategoryName::Integrations
+                }
+                Category::Rulesets => crate::config::manifest::ManifestCategoryName::Rulesets,
+                _ => crate::config::manifest::ManifestCategoryName::BranchProtection,
+            };
+            category.coverage.push(CoverageEntry {
+                category: name,
+                endpoint: "pulls (open configuration pull request)".to_owned(),
+                outcome: crate::config::manifest::CoverageOutcome::Unavailable,
+                reason: Some(message.to_owned()),
+                required_permission: Some("pull_requests:read".to_owned()),
+            });
+            category.warnings += 1;
+        }
+    }
+
     fn has_file_dependent_changes(&self) -> bool {
         self.categories
             .iter()
@@ -538,12 +564,16 @@ pub async fn plan(
     let branch = sync_branch(manifest);
     for repository in repos {
         let plan = plan_repo(client, manifest, repository, options).await;
+        let mut plan = plan;
         let existing_config_pr =
             if !plan.plans_config_pull_request() && plan.has_file_dependent_changes() {
-                client
-                    .find_open_pull_request(&plan.repo, &branch)
-                    .await?
-                    .is_some()
+                match client.find_open_pull_request(&plan.repo, &branch).await {
+                    Ok(pull_request) => pull_request.is_some(),
+                    Err(error) => {
+                        plan.record_config_pr_lookup_failure(&format!("{error:#}"));
+                        false
+                    }
+                }
             } else {
                 false
             };
@@ -2561,6 +2591,34 @@ mod tests {
         assert_eq!(report.verified, Some(false));
         assert!(report.configuration_pull_request_pending);
         assert!(report.details[0].contains("does not match"));
+    }
+
+    #[test]
+    fn unreadable_config_pr_lookup_degrades_dependent_categories_to_coverage() {
+        let mut plan = RepoPlan {
+            repo: "repo".to_owned(),
+            default_branch: "main".to_owned(),
+            categories: vec![CategoryPlan {
+                name: Category::Rulesets,
+                disposition: ManagementDisposition::Managed,
+                is_blocked_collection: false,
+                coverage: Vec::new(),
+                actionable: 3,
+                blocked: 0,
+                warnings: 0,
+                details: Vec::new(),
+                kind: CategoryPlanKind::Rulesets(security_rules::RulesetsPlan {
+                    actions: Vec::new(),
+                    issues: Vec::new(),
+                }),
+            }],
+        };
+
+        plan.record_config_pr_lookup_failure("HTTP 403");
+
+        let report = UnifiedReport::from_repos(vec![plan.to_report()]);
+        assert!(report.has_unknown_managed_state());
+        assert_eq!(report.warnings, 1);
     }
 
     #[test]
