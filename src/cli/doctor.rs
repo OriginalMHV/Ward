@@ -172,7 +172,7 @@ fn check_gh_cli() -> Check {
 }
 
 fn check_audit_log() -> Check {
-    let log = dirs_path("audit.log");
+    let log = audit_log_path();
     if log.exists() {
         match std::fs::metadata(&log) {
             Ok(meta) => {
@@ -353,9 +353,10 @@ async fn check_api_connectivity(config_path: Option<&str>) -> Check {
     }
 }
 
-fn dirs_path(name: &str) -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    std::path::PathBuf::from(home).join(".ward").join(name)
+fn audit_log_path() -> std::path::PathBuf {
+    crate::engine::audit_log::ward_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from(".ward"))
+        .join("audit.log")
 }
 
 #[cfg(test)]
