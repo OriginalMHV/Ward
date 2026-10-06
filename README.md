@@ -3,10 +3,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/OriginalMHV/Ward/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/OriginalMHV/Ward/ci.yml?branch=main&style=flat-square&labelColor=59636E&color=0969DA&label=CI" alt="CI status"></a>
-  <a href="https://crates.io/crates/ward-cli"><img src="https://img.shields.io/crates/v/ward-cli?style=flat-square&labelColor=59636E&color=0969DA&label=crates.io" alt="Latest version on crates.io"></a>
-  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/MSRV-1.88-0969DA?style=flat-square&labelColor=59636E" alt="Minimum supported Rust version 1.88"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-0969DA?style=flat-square&labelColor=59636E" alt="MIT license"></a>
+  <a href="https://github.com/OriginalMHV/Ward/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/OriginalMHV/Ward/ci.yml?branch=main&style=flat-square&labelColor=6E7681&color=9A6700&label=CI" alt="CI status"></a>
+  <a href="https://crates.io/crates/ward-cli"><img src="https://img.shields.io/crates/v/ward-cli?style=flat-square&labelColor=6E7681&color=9A6700&label=crates.io" alt="Latest version on crates.io"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/MSRV-1.88-9A6700?style=flat-square&labelColor=6E7681" alt="Minimum supported Rust version 1.88"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-9A6700?style=flat-square&labelColor=6E7681" alt="MIT license"></a>
 </p>
 
 ## Why Ward
