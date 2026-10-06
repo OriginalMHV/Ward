@@ -96,13 +96,13 @@ If drift is detected, the step fails with exit code 1. Deferred changes and unre
 ### Security plan as JSON
 
 ```bash
-ward security plan --system backend --json
+ward plan --category security --system backend --json
 ```
 
 The report is an object with a `repos` array and top-level `actionable`, `blocked`, `warnings`, and `deferred` counts. Pipe through `jq` to list repos that need changes:
 
 ```bash
-ward security plan --system backend --json | jq '.repos[] | select(.actionable > 0) | .repo'
+ward plan --category security --system backend --json | jq '.repos[] | select(.actionable > 0) | .repo'
 ```
 
 ### Full audit as JSON
@@ -121,9 +121,9 @@ Returns per-repo security features, key GitHub configuration files, alert counts
 Use `--yes` to skip confirmation prompts in CI:
 
 ```bash
-ward security apply --system backend --yes
-ward commit apply --system backend --yes
-ward protection apply --system backend --yes
+ward apply --category security --system backend --yes
+ward apply --category files --system backend --yes
+ward apply --category branch-protection --system backend --yes
 ```
 
 ---
@@ -155,9 +155,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.WARD_TOKEN }}
         run: |
-          ward security apply --system ${{ inputs.system }} --yes
-          ward commit apply --system ${{ inputs.system }} --yes
-          ward protection apply --system ${{ inputs.system }} --yes
+          ward apply --category security --system ${{ inputs.system }} --yes
+          ward apply --category files --system ${{ inputs.system }} --yes
+          ward apply --category branch-protection --system ${{ inputs.system }} --yes
 
       - name: Verify
         env:

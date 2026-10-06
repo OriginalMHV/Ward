@@ -150,6 +150,14 @@ struct TeamAudit {
 }
 
 impl AuditCommand {
+    /// An audit of one section, for the deprecated per-category commands.
+    pub(crate) fn for_section(section: AuditCategory, json: bool) -> Self {
+        Self {
+            category: vec![section],
+            format: if json { "json" } else { "table" }.to_owned(),
+        }
+    }
+
     pub async fn run(
         &self,
         client: &Client,

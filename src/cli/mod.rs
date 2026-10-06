@@ -1,18 +1,15 @@
 pub mod apply;
 pub mod args;
 pub mod audit;
-pub mod commit;
 pub mod config_cmd;
+pub mod deprecated;
 pub mod doctor;
 pub mod drift;
 pub mod import;
 pub mod init;
 mod output;
 pub mod plan;
-pub mod protection;
 pub mod repos;
-pub mod rulesets;
-pub mod security;
 pub mod settings;
 pub mod teams;
 
@@ -23,8 +20,7 @@ const AFTER_HELP: &str = "\x1b[1mGetting Started:\x1b[0m
 
 \x1b[1mPlan & Apply:\x1b[0m
   plan, apply                   Preview and apply changes across categories
-  security, rulesets, commit    Manage specific features
-  teams, protection, settings   Access control & repo settings
+  teams, settings               Access control & repo settings (deprecated)
 
 \x1b[1mMonitor:\x1b[0m
   drift, audit                  Detect drift, audit compliance
@@ -109,25 +105,25 @@ pub enum Command {
     #[command(display_order = 21)]
     Apply(apply::ApplyCommand),
 
-    /// Manage security features (Dependabot, secret scanning, CodeQL)
-    #[command(display_order = 22)]
-    Security(security::SecurityCommand),
+    /// Deprecated. Use `ward plan|apply|audit --category security`
+    #[command(hide = true)]
+    Security(deprecated::LegacyArgs),
 
-    /// Manage repository rulesets (branch protection successor)
-    #[command(display_order = 23)]
-    Rulesets(rulesets::RulesetsCommand),
+    /// Deprecated. Use `ward plan|apply|audit --category rulesets`
+    #[command(hide = true)]
+    Rulesets(deprecated::LegacyArgs),
 
-    /// Commit managed files to repositories (no cloning needed)
-    #[command(display_order = 24)]
-    Commit(commit::CommitCommand),
+    /// Deprecated. Use `ward plan|apply --category files`
+    #[command(hide = true)]
+    Commit(deprecated::LegacyArgs),
 
     /// Manage team access to repositories
     #[command(display_order = 25)]
     Teams(teams::TeamsCommand),
 
-    /// Manage classic branch protection rules
-    #[command(display_order = 26)]
-    Protection(protection::ProtectionCommand),
+    /// Deprecated. Use `ward plan|apply|audit --category branch-protection`
+    #[command(hide = true)]
+    Protection(deprecated::LegacyArgs),
 
     /// Manage repository settings and rulesets
     #[command(display_order = 27)]

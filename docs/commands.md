@@ -53,116 +53,28 @@ Output columns: Repository, Language, Visibility, Default Branch.
 
 ---
 
-## `ward security`
+## Deprecated per-category commands
 
-Manage security features (Dependabot, secret scanning, push protection) across repositories.
+`ward security`, `ward rulesets`, `ward protection`, and `ward commit` are hidden aliases in 0.5.x. Each one prints a warning to stderr and then runs the replacement. They are removed in 0.6.0.
 
-### `ward security plan`
+| Old invocation | New invocation |
+|----------------|----------------|
+| `ward security plan` | `ward plan --category security` |
+| `ward security apply [-y] [--skip-verify]` | `ward apply --category security [-y] [--skip-verify]` |
+| `ward security audit` | `ward audit --category security` |
+| `ward rulesets plan\|apply\|audit` | `ward plan\|apply\|audit --category rulesets` |
+| `ward protection plan\|apply\|audit` | `ward plan\|apply\|audit --category branch-protection` |
+| `ward commit plan\|apply` | `ward plan\|apply --category files` |
 
-Dry-run showing what security changes would be made.
+The warning has this form:
 
-```bash
-ward security plan --system backend
-ward security plan --repo my-service
-ward security plan --system backend --json
+```
+warning: 'ward security plan' is deprecated and will be removed in 0.6.0; use 'ward plan --category security'
 ```
 
-### `ward security apply`
+`ward commit audit` never existed and has no replacement. Use `ward plan --category files`.
 
-Apply security settings and verify the result.
-
-```bash
-ward security apply --system backend
-ward security apply --system backend --yes
-ward security apply --repo my-service --yes
-ward security apply --system backend --skip-verify
-```
-
-| Flag | Description |
-|------|-------------|
-| `--yes` | Skip confirmation prompt |
-| `--skip-verify` | Skip post-apply verification step |
-
-### `ward security audit`
-
-Report current security state for all repos in a system.
-
-```bash
-ward security audit --system backend
-ward security audit --repo my-service
-```
-
-Output columns: Dependabot Alerts, Dependabot Security Updates, Secret Scanning, AI Detection, Push Protection.
-
----
-
-## `ward protection`
-
-Manage branch protection rules on default branches.
-
-### `ward protection plan`
-
-Preview what branch protection changes would be made.
-
-```bash
-ward protection plan --system backend
-ward protection plan --repo my-service
-```
-
-### `ward protection apply`
-
-Apply branch protection rules to default branches.
-
-```bash
-ward protection apply --system backend
-ward protection apply --system backend --yes
-ward protection apply --repo my-service --yes
-```
-
-| Flag | Description |
-|------|-------------|
-| `--yes` | Skip confirmation prompt |
-
-### `ward protection audit`
-
-Show current branch protection state.
-
-```bash
-ward protection audit --system backend
-ward protection audit --repo my-service
-```
-
-Audited fields: Required PR Reviews, Required Approvals, Dismiss Stale Reviews, Code Owner Reviews, Status Checks, Strict Status Checks, Enforce Admins, Linear History, Force Pushes, Deletions.
-
----
-
-## `ward commit`
-
-Synchronize managed files without cloning. Uses the Git Trees API for atomic multi-file commits.
-
-### `ward commit plan`
-
-Preview what files would be committed.
-
-```bash
-ward commit plan --system backend
-ward commit plan --repo my-service
-```
-
-### `ward commit apply`
-
-Commit changed files and create pull requests.
-
-```bash
-ward commit apply --system backend
-ward commit apply --repo my-service --yes
-```
-
-| Flag | Description |
-|------|-------------|
-| `--yes` | Skip confirmation prompt |
-
-Ward compares every `[[categories.files.entries]]` entry, commits all changed files together, and opens one pull request per target repository. Target-only files are deleted only when the files category enables pruning.
+The aliases run the replacement command, so they behave like it. The audit aliases print the new audit section, and they cover all configured systems when you pass neither `--system` nor `--repo`.
 
 ---
 
@@ -229,46 +141,6 @@ Exit code `0` means all repos are in sync with `ward.toml`. Exit code `1` means 
 `ward drift check` is a deprecated alias of `ward drift`. It prints `warning: 'ward drift check' is deprecated; use 'ward drift'` to stderr and runs the same check.
 
 Checks every configured category by default. Use `--category <CATEGORY>` (repeatable, comma-separated) to narrow the drift gate, and `--allow-high-impact` to count visibility and archive changes as actionable.
-
----
-
-## `ward rulesets`
-
-Manage GitHub repository rulesets (the successor to branch protection rules).
-
-### `ward rulesets plan`
-
-Preview ruleset changes.
-
-```bash
-ward rulesets plan --system backend
-ward rulesets plan --repo my-service
-```
-
-### `ward rulesets apply`
-
-Create, update, or prune repository-owned rulesets according to `[categories.rulesets]`. Stable actor references such as team slugs and app slugs are resolved for each target repository.
-
-```bash
-ward rulesets apply --system backend
-ward rulesets apply --system backend --yes
-ward rulesets apply --repo my-service --yes
-```
-
-| Flag | Description |
-|------|-------------|
-| `--yes` / `-y` | Skip confirmation prompt |
-
-### `ward rulesets audit`
-
-Show current rulesets across repositories.
-
-```bash
-ward rulesets audit --system backend
-ward rulesets audit --repo my-service
-```
-
-Exact rulesets are configured under `[[categories.rulesets.repository_rulesets]]`. They preserve arbitrary conditions, rule parameters, enforcement, and bypass actors. Target-only rulesets are deleted only when the category enables pruning.
 
 ---
 

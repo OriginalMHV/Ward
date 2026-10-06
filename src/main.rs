@@ -10,6 +10,7 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberI
 use ward::cli::{Cli, Command};
 use ward::config::Manifest;
 use ward::github::Client;
+use ward::reconcile::unified::Category;
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -73,59 +74,32 @@ async fn run() -> Result<()> {
     }
 
     let client = Client::new(org, cli.parallelism)?;
+    let (system, repo) = (cli.system.as_deref(), cli.repo.as_deref());
 
     match cli.command {
         Command::Repos(cmd) => cmd.run(&client, &manifest, cli.system.as_deref()).await,
-        Command::Security(cmd) => {
-            cmd.run(
-                &client,
-                &manifest,
-                cli.system.as_deref(),
-                cli.repo.as_deref(),
-                cli.json,
-            )
-            .await
+        Command::Security(args) => {
+            args.into_legacy("security", Category::Security)
+                .run(&client, &manifest, system, repo, cli.json)
+                .await
         }
-        Command::Settings(cmd) => {
-            cmd.run(
-                &client,
-                &manifest,
-                cli.system.as_deref(),
-                cli.repo.as_deref(),
-            )
-            .await
+        Command::Rulesets(args) => {
+            args.into_legacy("rulesets", Category::Rulesets)
+                .run(&client, &manifest, system, repo, cli.json)
+                .await
         }
-        Command::Commit(cmd) => {
-            cmd.run(
-                &client,
-                &manifest,
-                cli.system.as_deref(),
-                cli.repo.as_deref(),
-                cli.json,
-            )
-            .await
+        Command::Commit(args) => {
+            args.into_legacy("commit", Category::Files)
+                .run(&client, &manifest, system, repo, cli.json)
+                .await
         }
-        Command::Protection(cmd) => {
-            cmd.run(
-                &client,
-                &manifest,
-                cli.system.as_deref(),
-                cli.repo.as_deref(),
-                cli.json,
-            )
-            .await
+        Command::Protection(args) => {
+            args.into_legacy("protection", Category::BranchProtection)
+                .run(&client, &manifest, system, repo, cli.json)
+                .await
         }
+        Command::Settings(cmd) => cmd.run(&client, &manifest, system, repo).await,
         Command::Drift(cmd) => {
-            cmd.run(
-                &client,
-                &manifest,
-                cli.system.as_deref(),
-                cli.repo.as_deref(),
-                cli.json,
-            )
-            .await
-        }
-        Command::Rulesets(cmd) => {
             cmd.run(
                 &client,
                 &manifest,

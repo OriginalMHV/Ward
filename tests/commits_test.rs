@@ -12,7 +12,7 @@ use serde_json::json;
 use wiremock::matchers::{body_partial_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use ward::cli::commit::CommitCommand;
+use ward::cli::deprecated::LegacyCategory;
 use ward::cli::{Cli, Command};
 use ward::config::Manifest;
 use ward::config::manifest::{
@@ -21,6 +21,7 @@ use ward::config::manifest::{
 use ward::github::Client;
 use ward::github::commits::{AtomicCommitEntry, AtomicCommitFile, CommitContent, DeleteTreeEntry};
 use ward::github::contents::{GitEntryMode, GitObjectType};
+use ward::reconcile::unified::Category;
 
 #[tokio::test]
 async fn test_create_atomic_commit_supports_binary_bytes_and_delete_entries() {
@@ -714,14 +715,14 @@ async fn ensure_dedicated_branch_encodes_refs_when_refreshing_stale_unicode_bran
 // commit apply: canonical files and aggregated failures
 // ---------------------------------------------------------------------------
 
-fn parse_commit_command(args: &[&str]) -> (CommitCommand, Option<String>, Option<String>) {
+fn parse_commit_command(args: &[&str]) -> (LegacyCategory, Option<String>, Option<String>) {
     let cli = Cli::parse_from(args);
     let system = cli.system.clone();
     let repo = cli.repo.clone();
     let Command::Commit(command) = cli.command else {
         panic!("expected commit command");
     };
-    (command, system, repo)
+    (command.into_legacy("commit", Category::Files), system, repo)
 }
 
 #[tokio::test]
