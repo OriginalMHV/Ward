@@ -11,9 +11,9 @@ Set Margin 24
 Set MarginFill "#2563EB"
 Set Padding 28
 Set FontFamily "JetBrains Mono"
-Set FontSize 20
+Set FontSize 22
 Set Width 1300
-Set Height 640
+Set Height 700
 Set LineHeight 1.35
 Set TypingSpeed 45ms
 Set Framerate 24
