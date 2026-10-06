@@ -2,7 +2,7 @@ use crate::outcome::Outcome;
 use anyhow::Result;
 use clap::Args;
 
-use crate::cli::args::CategoryArgs;
+use crate::cli::args::{CategoryArgs, OutputArgs, TargetArgs};
 use crate::config::Manifest;
 use crate::github::Client;
 use crate::reconcile::unified::{self, UnifiedOptions, UnifiedReport};
@@ -26,6 +26,12 @@ struct DriftArgs {
     /// Include high-impact repository changes in the actionable drift count
     #[arg(long)]
     allow_high_impact: bool,
+
+    #[command(flatten)]
+    target: TargetArgs,
+
+    #[command(flatten)]
+    output: OutputArgs,
 }
 
 #[derive(clap::Subcommand)]
@@ -36,27 +42,32 @@ enum DriftAction {
 }
 
 impl DriftCommand {
-    pub async fn run(
-        &self,
-        client: &Client,
-        manifest: &Manifest,
-        system: Option<&str>,
-        repo: Option<&str>,
-        json: bool,
-    ) -> Result<()> {
-        let args = match &self.action {
-            Some(DriftAction::Check(args)) => {
-                eprintln!("warning: 'ward drift check' is deprecated; use 'ward drift'");
-                args
-            }
+    fn active_args(&self) -> &DriftArgs {
+        match &self.action {
+            Some(DriftAction::Check(args)) => args,
             None => &self.args,
-        };
+        }
+    }
+
+    pub fn target(&self) -> &TargetArgs {
+        &self.active_args().target
+    }
+
+    /// Print the deprecation warning when the run uses the `check` alias.
+    pub fn announce(&self) {
+        if self.action.is_some() {
+            eprintln!("warning: 'ward drift check' is deprecated; use 'ward drift'");
+        }
+    }
+
+    pub async fn run(&self, client: &Client, manifest: &Manifest) -> Result<()> {
+        let args = self.active_args();
         run_drift(
             client,
             manifest,
-            system,
-            repo,
-            json,
+            args.target.system.as_deref(),
+            args.target.repo.as_deref(),
+            args.output.is_json(),
             unified::select_categories(&args.category.categories),
             args.allow_high_impact,
         )

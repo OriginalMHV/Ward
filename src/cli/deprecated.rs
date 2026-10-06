@@ -7,6 +7,7 @@
 use anyhow::{Result, bail};
 use clap::{Args, Subcommand};
 
+use crate::cli::args::{OutputArgs, TargetArgs};
 use crate::cli::audit::{AuditCategory, AuditCommand};
 use crate::cli::plan::CategoryRun;
 use crate::config::Manifest;
@@ -14,11 +15,24 @@ use crate::engine::audit_log::AuditLog;
 use crate::github::Client;
 use crate::reconcile::unified::{Category, UnifiedOptions};
 
+/// Target and output arguments shared by every legacy action.
+#[derive(Args, Debug, Clone, Default)]
+pub struct CommonArgs {
+    #[command(flatten)]
+    target: TargetArgs,
+
+    #[command(flatten)]
+    output: OutputArgs,
+}
+
 /// The actions of `ward security`, `rulesets`, `protection` and `commit`.
-#[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum LegacyClapAction {
     /// Show what would change
-    Plan,
+    Plan {
+        #[command(flatten)]
+        common: CommonArgs,
+    },
 
     /// Apply the changes
     Apply {
@@ -29,40 +43,61 @@ pub enum LegacyClapAction {
         /// Skip the post-apply verification step
         #[arg(long)]
         skip_verify: bool,
+
+        #[command(flatten)]
+        common: CommonArgs,
     },
 
     /// Show the current state
-    Audit,
+    Audit {
+        #[command(flatten)]
+        common: CommonArgs,
+    },
 }
 
 /// The actions of `ward teams`.
-#[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum TeamsClapAction {
     /// List the teams of each repository
-    List,
+    List {
+        #[command(flatten)]
+        common: CommonArgs,
+    },
 
     /// Show what would change
-    Plan,
+    Plan {
+        #[command(flatten)]
+        common: CommonArgs,
+    },
 
     /// Apply the changes
     Apply {
         /// Skip the confirmation prompt
         #[arg(long, short = 'y')]
         yes: bool,
+
+        #[command(flatten)]
+        common: CommonArgs,
     },
 
     /// Compare team access with the manifest
-    Audit,
+    Audit {
+        #[command(flatten)]
+        common: CommonArgs,
+    },
 }
 
 /// The actions of `ward settings`.
-#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum SettingsClapAction {
     /// Show what would change
     Plan {
         /// Removed. Manage the Copilot review ruleset in ward.toml
         #[arg(long, hide = true)]
         ruleset: Option<String>,
+
+        #[command(flatten)]
+        common: CommonArgs,
     },
 
     /// Apply the changes
@@ -74,10 +109,16 @@ pub enum SettingsClapAction {
         /// Skip the confirmation prompt
         #[arg(long, short = 'y')]
         yes: bool,
+
+        #[command(flatten)]
+        common: CommonArgs,
     },
 
     /// Compare repository settings with the manifest
-    Audit,
+    Audit {
+        #[command(flatten)]
+        common: CommonArgs,
+    },
 }
 
 /// What a legacy command runs.
@@ -126,10 +167,9 @@ impl SettingsArgs {
     /// Reject the removed `--ruleset` option. This needs no token or manifest.
     pub fn precheck(&self) -> Result<()> {
         let ruleset = match &self.action {
-            SettingsClapAction::Plan { ruleset } | SettingsClapAction::Apply { ruleset, .. } => {
-                ruleset.as_deref()
-            }
-            SettingsClapAction::Audit => None,
+            SettingsClapAction::Plan { ruleset, .. }
+            | SettingsClapAction::Apply { ruleset, .. } => ruleset.as_deref(),
+            SettingsClapAction::Audit { .. } => None,
         };
         let Some(ruleset) = ruleset else {
             return Ok(());
@@ -144,19 +184,23 @@ impl SettingsArgs {
 
     /// `settings plan` and `apply` run the repository category. `audit` becomes a drift check.
     pub fn into_legacy(self) -> LegacyCategory {
-        let (name, action, note) = match self.action {
-            SettingsClapAction::Plan { .. } => {
-                ("plan", LegacyAction::Plan, Some(REPOSITORY_SCOPE_NOTE))
-            }
-            SettingsClapAction::Apply { yes, .. } => (
+        let (name, action, note, common) = match self.action {
+            SettingsClapAction::Plan { common, .. } => (
+                "plan",
+                LegacyAction::Plan,
+                Some(REPOSITORY_SCOPE_NOTE),
+                common,
+            ),
+            SettingsClapAction::Apply { yes, common, .. } => (
                 "apply",
                 LegacyAction::Apply {
                     yes,
                     skip_verify: false,
                 },
                 Some(REPOSITORY_SCOPE_NOTE),
+                common,
             ),
-            SettingsClapAction::Audit => ("audit", LegacyAction::Drift, None),
+            SettingsClapAction::Audit { common } => ("audit", LegacyAction::Drift, None, common),
         };
         LegacyCategory {
             command: "settings",
@@ -164,6 +208,8 @@ impl SettingsArgs {
             category: Category::Repository,
             action,
             note,
+            target: common.target,
+            output: common.output,
         }
     }
 }
@@ -173,12 +219,14 @@ const ACCESS_SCOPE_NOTE: &str = "note: the access category also covers collabora
 impl LegacyArgs {
     /// Bind the parsed action to the legacy command name and its category.
     pub fn into_legacy(self, command: &'static str, category: Category) -> LegacyCategory {
-        let (name, action) = match self.action {
-            LegacyClapAction::Plan => ("plan", LegacyAction::Plan),
-            LegacyClapAction::Apply { yes, skip_verify } => {
-                ("apply", LegacyAction::Apply { yes, skip_verify })
-            }
-            LegacyClapAction::Audit => ("audit", LegacyAction::Audit),
+        let (name, action, common) = match self.action {
+            LegacyClapAction::Plan { common } => ("plan", LegacyAction::Plan, common),
+            LegacyClapAction::Apply {
+                yes,
+                skip_verify,
+                common,
+            } => ("apply", LegacyAction::Apply { yes, skip_verify }, common),
+            LegacyClapAction::Audit { common } => ("audit", LegacyAction::Audit, common),
         };
         LegacyCategory {
             command,
@@ -186,6 +234,8 @@ impl LegacyArgs {
             category,
             action,
             note: None,
+            target: common.target,
+            output: common.output,
         }
     }
 }
@@ -194,18 +244,21 @@ impl TeamsArgs {
     /// `teams plan` and `apply` run the access category. `list` becomes an audit
     /// section and `audit` becomes a drift check.
     pub fn into_legacy(self) -> LegacyCategory {
-        let (name, action, note) = match self.action {
-            TeamsClapAction::List => ("list", LegacyAction::Audit, None),
-            TeamsClapAction::Plan => ("plan", LegacyAction::Plan, Some(ACCESS_SCOPE_NOTE)),
-            TeamsClapAction::Apply { yes } => (
+        let (name, action, note, common) = match self.action {
+            TeamsClapAction::List { common } => ("list", LegacyAction::Audit, None, common),
+            TeamsClapAction::Plan { common } => {
+                ("plan", LegacyAction::Plan, Some(ACCESS_SCOPE_NOTE), common)
+            }
+            TeamsClapAction::Apply { yes, common } => (
                 "apply",
                 LegacyAction::Apply {
                     yes,
                     skip_verify: false,
                 },
                 Some(ACCESS_SCOPE_NOTE),
+                common,
             ),
-            TeamsClapAction::Audit => ("audit", LegacyAction::Drift, None),
+            TeamsClapAction::Audit { common } => ("audit", LegacyAction::Drift, None, common),
         };
         LegacyCategory {
             command: "teams",
@@ -213,17 +266,21 @@ impl TeamsArgs {
             category: Category::Access,
             action,
             note,
+            target: common.target,
+            output: common.output,
         }
     }
 }
 
 /// One legacy command invocation, mapped onto the generic category commands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LegacyCategory {
     pub command: &'static str,
     pub subcommand: &'static str,
     pub category: Category,
     pub action: LegacyAction,
+    pub target: TargetArgs,
+    output: OutputArgs,
     note: Option<&'static str>,
 }
 
@@ -264,16 +321,8 @@ impl LegacyCategory {
         }
     }
 
-    pub async fn run(
-        &self,
-        client: &Client,
-        manifest: &Manifest,
-        system: Option<&str>,
-        repo: Option<&str>,
-        json: bool,
-    ) -> Result<()> {
-        self.run_with_audit(client, manifest, system, repo, json, AuditLog::new)
-            .await
+    pub async fn run(&self, client: &Client, manifest: &Manifest) -> Result<()> {
+        self.run_with_audit(client, manifest, AuditLog::new).await
     }
 
     /// As [`Self::run`], with the audit log opened by `open_audit` when an apply starts.
@@ -281,12 +330,11 @@ impl LegacyCategory {
         &self,
         client: &Client,
         manifest: &Manifest,
-        system: Option<&str>,
-        repo: Option<&str>,
-        json: bool,
         open_audit: impl FnOnce() -> Result<AuditLog>,
     ) -> Result<()> {
-        self.announce();
+        let system = self.target.system.as_deref();
+        let repo = self.target.repo.as_deref();
+        let json = self.output.is_json();
         let options = |verify| UnifiedOptions {
             categories: vec![self.category],
             allow_high_impact: false,
@@ -343,8 +391,8 @@ impl LegacyCategory {
                         self.category.stable_name()
                     );
                 };
-                AuditCommand::for_section(section, json)
-                    .run(client, manifest, system, repo)
+                AuditCommand::for_section(section, self.target.clone(), self.output.clone())
+                    .run(client, manifest)
                     .await
             }
         }

@@ -2,12 +2,16 @@ use anyhow::Result;
 use clap::Args;
 use console::style;
 
+use crate::cli::args::OutputArgs;
 use crate::config::auth;
 use crate::config::manifest::Manifest;
 use crate::outcome::Outcome;
 
 #[derive(Args)]
-pub struct DoctorCommand;
+pub struct DoctorCommand {
+    #[command(flatten)]
+    output: OutputArgs,
+}
 
 struct Check {
     name: &'static str,
@@ -23,10 +27,13 @@ enum CheckStatus {
 
 impl DoctorCommand {
     pub async fn run(&self, config_path: Option<&str>) -> Result<()> {
-        println!();
-        println!("  {}", style("Ward Doctor").bold());
-        println!("  {}", style("Diagnosing your setup...").dim());
-        println!();
+        let json = self.output.is_json();
+        if !json {
+            println!();
+            println!("  {}", style("Ward Doctor").bold());
+            println!("  {}", style("Diagnosing your setup...").dim());
+            println!();
+        }
 
         let mut checks = vec![
             check_config(config_path),
@@ -48,23 +55,30 @@ impl DoctorCommand {
         let mut fail = 0;
 
         for check in &checks {
-            let icon = match check.status {
-                CheckStatus::Pass => style("[ok]").green().bold(),
-                CheckStatus::Warn => style("[!!]").yellow().bold(),
-                CheckStatus::Fail => style("[x]").red().bold(),
-            };
-            println!(
-                "  {} {:<30} {}",
-                icon,
-                check.name,
-                style(&check.detail).dim()
-            );
+            if !json {
+                let icon = match check.status {
+                    CheckStatus::Pass => style("[ok]").green().bold(),
+                    CheckStatus::Warn => style("[!!]").yellow().bold(),
+                    CheckStatus::Fail => style("[x]").red().bold(),
+                };
+                println!(
+                    "  {} {:<30} {}",
+                    icon,
+                    check.name,
+                    style(&check.detail).dim()
+                );
+            }
 
             match check.status {
                 CheckStatus::Pass => pass += 1,
                 CheckStatus::Warn => warn += 1,
                 CheckStatus::Fail => fail += 1,
             }
+        }
+
+        if json {
+            print_json(&checks, pass, warn, fail)?;
+            return finish(fail);
         }
 
         println!();
@@ -93,11 +107,43 @@ impl DoctorCommand {
         }
 
         println!();
-        if fail > 0 {
-            return Err(Outcome::ChecksFailed(format!("{fail} doctor check(s) failed")).into());
-        }
-        Ok(())
+        finish(fail)
     }
+}
+
+fn finish(fail: usize) -> Result<()> {
+    if fail > 0 {
+        return Err(Outcome::ChecksFailed(format!("{fail} doctor check(s) failed")).into());
+    }
+    Ok(())
+}
+
+impl CheckStatus {
+    fn label(&self) -> &'static str {
+        match self {
+            CheckStatus::Pass => "pass",
+            CheckStatus::Warn => "warn",
+            CheckStatus::Fail => "fail",
+        }
+    }
+}
+
+fn print_json(checks: &[Check], pass: usize, warn: usize, fail: usize) -> Result<()> {
+    let report = serde_json::json!({
+        "checks": checks
+            .iter()
+            .map(|check| serde_json::json!({
+                "name": check.name,
+                "status": check.status.label(),
+                "detail": check.detail,
+            }))
+            .collect::<Vec<_>>(),
+        "passed": pass,
+        "warnings": warn,
+        "errors": fail,
+    });
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
 }
 
 fn check_config(path: Option<&str>) -> Check {

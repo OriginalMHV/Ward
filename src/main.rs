@@ -7,6 +7,7 @@ use clap::Parser;
 use clap_complete::generate;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
+use ward::cli::deprecated::LegacyCategory;
 use ward::cli::{Cli, Command};
 use ward::config::Manifest;
 use ward::github::Client;
@@ -23,14 +24,10 @@ async fn main() -> ExitCode {
     }
 }
 
-#[allow(
-    clippy::unreachable,
-    reason = "commands handled before the client exists; the PR 3 dispatch refactor removes these arms"
-)]
 async fn run() -> Result<()> {
     let cli = Cli::parse();
 
-    // Handle completions early, before initializing tracing
+    // Completions need no tracing, token or manifest.
     if let Command::Completions { shell } = cli.command {
         let mut cmd = <Cli as clap::CommandFactory>::command();
         let name = cmd.get_name().to_string();
@@ -40,36 +37,98 @@ async fn run() -> Result<()> {
 
     init_tracing(cli.verbose);
 
-    // Init handles its own client creation (manifest may not exist yet)
-    if let Command::Init(cmd) = cli.command {
-        return cmd.run(cli.parallelism).await;
-    }
+    let config = cli.config.as_deref();
+    let parallelism = cli.parallelism;
 
-    // Import handles its own client creation (it creates the manifest)
-    if let Command::Import(cmd) = cli.command {
-        return cmd.run(cli.parallelism).await;
+    // Commands that need no client run first. Removed and deprecated commands
+    // print their hint here, before any token or manifest is needed.
+    match cli.command {
+        Command::Completions { .. } => Ok(()),
+        Command::Init(cmd) => cmd.run(parallelism).await,
+        Command::Import(cmd) => cmd.run(parallelism).await,
+        Command::Config(cmd) => cmd.run(config),
+        Command::Doctor(cmd) => cmd.run(config).await,
+        Command::Repos(cmd) => {
+            cmd.precheck()?;
+            let (client, manifest) = connect(config, cmd.org(), parallelism)?;
+            cmd.run(&client, &manifest).await
+        }
+        Command::Plan(cmd) => {
+            let (client, manifest) = connect(config, cmd.target.org.as_deref(), parallelism)?;
+            cmd.run(&client, &manifest).await
+        }
+        Command::Apply(cmd) => {
+            let (client, manifest) = connect(config, cmd.target.org.as_deref(), parallelism)?;
+            cmd.run(&client, &manifest).await
+        }
+        Command::Drift(cmd) => {
+            cmd.announce();
+            let (client, manifest) = connect(config, cmd.target().org.as_deref(), parallelism)?;
+            cmd.run(&client, &manifest).await
+        }
+        Command::Audit(cmd) => {
+            let (client, manifest) = connect(config, cmd.target.org.as_deref(), parallelism)?;
+            cmd.run(&client, &manifest).await
+        }
+        Command::Security(args) => {
+            run_legacy(
+                args.into_legacy("security", Category::Security),
+                config,
+                parallelism,
+            )
+            .await
+        }
+        Command::Rulesets(args) => {
+            run_legacy(
+                args.into_legacy("rulesets", Category::Rulesets),
+                config,
+                parallelism,
+            )
+            .await
+        }
+        Command::Commit(args) => {
+            run_legacy(
+                args.into_legacy("commit", Category::Files),
+                config,
+                parallelism,
+            )
+            .await
+        }
+        Command::Protection(args) => {
+            run_legacy(
+                args.into_legacy("protection", Category::BranchProtection),
+                config,
+                parallelism,
+            )
+            .await
+        }
+        Command::Teams(args) => run_legacy(args.into_legacy(), config, parallelism).await,
+        Command::Settings(args) => {
+            args.precheck()?;
+            run_legacy(args.into_legacy(), config, parallelism).await
+        }
     }
+}
 
-    if let Command::Config(cmd) = cli.command {
-        return cmd.run(cli.config.as_deref());
-    }
+/// Print the deprecation warning, then run the replacement command.
+async fn run_legacy(
+    legacy: LegacyCategory,
+    config: Option<&str>,
+    parallelism: usize,
+) -> Result<()> {
+    legacy.announce();
+    let (client, manifest) = connect(config, legacy.target.org.as_deref(), parallelism)?;
+    legacy.run(&client, &manifest).await
+}
 
-    if let Command::Doctor(cmd) = cli.command {
-        return cmd.run(cli.config.as_deref()).await;
-    }
-
-    if let Command::Repos(cmd) = &cli.command
-        && let Some(hint) = cmd.removed_hint()
-    {
-        anyhow::bail!("{hint}");
-    }
-
-    if let Command::Settings(args) = &cli.command {
-        args.precheck()?;
-    }
-
-    let manifest = Manifest::load(cli.config.as_deref())?;
-    let org = cli.org.as_deref().unwrap_or(&manifest.org.name);
+/// Load the manifest and build the GitHub client for the target organization.
+fn connect(
+    config: Option<&str>,
+    org_override: Option<&str>,
+    parallelism: usize,
+) -> Result<(Client, Manifest)> {
+    let manifest = Manifest::load(config)?;
+    let org = org_override.unwrap_or(&manifest.org.name);
 
     if org.is_empty() {
         anyhow::bail!(
@@ -77,86 +136,8 @@ async fn run() -> Result<()> {
         );
     }
 
-    let client = Client::new(org, cli.parallelism)?;
-    let (system, repo) = (cli.system.as_deref(), cli.repo.as_deref());
-
-    match cli.command {
-        Command::Repos(cmd) => cmd.run(&client, &manifest, cli.system.as_deref()).await,
-        Command::Security(args) => {
-            args.into_legacy("security", Category::Security)
-                .run(&client, &manifest, system, repo, cli.json)
-                .await
-        }
-        Command::Rulesets(args) => {
-            args.into_legacy("rulesets", Category::Rulesets)
-                .run(&client, &manifest, system, repo, cli.json)
-                .await
-        }
-        Command::Commit(args) => {
-            args.into_legacy("commit", Category::Files)
-                .run(&client, &manifest, system, repo, cli.json)
-                .await
-        }
-        Command::Protection(args) => {
-            args.into_legacy("protection", Category::BranchProtection)
-                .run(&client, &manifest, system, repo, cli.json)
-                .await
-        }
-        Command::Settings(args) => {
-            args.into_legacy()
-                .run(&client, &manifest, system, repo, cli.json)
-                .await
-        }
-        Command::Drift(cmd) => {
-            cmd.run(
-                &client,
-                &manifest,
-                cli.system.as_deref(),
-                cli.repo.as_deref(),
-                cli.json,
-            )
-            .await
-        }
-        Command::Teams(args) => {
-            args.into_legacy()
-                .run(&client, &manifest, system, repo, cli.json)
-                .await
-        }
-        Command::Audit(cmd) => {
-            cmd.run(
-                &client,
-                &manifest,
-                cli.system.as_deref(),
-                cli.repo.as_deref(),
-            )
-            .await
-        }
-        Command::Plan(cmd) => {
-            cmd.run(
-                &client,
-                &manifest,
-                cli.system.as_deref(),
-                cli.repo.as_deref(),
-                cli.json,
-            )
-            .await
-        }
-        Command::Apply(cmd) => {
-            cmd.run(
-                &client,
-                &manifest,
-                cli.system.as_deref(),
-                cli.repo.as_deref(),
-                cli.json,
-            )
-            .await
-        }
-        Command::Init(_) => unreachable!(),
-        Command::Import(_) => unreachable!(),
-        Command::Config(_) => unreachable!(),
-        Command::Doctor(_) => unreachable!(),
-        Command::Completions { .. } => unreachable!(),
-    }
+    let client = Client::new(org, parallelism)?;
+    Ok((client, manifest))
 }
 
 fn init_tracing(verbose: u8) {

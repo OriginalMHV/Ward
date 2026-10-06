@@ -6,17 +6,35 @@ Every mutating command in Ward follows the **plan, apply, verify** pattern. `pla
 
 ## Global flags
 
-These flags are available on all commands:
+Only these flags are global. They work before or after the subcommand.
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--parallelism <N>` | integer | `5` | Max concurrent API calls |
+| `--config <PATH>` | string | `./ward.toml` | Path to config file |
+| `-v` / `-vv` / `-vvv` | count | `0` | Increase log verbosity |
+
+## Target flags
+
+`plan`, `apply`, `drift` and `audit` take the target flags. Pass them **after** the subcommand: `ward plan --repo my-service`. `ward --repo my-service plan` is an error.
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--org <ORG>` | string | from `ward.toml` | GitHub organization (overrides config) |
-| `--system <ID>` | string | -- | Filter to a specific system |
+| `--system <ID>` | string | all configured systems | Narrow the run to one system |
 | `--repo <REPO>` | string | -- | Narrow the run to one repository inside the manifest scope. The repository must be selected by a system. When the manifest has no `[[systems]]`, `--repo` is the explicit target. Names match case-insensitively. Archived repositories are allowed for read-only commands. `apply` skips them with a warning inside a scope and refuses an explicit `--repo` archived target |
-| `--json` | bool | `false` | Output the unified report as JSON. Honored by `plan`, `apply`, `drift`, and the focused `plan` and `apply` subcommands. Audit and list commands ignore it (`audit` uses `--format`) |
-| `--parallelism <N>` | integer | `5` | Max concurrent API calls |
-| `--config <PATH>` | string | `./ward.toml` | Path to config file |
-| `-v` / `-vv` / `-vvv` | count | `0` | Increase log verbosity |
+
+`ward repos list` takes `--org` and `--system` only.
+
+## Output flags
+
+`plan`, `apply`, `drift`, `audit`, `repos list` and `doctor` take `--format text|json`. The default is `text`. JSON goes to stdout. Progress lines and warnings go to stderr, so you can pipe JSON to `jq`.
+
+`--format table` is accepted as an alias of `--format text`. The old `--json` flag is hidden and deprecated. It works as `--format json` and prints `warning: '--json' is deprecated and will be removed in 0.6.0; use '--format json'` to stderr. It is removed in 0.6.0.
+
+## Confirmation
+
+`ward apply` shows the plan and asks before it changes anything. Pass `--yes` (or `-y`) to skip the prompt. Without `--yes`, a session with no terminal on stdin fails with exit code 2: `refusing to prompt in a non-interactive session; pass --yes`. JSON output also requires `--yes`.
 
 ## Exit codes
 
@@ -44,6 +62,12 @@ List all repositories matched by a system, with metadata.
 ward repos list --system backend
 ward repos list --org my-org
 ```
+
+| Flag | Description |
+|------|-------------|
+| `--org <ORG>` | GitHub organization (overrides config) |
+| `--system <ID>` | List only the repositories of one system |
+| `--format text\|json` | Output format. JSON is an array of `name`, `language`, `visibility`, `default_branch` |
 
 Output columns: Repository, Language, Visibility, Default Branch.
 
@@ -97,7 +121,7 @@ Compare actual repository state against the desired state in `ward.toml`. Design
 ```bash
 ward drift --system backend
 ward drift --repo my-service
-ward drift --system backend --json
+ward drift --system backend --format json
 ```
 
 Exit code `0` means all repos are in sync with `ward.toml`. Exit code `1` means drift: actionable, blocked, or deferred changes, or state in a managed category that Ward could not read. Exit code `2` means Ward could not run the check. See [Exit codes](#exit-codes).
@@ -123,7 +147,7 @@ ward audit --system backend --format json
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--category <CATEGORY>` | list | all four | Report only these sections: `security`, `rulesets`, `branch-protection`, `access`. Repeat the flag or separate values with commas. Aliases: `ruleset`, `protection`, `teams` |
-| `--format` | string | `"table"` | Output format: `table` or `json` |
+| `--format` | `text` or `json` | `text` | Output format (`table` is accepted as an alias of `text`) |
 
 Progress lines go to stderr. The report goes to stdout, so `--format json` can be piped.
 
@@ -248,7 +272,10 @@ Diagnose your Ward setup. Checks configuration, authentication, GitHub CLI avail
 ```bash
 ward doctor
 ward doctor --config /path/to/ward.toml
+ward doctor --format json
 ```
+
+`--format json` prints `checks` (name, status `pass`, `warn` or `fail`, detail) and the counts `passed`, `warnings` and `errors`.
 
 Doctor runs **before** loading the full manifest, so it can diagnose a missing or broken config file. Checks performed:
 
@@ -291,7 +318,7 @@ Read-only Ward manifest plan across every repository category.
 ward plan --repo backend-api
 ward plan --system backend
 ward plan --category files --category actions
-ward plan --json
+ward plan --format json
 ```
 
 | Flag | Type | Default | Description |
@@ -306,7 +333,7 @@ The Ward manifest planner covers these categories in safe apply order:
 
 Category names are case-insensitive. These aliases are also accepted: `repo` and `general` for `repository`, `file` for `files`, `ruleset` for `rulesets`, `protection` for `branch-protection`, `teams` for `access`, `environment` for `environments`, and `integration` for `integrations`.
 
-Output distinguishes actionable, blocked, warning, and deferred changes. `--json`
+Output distinguishes actionable, blocked, warning, and deferred changes. `--format json`
 emits the stable unified report shape.
 
 ---
@@ -321,7 +348,7 @@ categories in safe order, and verifies the result.
 ward plan --system backend
 ward apply --system backend
 ward apply --repo backend-api --category files
-ward apply --system backend --json --yes
+ward apply --system backend --format json --yes
 ```
 
 | Flag | Type | Default | Description |
@@ -331,7 +358,7 @@ ward apply --system backend --json --yes
 | `--skip-verify` | bool | `false` | Skip the post-apply verification step |
 | `--yes` / `-y` | bool | `false` | Skip interactive confirmation |
 
-`--json` never authorizes a mutation by itself; JSON apply requires `--yes`.
+`--format json` never authorizes a mutation by itself; JSON apply requires `--yes`.
 Managed files are committed to the configured Ward branch and opened as a pull
 request. Workflow state, Pages, rulesets, and branch-protection changes that
 depend on that pull request are reported as deferred until it merges.

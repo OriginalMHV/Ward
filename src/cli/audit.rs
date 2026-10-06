@@ -4,6 +4,7 @@ use console::style;
 use reqwest::StatusCode;
 use serde::Serialize;
 
+use super::args::{OutputArgs, TargetArgs};
 use super::output::{self, ok_icon};
 use crate::config::Manifest;
 use crate::github::Client;
@@ -40,9 +41,11 @@ pub struct AuditCommand {
     )]
     category: Vec<AuditCategory>,
 
-    /// Output format (table or json)
-    #[arg(long, default_value = "table")]
-    format: String,
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[command(flatten)]
+    output: OutputArgs,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -151,24 +154,25 @@ struct TeamAudit {
 
 impl AuditCommand {
     /// An audit of one section, for the deprecated per-category commands.
-    pub(crate) fn for_section(section: AuditCategory, json: bool) -> Self {
+    pub(crate) fn for_section(
+        section: AuditCategory,
+        target: TargetArgs,
+        output: OutputArgs,
+    ) -> Self {
         Self {
             category: vec![section],
-            format: if json { "json" } else { "table" }.to_owned(),
+            target,
+            output,
         }
     }
 
-    pub async fn run(
-        &self,
-        client: &Client,
-        manifest: &Manifest,
-        system: Option<&str>,
-        repo: Option<&str>,
-    ) -> Result<()> {
+    pub async fn run(&self, client: &Client, manifest: &Manifest) -> Result<()> {
+        let system = self.target.system.as_deref();
+        let repo = self.target.repo.as_deref();
         let (repos, system_id, scope_label) = resolve_repos(client, manifest, system, repo).await?;
         let sections = Sections::select(&self.category);
 
-        let json_output = is_json_format(&self.format);
+        let json_output = self.output.is_json();
         eprintln!(
             "  {} Full audit: {} repo(s) in {}",
             style("[..]").bold(),
@@ -506,10 +510,6 @@ fn next_page_path(headers: &reqwest::header::HeaderMap) -> Option<String> {
     })
 }
 
-fn is_json_format(format: &str) -> bool {
-    format == "json"
-}
-
 fn print_report(audits: &[RepoAudit], sections: Sections) {
     if sections.security {
         print_security(audits);
@@ -784,7 +784,7 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    use super::{AuditCategory, Sections, get_alert_counts, is_json_format};
+    use super::{AuditCategory, Sections, get_alert_counts};
     use crate::github::Client;
 
     fn strip_ansi(s: &str) -> String {
@@ -865,9 +865,15 @@ mod tests {
     }
 
     #[test]
-    fn json_format_suppresses_human_progress_output() {
-        assert!(is_json_format("json"));
-        assert!(!is_json_format("table"));
+    fn audit_format_accepts_text_table_and_json() {
+        use clap::Parser;
+        for (value, json) in [("text", false), ("table", false), ("json", true)] {
+            let cli = crate::cli::Cli::parse_from(["ward", "audit", "--format", value]);
+            let crate::cli::Command::Audit(command) = cli.command else {
+                panic!("expected audit command");
+            };
+            assert_eq!(command.output.is_json(), json, "{value}");
+        }
     }
 
     #[tokio::test]

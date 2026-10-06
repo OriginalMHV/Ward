@@ -84,7 +84,7 @@ jobs:
       - name: Check drift
         env:
           GH_TOKEN: ${{ secrets.WARD_TOKEN }}
-        run: ward drift --system backend --json
+        run: ward drift --system backend --format json
 ```
 
 If drift is detected, the step fails with exit code 1. Deferred changes and unreadable state in managed categories also count as drift.
@@ -96,13 +96,13 @@ If drift is detected, the step fails with exit code 1. Deferred changes and unre
 ### Security plan as JSON
 
 ```bash
-ward plan --category security --system backend --json
+ward plan --category security --system backend --format json
 ```
 
 The report is an object with a `repos` array and top-level `actionable`, `blocked`, `warnings`, and `deferred` counts. Pipe through `jq` to list repos that need changes:
 
 ```bash
-ward plan --category security --system backend --json | jq '.repos[] | select(.actionable > 0) | .repo'
+ward plan --category security --system backend --format json | jq '.repos[] | select(.actionable > 0) | .repo'
 ```
 
 ### Full audit as JSON

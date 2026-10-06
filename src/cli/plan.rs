@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Args;
 
-use crate::cli::args::CategoryArgs;
+use crate::cli::args::{CategoryArgs, OutputArgs, TargetArgs};
 use crate::config::Manifest;
 use crate::github::Client;
 use crate::reconcile::unified::{self, UnifiedOptions, UnifiedReport};
@@ -23,17 +23,16 @@ pub struct PlanCommand {
     /// Allow planning high-impact repository changes (visibility, archive)
     #[arg(long)]
     allow_high_impact: bool,
+
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[command(flatten)]
+    output: OutputArgs,
 }
 
 impl PlanCommand {
-    pub async fn run(
-        &self,
-        client: &Client,
-        manifest: &Manifest,
-        system: Option<&str>,
-        repo: Option<&str>,
-        json: bool,
-    ) -> Result<()> {
+    pub async fn run(&self, client: &Client, manifest: &Manifest) -> Result<()> {
         let options = UnifiedOptions {
             categories: unified::select_categories(&self.category.categories),
             allow_high_impact: self.allow_high_impact,
@@ -44,9 +43,9 @@ impl PlanCommand {
             manifest,
             options,
             CategoryRun {
-                system,
-                repo,
-                json,
+                system: self.target.system.as_deref(),
+                repo: self.target.repo.as_deref(),
+                json: self.output.is_json(),
                 command: "plan",
                 title: "Ward Plan",
             },

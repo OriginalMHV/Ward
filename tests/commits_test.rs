@@ -715,14 +715,12 @@ async fn ensure_dedicated_branch_encodes_refs_when_refreshing_stale_unicode_bran
 // commit apply: canonical files and aggregated failures
 // ---------------------------------------------------------------------------
 
-fn parse_commit_command(args: &[&str]) -> (LegacyCategory, Option<String>, Option<String>) {
+fn parse_commit_command(args: &[&str]) -> LegacyCategory {
     let cli = Cli::parse_from(args);
-    let system = cli.system.clone();
-    let repo = cli.repo.clone();
     let Command::Commit(command) = cli.command else {
         panic!("expected commit command");
     };
-    (command.into_legacy("commit", Category::Files), system, repo)
+    command.into_legacy("commit", Category::Files)
 }
 
 #[tokio::test]
@@ -774,21 +772,15 @@ async fn commit_apply_reports_collection_failures_for_every_repository() {
         categories: ManifestCategories::default(),
     }];
 
-    let (command, system, repo) =
-        parse_commit_command(&["ward", "commit", "apply", "--yes", "--system", "sys"]);
+    let command = parse_commit_command(&["ward", "commit", "apply", "--yes", "--system", "sys"]);
 
     let client = Client::new_for_test("test-org", &server.uri());
     let audit_dir = tempfile::tempdir().unwrap();
     let audit_path = audit_dir.path().join("audit.log");
     let result = command
-        .run_with_audit(
-            &client,
-            &manifest,
-            system.as_deref(),
-            repo.as_deref(),
-            false,
-            || ward::engine::audit_log::AuditLog::open(&audit_path),
-        )
+        .run_with_audit(&client, &manifest, || {
+            ward::engine::audit_log::AuditLog::open(&audit_path)
+        })
         .await;
     let audit = std::fs::read_to_string(&audit_path).unwrap();
     assert!(

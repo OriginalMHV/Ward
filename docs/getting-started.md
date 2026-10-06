@@ -185,7 +185,7 @@ The plan reports, per repository and category:
 Machine-readable output:
 
 ```bash
-ward plan --json
+ward plan --format json
 ```
 
 Focused plan:

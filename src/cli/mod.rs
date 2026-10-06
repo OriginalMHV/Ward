@@ -45,22 +45,6 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
 
-    /// GitHub organization (overrides ward.toml)
-    #[arg(long, global = true)]
-    pub org: Option<String>,
-
-    /// Filter to a specific system (e.g., backend)
-    #[arg(long, global = true)]
-    pub system: Option<String>,
-
-    /// Target a single repository
-    #[arg(long, global = true)]
-    pub repo: Option<String>,
-
-    /// Output as JSON
-    #[arg(long, global = true, default_value_t = false)]
-    pub json: bool,
-
     /// Max concurrent operations
     #[arg(long, global = true, default_value_t = 5)]
     pub parallelism: usize,
