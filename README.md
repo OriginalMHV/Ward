@@ -1,149 +1,225 @@
 <div align="center">
 
-<img src="https://capsule-render.vercel.app/api?type=waving&color=0:556B2F,50:8B6914,100:CC5500&height=200&text=WARD&fontSize=80&fontColor=FAEBD7&fontAlignY=35&desc=plan.%20apply.%20verify.&descAlignY=55&descSize=22&descAlign=50&animation=fadeIn" width="100%" alt="Ward" />
+<img src="docs/assets/ward-hero.svg" alt="Ward: declarative GitHub repository management. Plan, apply, verify." width="100%">
 
-[Install](#install) | [Quick Start](#quick-start) | [Workflow](#day-to-day-workflow) | [Docs](#documentation)
+<br>
+
+[![CI](https://github.com/OriginalMHV/Ward/actions/workflows/ci.yml/badge.svg)](https://github.com/OriginalMHV/Ward/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/ward-cli.svg)](https://crates.io/crates/ward-cli)
+[![MSRV](https://img.shields.io/badge/MSRV-1.88-0F2A44.svg)](https://www.rust-lang.org)
+[![License: MIT](https://img.shields.io/badge/license-MIT-14B8A6.svg)](LICENSE)
+
+**Manage GitHub repository settings as code. Preview every change. Verify every result.**
+
+[Install](#install) · [Quick start](#quick-start) · [Commands](#commands) · [Configuration](#configuration) · [CI](#ci) · [Docs](#documentation)
 
 </div>
 
----
+<br>
 
-## What is Ward?
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="Terminal recording: ward import, plan, apply and drift against a demo repository" width="900">
+</p>
 
-Ward is a Rust CLI for managing GitHub repository configuration as code. There are two first-class ways to create the desired state:
+## Why Ward
 
-```text
-author ward.toml manually ---------+
-                                   +-> ward plan -> ward apply (includes verification)
-bootstrap from a repository -------+
-```
-
-Write `ward.toml` yourself when you know the policy you want. Bootstrap from a well-configured repository when an existing setup is the fastest starting point. Both paths produce the same normal manifest and use the same commands afterward.
-
-Repository import is a one-time convenience, not an ongoing dependency. Once `ward.toml` exists, edit and maintain it directly; the source repository has no special role in later `plan` or `apply` runs.
-
-Ward does not clone repositories. It reads and writes through GitHub's REST, GraphQL, Git Data, and Contents APIs. Configuration files are committed to a dedicated branch and delivered through a pull request.
+- **One manifest for many repositories.** `ward.toml` describes the desired state for a whole organization or a set of systems.
+- **Plan before any change.** `ward plan` is read-only. `ward apply` runs one category at a time, and each category has its own safety boundary.
+- **Verify after apply.** Ward reads the state back from GitHub and checks it against the manifest.
+- **Drift checks for CI.** `ward drift` exits with `0` (in sync), `1` (drift) or `2` (could not run).
+- **Start from what you have.** `ward import` turns an existing repository into your baseline manifest.
+- **Fast.** `ward plan` on 10 repositories: 131 s → 29 s in 0.5.
 
 ## Install
 
 ```bash
-# From crates.io
+# crates.io
 cargo install ward-cli
 
-# Homebrew (macOS / Linux)
+# Homebrew (macOS and Linux)
 brew install OriginalMHV/tap/ward-cli
 
-# Shell installer (macOS / Linux)
+# Shell installer (macOS and Linux)
 curl --proto '=https' --tlsv1.2 -LsSf \
   https://github.com/OriginalMHV/Ward/releases/latest/download/ward-cli-installer.sh | sh
 
 # PowerShell (Windows)
-powershell -ExecutionPolicy ByPass -c \
-  "irm https://github.com/OriginalMHV/Ward/releases/latest/download/ward-cli-installer.ps1 | iex"
-
-# From source
-git clone https://github.com/OriginalMHV/Ward.git
-cd Ward
-cargo install --path .
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/OriginalMHV/Ward/releases/latest/download/ward-cli-installer.ps1 | iex"
 ```
 
-Source installation requires Rust 1.88 or newer. Ward reads authentication from `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`.
+Building from source needs Rust 1.88 or newer. Ward reads its token from `GH_TOKEN`, `GITHUB_TOKEN` or `gh auth token`. Run `ward doctor` to check your setup. The [GitHub coverage](docs/github-coverage.md) page lists the permissions each category needs.
+
+## Quick start
 
 ```bash
-gh auth status
+ward import OWNER/REPO                 # write ward.toml from an existing repository
+ward plan                              # show what differs from GitHub, change nothing
+ward apply --category repository       # apply one category, then verify it
 ```
 
-Required permissions depend on the setup path and selected categories. Directly authoring `ward.toml` needs no API access until `plan`; repository bootstrap additionally needs read access to its source. Planning and applying require access to the target repositories, with additional repository or organization permissions for the selected settings. See [GitHub Coverage](docs/github-coverage.md) for the API boundaries.
+1. `import` reads the repository through the GitHub API and writes a reviewable `ward.toml`. The source repository is the only target, so the first plan shows zero drift.
+2. `plan` collects the live state, compares it with the manifest and prints the differences.
+3. `apply` shows the plan, asks for confirmation, applies the category and checks the result.
 
-## Quick Start
+Edit `ward.toml`, run `ward plan` again, and repeat. See [Getting started](docs/getting-started.md) for the full walkthrough.
 
-Choose whichever setup path fits the situation.
+## How it works
 
-### Author the manifest directly
-
-```bash
-ward init
+```mermaid
+flowchart LR
+    A["ward.toml<br/>desired state"] --> B["plan<br/>collect and diff"]
+    G["GitHub API<br/>live state"] --> B
+    B --> C["apply<br/>one category at a time"]
+    C --> D["verify<br/>read back and compare"]
+    D --> E["drift in CI<br/>exit 0, 1 or 2"]
 ```
 
-`ward init` writes a minimal scaffold. Review and edit `ward.toml` using the [configuration reference](docs/configuration.md). The scaffold is a starting point, not a limit on what can be managed. For real onboarding, use `ward import OWNER/REPO`.
+Every category in `ward.toml` has a policy with a **disposition**:
 
-### Bootstrap from an existing repository
-
-```bash
-ward import acme/reference-service
-```
-
-This creates a static, reviewable `ward.toml` from reusable state exposed by GitHub's public APIs. It targets only the source repository by default, making the first plan a zero-drift check. See [Getting Started](docs/getting-started.md) for target selection, file globs, strict coverage, and placeholders.
-
-## Day-to-day workflow
-
-After either setup path, the workflow is identical:
-
-```bash
-ward doctor
-ward plan
-ward apply
-ward plan
-```
-
-`plan` is read-only. `apply` shows the complete plan before mutation, applies managed categories in dependency-aware order, and verifies the result.
-
-Filter either command for a focused operation:
-
-```bash
-ward plan --category actions --category environments
-ward apply --category actions --category environments
-```
-
-Narrow a run with `--org`, `--system` and `--repo`, and choose JSON output with `--format json`. Put these flags after the subcommand:
-
-```bash
-ward plan --system backend --format json
-ward audit --repo my-service --category security,access
-ward drift --category rulesets
-```
-
-`ward apply` prompts before it changes anything. Pass `--yes` in CI. `ward drift` exits with code 1 when it finds drift and with code 2 when it cannot run.
-
-Managed configuration files are committed through a pull request. Merge it, then run `ward plan` and `ward apply` again for settings that depended on those files.
-
-## What Ward manages
-
-Ward can represent and reconcile:
-
-| Area | Examples |
+| Disposition | Meaning |
 |---|---|
-| Repository | General settings, metadata, merge behavior, topics, labels, and custom properties |
-| Security and rules | Security features, CodeQL, rulesets, and detailed branch protection |
-| Automation and deployment | Actions policy, workflows, variables, environments, secrets, and deployment policies |
-| Access and integrations | Teams, collaborators, apps, webhooks, deploy keys, Pages, and autolinks |
-| Files | Binary-safe repository configuration with executable-mode preservation and atomic pull requests |
+| `managed` | Ward may change GitHub to match the manifest. |
+| `observe` | Ward reports state and coverage. It never writes. |
+| `reference` | Inherited resources, such as organization rulesets. Reported only. |
+| `placeholder` | A value that lives outside the manifest, such as a secret. Reported only. |
 
-See [GitHub Coverage](docs/github-coverage.md) for the complete matrix, file-selection rules, unsupported settings, and public-API boundaries.
+`ward import` starts the `repository` and `files` categories as `managed`. It starts all other categories as `observe` and `sensitive`. Change a category to `managed` when you want Ward to write it. See [Configuration](docs/configuration.md#category-policies).
 
-## Safe by default
+## Categories
 
-- Ward manages only existing repositories; it never creates, renames, transfers, or deletes them.
-- Every configured category is explicitly `managed`, `observe`, `reference`, or `placeholder`.
-- Pruning is off unless enabled deliberately, and incomplete observations never trigger silent deletion.
-- Visibility and archive changes, access, integrations, rules, and destructive pruning require explicit opt-in gates.
-- Managed files go through dedicated branches and pull requests, never directly to the default branch.
-- Secret values stay outside `ward.toml` and are resolved only when needed for apply.
+Pass any of these to `--category`. Separate several with commas.
 
-Repository bootstrap starts with conservative policies. Manually authored manifests use the same policy model and safety checks. See [Configuration](docs/configuration.md) and [Architecture](docs/architecture.md) for the full behavior.
+| Category | Scope |
+|---|---|
+| `repository` | Description, homepage, default branch, merge settings, topics, labels, custom properties, immutable releases |
+| `files` | Configuration files such as `.github/**`, delivered through a pull request |
+| `security` | Advanced Security, Dependabot, secret scanning, CodeQL default setup, private vulnerability reporting |
+| `rulesets` | Repository rulesets with conditions, rules and bypass actors |
+| `branch-protection` | Detailed protection for the default branch and every protected branch |
+| `actions` | Actions policy, token permissions, retention, variables, secret names, workflow state |
+| `environments` | Environment settings, reviewers, deployment policies, variables, secret names |
+| `access` | Teams, collaborators, invitations, App references |
+| `integrations` | Webhooks, deploy keys, Pages, autolinks |
+
+`ward audit` supports the `security`, `rulesets`, `branch-protection` and `access` sections. See [GitHub coverage](docs/github-coverage.md) for the full matrix and the public API limits.
+
+## Commands
+
+| Command | Purpose |
+|---|---|
+| `ward import SOURCE` | Write a manifest from an existing repository. |
+| `ward init` | Write a minimal `ward.toml` scaffold. |
+| `ward doctor` | Check the token, the config, the audit log and API access. |
+| `ward plan` | Show the changes needed to reach the desired state. Read-only. |
+| `ward apply` | Apply the changes per category, then verify. Asks first, or use `--yes`. |
+| `ward drift` | Compare live state with `ward.toml`. Exit code `0`, `1` or `2`. |
+| `ward audit` | Report security, rulesets, branch protection and access across repositories. |
+| `ward repos list` | List repositories with metadata. |
+| `ward config show` | Print the current configuration. |
+| `ward config edit` | Open the configuration in your editor. |
+| `ward config path` | Print the path of the configuration file. |
+
+Common options go after the subcommand: `--category C,..`, `--org`, `--system`, `--repo` and `--format text|json`. The global options are `--config`, `--parallelism` and `-v`. See the [command reference](docs/commands.md).
+
+## Configuration
+
+A manifest names the organization, the systems and the categories to manage:
+
+```toml
+[org]
+name = "my-github-org"
+
+[[systems]]
+id = "backend"
+name = "Backend Services"
+repos = ["backend-api", "backend-worker"]
+
+[categories.repository.policy]
+disposition = "managed"
+prune = false
+sensitive = false
+
+[categories.repository.settings]
+delete_branch_on_merge = true
+topics = ["managed-by-ward"]
+```
+
+Start from [`ward.example.toml`](ward.example.toml) or run `ward import`. The [configuration reference](docs/configuration.md) describes every field.
+
+## CI
+
+Run `ward drift` on a schedule. The step fails when GitHub no longer matches `ward.toml`.
+
+```yaml
+name: Ward drift
+on:
+  schedule:
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ward
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            https://github.com/OriginalMHV/Ward/releases/latest/download/ward-cli-installer.sh | sh
+      - name: Check drift
+        env:
+          GH_TOKEN: ${{ secrets.WARD_TOKEN }}
+        run: ward drift --format json
+```
+
+| Exit code | Meaning |
+|---|---|
+| `0` | Every repository matches `ward.toml`. |
+| `1` | Drift found. This includes blocked or deferred changes and unreadable state in managed categories. |
+| `2` | Ward could not run the check. Authentication, network, config or arguments are wrong. |
+
+JSON goes to stdout and progress goes to stderr. See [CI integration](docs/ci-integration.md) for more patterns.
+
+## Ward compared with other tools
+
+| | Ward | [Terraform GitHub provider](https://github.com/integrations/terraform-provider-github) | [Probot Settings](https://github.com/repository-settings/app) | [safe-settings](https://github.com/github/safe-settings) |
+|---|---|---|---|---|
+| Runs as | CLI, locally or in CI | Terraform provider | GitHub App, hosted or self-hosted | Server, Action or Lambda (Probot app) |
+| State file | None. Reads live GitHub state each run. | Yes, Terraform state | None | None |
+| Preview before change | `ward plan` | `terraform plan` | Not documented in its README | Yes, dry run on pull requests (nop mode) |
+| Drift detection | `ward drift`, exit codes for CI | `terraform plan` shows it | Not documented in its README | Yes, scheduled and on webhook events |
+| Import an existing repository | `ward import` | Per-resource `terraform import` | Not documented in its README | Yes, a settings generator script |
+| Scope | Repository, files, security, rulesets, branch protection, Actions, environments, access, integrations | Broad. Repositories, teams, org settings, rulesets, Actions, webhooks and more | Repository settings from `.github/settings.yml` | Org, suborg and repository settings in an admin repository |
+| Many repositories | One manifest with systems | Yes, with modules and loops | Org-wide install | Yes, built for large orgs |
+| Learning curve | One TOML file and five commands | Terraform language, providers and state | Low. One YAML file. | Medium. Needs a deployed service. |
+
+Terraform covers more GitHub resources than Ward and has a mature state model. If you already run Terraform, its provider is a strong choice. The two apps run continuously and react to events. Ward is a CLI that you run on demand or in CI, and it needs nothing deployed. Entries marked "not documented" mean the project README does not say. They do not mean the feature is missing.
+
+## Safety
+
+- **No global apply-all.** `ward apply` works one category at a time, in a fixed safe order, and shows the plan first.
+- **Sensitive categories are gated.** They need `sensitive = true` and `disposition = "managed"` before Ward writes them.
+- **Secret values are never read.** Secrets stay outside `ward.toml` as placeholders and Ward resolves them only at write time. They never appear in the manifest, the plan or the audit log.
+- **Audit log.** Every change is appended to `~/.ward/audit.log`. On Windows this is `.ward\audit.log` in your user profile folder.
+- **A missing list is never pruned.** If `teams` or `collaborators` is absent from the manifest, Ward leaves them alone. Only an explicit list with `prune = true` removes entries.
+- **No repository lifecycle.** Ward never creates, renames, transfers or deletes repositories. Visibility and archive changes need `--allow-high-impact`.
+- **Files go through pull requests.** Ward never pushes managed files to the default branch.
 
 ## Documentation
 
 | Guide | Description |
 |---|---|
-| **[Getting Started](docs/getting-started.md)** | Manual setup, repository bootstrap, review, plan, and apply |
-| [Configuration](docs/configuration.md) | Ward manifest categories, policies, references, and placeholders |
-| [GitHub Coverage](docs/github-coverage.md) | Managed settings, file selection, coverage outcomes, and API boundaries |
-| [Commands](docs/commands.md) | Complete CLI command reference |
-| [Architecture](docs/architecture.md) | Independent collectors, planning, safe ordering, and verification |
-| [CI Integration](docs/ci-integration.md) | Run Ward in GitHub Actions |
+| [Getting started](docs/getting-started.md) | Set up a manifest, review it, plan and apply |
+| [Commands](docs/commands.md) | Full CLI reference |
+| [Configuration](docs/configuration.md) | Categories, policies, references and placeholders |
+| [GitHub coverage](docs/github-coverage.md) | Supported settings and API limits |
+| [Architecture](docs/architecture.md) | Collectors, planning, ordering and verification |
+| [CI integration](docs/ci-integration.md) | Run Ward in GitHub Actions |
+| [Changelog](CHANGELOG.md) | Release notes and breaking changes |
 
-## Development
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Before you open a pull request, run:
 
 ```bash
 cargo fmt -- --check
@@ -151,8 +227,8 @@ cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 ```
 
+Report security issues as described in [SECURITY.md](SECURITY.md).
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
-<img src="https://capsule-render.vercel.app/api?type=waving&color=0:CC5500,50:8B6914,100:556B2F&height=120&section=footer&reversal=true" width="100%" alt="" />
