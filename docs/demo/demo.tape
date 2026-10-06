@@ -7,7 +7,7 @@
 Output docs/assets/demo.gif
 
 Set Shell "bash"
-Set Theme { "name": "Ward GitHub Dark", "background": "#0D1117", "foreground": "#E6EDF3", "cursor": "#E3B341", "selection": "#3D444D", "black": "#484F58", "red": "#FF7B72", "green": "#3FB950", "yellow": "#E3B341", "blue": "#58A6FF", "magenta": "#BC8CFF", "cyan": "#39C5CF", "white": "#B1BAC4", "brightBlack": "#6E7681", "brightRed": "#FFA198", "brightGreen": "#56D364", "brightYellow": "#F0C14B", "brightBlue": "#79C0FF", "brightMagenta": "#D2A8FF", "brightCyan": "#56D4DD", "brightWhite": "#F0F6FC" }
+Set Theme { "name": "Ward GitHub Dark", "background": "#0D1117", "foreground": "#E6EDF3", "cursor": "#E3B341", "selection": "#3D444D", "black": "#484F58", "red": "#FF7B72", "green": "#3FB950", "yellow": "#E3B341", "blue": "#58A6FF", "magenta": "#BC8CFF", "cyan": "#F2CC60", "white": "#B1BAC4", "brightBlack": "#6E7681", "brightRed": "#FFA198", "brightGreen": "#56D364", "brightYellow": "#F0C14B", "brightBlue": "#79C0FF", "brightMagenta": "#D2A8FF", "brightCyan": "#F2CC60", "brightWhite": "#F0F6FC" }
 Set WindowBar Colorful
 Set WindowBarSize 40
 Set BorderRadius 12
