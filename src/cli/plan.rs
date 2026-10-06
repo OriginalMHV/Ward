@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Args;
 
+use crate::cli::args::CategoryArgs;
 use crate::config::Manifest;
 use crate::github::Client;
 use crate::reconcile::unified::{self, UnifiedOptions, UnifiedReport};
@@ -16,11 +17,8 @@ pub(crate) struct CategoryRun<'a> {
 /// Preview the desired manifest state across existing repositories.
 #[derive(Args)]
 pub struct PlanCommand {
-    /// Limit to one or more categories (repeatable). Valid: repository, files,
-    /// security, rulesets, branch-protection, actions, environments, access,
-    /// integrations.
-    #[arg(long = "category", value_name = "CATEGORY")]
-    categories: Vec<String>,
+    #[command(flatten)]
+    category: CategoryArgs,
 
     /// Allow planning high-impact repository changes (visibility, archive)
     #[arg(long)]
@@ -37,7 +35,7 @@ impl PlanCommand {
         json: bool,
     ) -> Result<()> {
         let options = UnifiedOptions {
-            categories: unified::parse_categories(&self.categories)?,
+            categories: unified::select_categories(&self.category.categories),
             allow_high_impact: self.allow_high_impact,
             verify: true,
         };
@@ -103,6 +101,8 @@ pub(crate) async fn run_canonical_plan(
 mod tests {
     use clap::Parser;
 
+    use crate::reconcile::unified::Category;
+
     #[test]
     fn plan_accepts_category_filtering_and_high_impact_opt_in() {
         let cli = crate::cli::Cli::parse_from([
@@ -116,7 +116,7 @@ mod tests {
             panic!("expected plan command");
         };
 
-        assert_eq!(command.categories, ["files"]);
+        assert_eq!(command.category.categories, [Category::Files]);
         assert!(command.allow_high_impact);
     }
 }

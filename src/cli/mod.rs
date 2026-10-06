@@ -1,4 +1,5 @@
 pub mod apply;
+pub mod args;
 pub mod audit;
 pub mod commit;
 pub mod config_cmd;

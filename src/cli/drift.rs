@@ -2,6 +2,7 @@ use crate::outcome::Outcome;
 use anyhow::Result;
 use clap::Args;
 
+use crate::cli::args::CategoryArgs;
 use crate::config::Manifest;
 use crate::github::Client;
 use crate::reconcile::unified::{self, UnifiedOptions, UnifiedReport};
@@ -16,9 +17,8 @@ pub struct DriftCommand {
 enum DriftAction {
     /// Check for configuration drift across repos
     Check {
-        /// Limit to one or more categories (repeatable). Defaults to all categories.
-        #[arg(long = "category", value_name = "CATEGORY")]
-        categories: Vec<String>,
+        #[command(flatten)]
+        category: CategoryArgs,
 
         /// Include high-impact repository changes in the actionable drift count
         #[arg(long)]
@@ -37,11 +37,11 @@ impl DriftCommand {
     ) -> Result<()> {
         match &self.action {
             DriftAction::Check {
-                categories,
+                category,
                 allow_high_impact,
             } => {
                 let options = UnifiedOptions {
-                    categories: unified::parse_categories(categories)?,
+                    categories: unified::select_categories(&category.categories),
                     allow_high_impact: *allow_high_impact,
                     verify: true,
                 };
@@ -111,9 +111,9 @@ mod tests {
         assert!(matches!(
             command.action,
             DriftAction::Check {
-                categories,
+                category,
                 allow_high_impact: false,
-            } if categories.is_empty()
+            } if category.categories.is_empty()
         ));
     }
 
@@ -134,7 +134,7 @@ mod tests {
 
         assert!(matches!(
             command.action,
-            DriftAction::Check { categories, .. } if categories == ["files"]
+            DriftAction::Check { category, .. } if category.categories == [unified::Category::Files]
         ));
     }
 

@@ -3,6 +3,7 @@ use clap::Args;
 use console::style;
 use dialoguer::Confirm;
 
+use crate::cli::args::CategoryArgs;
 use crate::cli::plan::CategoryRun;
 use crate::config::Manifest;
 use crate::engine::audit_log::AuditLog;
@@ -19,18 +20,19 @@ use crate::reconcile::unified::{self, UnifiedOptions, UnifiedReport};
 /// deletes repositories.
 #[derive(Args)]
 pub struct ApplyCommand {
-    /// Limit to one or more categories (repeatable). Valid: repository, files,
-    /// security, rulesets, branch-protection, actions, environments, access,
-    /// integrations.
-    #[arg(long = "category", value_name = "CATEGORY")]
-    categories: Vec<String>,
+    #[command(flatten)]
+    category: CategoryArgs,
 
     /// Allow high-impact repository changes (visibility, archive)
     #[arg(long)]
     allow_high_impact: bool,
 
-    /// Skip the confirmation prompt (required with --json)
+    /// Skip the post-apply verification step
     #[arg(long)]
+    skip_verify: bool,
+
+    /// Skip the confirmation prompt (required with --json)
+    #[arg(short = 'y', long)]
     yes: bool,
 }
 
@@ -58,9 +60,9 @@ impl ApplyCommand {
         open_audit: impl FnOnce() -> Result<AuditLog>,
     ) -> Result<()> {
         let options = UnifiedOptions {
-            categories: unified::parse_categories(&self.categories)?,
+            categories: unified::select_categories(&self.category.categories),
             allow_high_impact: self.allow_high_impact,
-            verify: true,
+            verify: !self.skip_verify,
         };
         run_canonical_apply(
             client,
@@ -154,7 +156,28 @@ fn validate_confirmation_mode(json: bool, yes: bool) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use clap::Parser;
+
     use super::validate_confirmation_mode;
+
+    #[test]
+    fn apply_accepts_short_yes_and_skip_verify() {
+        let cli = crate::cli::Cli::parse_from([
+            "ward",
+            "apply",
+            "-y",
+            "--skip-verify",
+            "--category",
+            "files,security",
+        ]);
+        let crate::cli::Command::Apply(command) = cli.command else {
+            panic!("expected apply command");
+        };
+
+        assert!(command.yes);
+        assert!(command.skip_verify);
+        assert_eq!(command.category.categories.len(), 2);
+    }
 
     #[test]
     fn json_apply_requires_explicit_confirmation() {

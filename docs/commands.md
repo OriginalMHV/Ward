@@ -517,14 +517,15 @@ ward plan --json
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--category <CATEGORY>` | repeatable | all | Limit the plan to selected categories |
+| `--category <CATEGORY>` | list | all | Limit the plan to selected categories. Repeat the flag or separate values with commas, for example `--category files,security` |
 | `--allow-high-impact` | bool | `false` | Allow visibility and archive changes to become actionable |
-| `--all` | bool | `false` | Compatibility flag; all configured systems are already selected when neither `--repo` nor `--system` is set |
 
 The Ward manifest planner covers these categories in safe apply order:
 
 `repository`, `files`, `security`, `actions`, `environments`, `access`,
 `integrations`, `rulesets`, and `branch-protection`.
+
+Category names are case-insensitive. These aliases are also accepted: `repo` and `general` for `repository`, `file` for `files`, `ruleset` for `rulesets`, `protection` for `branch-protection`, `teams` for `access`, `environment` for `environments`, and `integration` for `integrations`.
 
 Output distinguishes actionable, blocked, warning, and deferred changes. `--json`
 emits the stable unified report shape.
@@ -546,9 +547,10 @@ ward apply --system backend --json --yes
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--category <CATEGORY>` | repeatable | all | Limit apply to selected categories |
+| `--category <CATEGORY>` | list | all | Limit apply to selected categories. Repeat the flag or separate values with commas |
 | `--allow-high-impact` | bool | `false` | Permit planned visibility and archive changes |
-| `--yes` | bool | `false` | Skip interactive confirmation |
+| `--skip-verify` | bool | `false` | Skip the post-apply verification step |
+| `--yes` / `-y` | bool | `false` | Skip interactive confirmation |
 
 `--json` never authorizes a mutation by itself; JSON apply requires `--yes`.
 Managed files are committed to the configured Ward branch and opened as a pull
