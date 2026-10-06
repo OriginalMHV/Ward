@@ -296,11 +296,13 @@ impl LegacyCategory {
 
     /// The `ward ...` invocation that replaces this one.
     pub fn replacement(&self) -> String {
-        format!(
-            "ward {} --category {}",
-            self.replacement_name(),
-            self.category.stable_name()
-        )
+        // Audit sections exist only for some categories. Compare the rest with `plan`.
+        let name = if self.action == LegacyAction::Audit && self.audit_section().is_none() {
+            "plan"
+        } else {
+            self.replacement_name()
+        };
+        format!("ward {name} --category {}", self.category.stable_name())
     }
 
     /// The deprecation warning, without a trailing newline.

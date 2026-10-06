@@ -33,7 +33,7 @@ pub struct ApplyCommand {
     #[arg(long)]
     skip_verify: bool,
 
-    /// Skip the confirmation prompt (required with --json)
+    /// Skip the confirmation prompt (required with --format json)
     #[arg(short = 'y', long)]
     yes: bool,
 
