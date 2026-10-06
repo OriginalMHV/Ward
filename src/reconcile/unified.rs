@@ -115,8 +115,11 @@ impl UnifiedOptions {
 pub struct CoverageCounts {
     pub total: usize,
     pub collected: usize,
+    /// Reads that failed: permission denied or unavailable.
     pub degraded: usize,
     pub not_applicable: usize,
+    /// Settings GitHub does not expose, or values it never returns, such as secrets.
+    pub unsupported: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -182,6 +185,7 @@ impl UnifiedReport {
                 coverage.collected += category.coverage.collected;
                 coverage.degraded += category.coverage.degraded;
                 coverage.not_applicable += category.coverage.not_applicable;
+                coverage.unsupported += category.coverage.unsupported;
             }
         }
         Self {
@@ -2108,10 +2112,7 @@ fn degraded_coverage(coverage: &[CoverageEntry]) -> usize {
         .filter(|entry| {
             matches!(
                 entry.outcome,
-                CoverageOutcome::PermissionDenied
-                    | CoverageOutcome::Unavailable
-                    | CoverageOutcome::Redacted
-                    | CoverageOutcome::Unsupported
+                CoverageOutcome::PermissionDenied | CoverageOutcome::Unavailable
             )
         })
         .count()
@@ -2126,10 +2127,10 @@ fn coverage_counts(coverage: &[CoverageEntry]) -> CoverageCounts {
         match entry.outcome {
             CoverageOutcome::Collected => counts.collected += 1,
             CoverageOutcome::NotApplicable => counts.not_applicable += 1,
-            CoverageOutcome::PermissionDenied
-            | CoverageOutcome::Unavailable
-            | CoverageOutcome::Redacted
-            | CoverageOutcome::Unsupported => counts.degraded += 1,
+            CoverageOutcome::PermissionDenied | CoverageOutcome::Unavailable => {
+                counts.degraded += 1;
+            }
+            CoverageOutcome::Redacted | CoverageOutcome::Unsupported => counts.unsupported += 1,
         }
     }
     counts
@@ -2398,11 +2399,21 @@ pub fn render_report_to(
         style(report.warnings).bold(),
         report.repos.len(),
     )?;
-    writeln!(
-        out,
-        "  Coverage: {}/{} collected, {} degraded",
-        report.coverage.collected, report.coverage.total, report.coverage.degraded,
-    )
+    writeln!(out, "  Coverage: {}", coverage_line(&report.coverage))
+}
+
+fn coverage_line(counts: &CoverageCounts) -> String {
+    let mut parts = vec![format!("{}/{} read", counts.collected, counts.total)];
+    if counts.degraded > 0 {
+        parts.push(format!("{} could not be read", counts.degraded));
+    }
+    if counts.unsupported > 0 {
+        parts.push(format!("{} not exposed by GitHub", counts.unsupported));
+    }
+    if counts.not_applicable > 0 {
+        parts.push(format!("{} not applicable", counts.not_applicable));
+    }
+    parts.join(", ")
 }
 
 fn style_status(status: &str) -> console::StyledObject<&str> {
@@ -2459,6 +2470,35 @@ mod tests {
         assert_eq!(counts.collected, 1);
         assert_eq!(counts.degraded, 1);
         assert_eq!(degraded_coverage(&coverage), 1);
+    }
+
+    #[test]
+    fn known_github_limits_are_not_counted_as_degraded() {
+        use crate::config::manifest::ManifestCategoryName;
+        let entry = |outcome| CoverageEntry {
+            category: ManifestCategoryName::Repository,
+            endpoint: "x".to_owned(),
+            outcome,
+            reason: None,
+            required_permission: None,
+        };
+        let coverage = vec![
+            entry(CoverageOutcome::Collected),
+            entry(CoverageOutcome::Unsupported),
+            entry(CoverageOutcome::Redacted),
+            entry(CoverageOutcome::NotApplicable),
+            entry(CoverageOutcome::Unavailable),
+        ];
+
+        let counts = coverage_counts(&coverage);
+
+        assert_eq!(counts.degraded, 1);
+        assert_eq!(counts.unsupported, 2);
+        assert_eq!(degraded_coverage(&coverage), 1);
+        assert_eq!(
+            coverage_line(&counts),
+            "1/5 read, 1 could not be read, 2 not exposed by GitHub, 1 not applicable"
+        );
     }
 
     fn empty_files_plan() -> files::FilesPlan {

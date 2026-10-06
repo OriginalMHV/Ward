@@ -318,12 +318,23 @@ pub async fn collect(client: &Client, repo: &str) -> Result<CollectedGeneralStat
 }
 
 /// Collect general state from an already fetched `GET /repos/{repo}` response.
+fn collected(endpoint: &str) -> CoverageEntry {
+    coverage_entry(
+        ManifestCategoryName::Repository,
+        endpoint,
+        CoverageOutcome::Collected,
+        None,
+        None,
+    )
+}
+
 pub async fn collect_with_rest(
     client: &Client,
     repo: &str,
     rest: RepositoryGeneralSettings,
 ) -> Result<CollectedGeneralState> {
     let mut coverage = unsupported_repository_settings_coverage();
+    coverage.push(collected("GET /repos/{owner}/{repo}"));
 
     let (graphql_result, topics_result, properties_result, immutable_result, labels_result) = tokio::join!(
         client.get_repository_graphql_settings_classified(repo),
@@ -334,7 +345,10 @@ pub async fn collect_with_rest(
     );
 
     let graphql = match graphql_result? {
-        ClassifiedApiResponse::Success(settings) => Some(settings),
+        ClassifiedApiResponse::Success(settings) => {
+            coverage.push(collected("POST /graphql repository settings"));
+            Some(settings)
+        }
         ClassifiedApiResponse::Other(message) => {
             coverage.push(coverage_entry(
                 ManifestCategoryName::Repository,
@@ -389,7 +403,10 @@ pub async fn collect_with_rest(
     };
 
     let topics = match topics_result? {
-        ClassifiedApiResponse::Success(values) => Some(normalize_topics(&values)),
+        ClassifiedApiResponse::Success(values) => {
+            coverage.push(collected("GET /repos/{owner}/{repo}/topics"));
+            Some(normalize_topics(&values))
+        }
         ClassifiedApiResponse::Forbidden(message) => {
             coverage.push(coverage_entry(
                 ManifestCategoryName::Repository,
@@ -426,7 +443,10 @@ pub async fn collect_with_rest(
     };
 
     let custom_properties = match properties_result? {
-        ClassifiedApiResponse::Success(values) => collect_custom_properties(&values),
+        ClassifiedApiResponse::Success(values) => {
+            coverage.push(collected("GET /repos/{owner}/{repo}/properties/values"));
+            collect_custom_properties(&values)
+        }
         ClassifiedApiResponse::Forbidden(message) => {
             coverage.push(coverage_entry(
                 ManifestCategoryName::Repository,
@@ -463,7 +483,10 @@ pub async fn collect_with_rest(
     };
 
     let immutable_releases = match immutable_result? {
-        ClassifiedApiResponse::Success(state) => Some(state),
+        ClassifiedApiResponse::Success(state) => {
+            coverage.push(collected("GET /repos/{owner}/{repo}/immutable-releases"));
+            Some(state)
+        }
         ClassifiedApiResponse::Forbidden(message) => {
             coverage.push(coverage_entry(
                 ManifestCategoryName::Repository,
@@ -503,7 +526,10 @@ pub async fn collect_with_rest(
     };
 
     let labels = match labels_result? {
-        ClassifiedApiResponse::Success(labels) => collect_labels(labels),
+        ClassifiedApiResponse::Success(labels) => {
+            coverage.push(collected("GET /repos/{owner}/{repo}/labels"));
+            collect_labels(labels)
+        }
         ClassifiedApiResponse::Forbidden(message) => {
             coverage.push(coverage_entry(
                 ManifestCategoryName::Repository,
