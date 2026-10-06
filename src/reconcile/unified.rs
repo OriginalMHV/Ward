@@ -1210,10 +1210,16 @@ pub async fn prepare_apply(
             "Skipping archived repository {}. Ward plans and audits archived repositories but does not apply changes to them",
             repository.name
         );
-        eprintln!(
-            "  warning: skipping archived repository {}",
-            repository.name
-        );
+        #[allow(
+            clippy::print_stderr,
+            reason = "user-visible warning; moves to cli with the module split"
+        )]
+        {
+            eprintln!(
+                "  warning: skipping archived repository {}",
+                repository.name
+            );
+        }
     }
     let branch = sync_branch(manifest);
     let prepared = crate::reconcile::map_buffered(repos, |repository| async {
