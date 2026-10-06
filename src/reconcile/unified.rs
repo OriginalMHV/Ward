@@ -390,7 +390,7 @@ impl RepoPlan {
             category.coverage.push(CoverageEntry {
                 category: name,
                 endpoint: "pulls (open configuration pull request)".to_owned(),
-                outcome: crate::config::manifest::CoverageOutcome::Unavailable,
+                outcome: CoverageOutcome::Unavailable,
                 reason: Some(message.to_owned()),
                 required_permission: Some("pull_requests:read".to_owned()),
             });
@@ -2890,7 +2890,7 @@ mod tests {
             entry("GET /repos/{owner}/{repo}/topics"),
         ];
         let desired = RepositoryCategoryV2 {
-            policy: crate::config::manifest::CategoryPolicy::managed(),
+            policy: CategoryPolicy::managed(),
             settings: None,
             metadata: None,
             custom_properties: Vec::new(),

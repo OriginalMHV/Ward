@@ -2077,8 +2077,7 @@ fn degraded_endpoints(
         .filter(|entry| {
             matches!(
                 entry.outcome,
-                ward::config::manifest::CoverageOutcome::PermissionDenied
-                    | ward::config::manifest::CoverageOutcome::Unavailable
+                CoverageOutcome::PermissionDenied | CoverageOutcome::Unavailable
             )
         })
         .map(|entry| entry.endpoint.clone())

@@ -143,7 +143,7 @@ impl Client {
     }
 
     /// Make a PATCH request with a JSON body.
-    pub async fn patch_json<T: serde::Serialize + Sync>(
+    pub async fn patch_json<T: Serialize + Sync>(
         &self,
         path: &str,
         body: &T,
@@ -154,7 +154,7 @@ impl Client {
     }
 
     /// Make a POST request with a JSON body.
-    pub async fn post_json<T: serde::Serialize + Sync>(
+    pub async fn post_json<T: Serialize + Sync>(
         &self,
         path: &str,
         body: &T,
@@ -165,7 +165,7 @@ impl Client {
     }
 
     /// Make a PUT request with a JSON body.
-    pub async fn put_json<T: serde::Serialize + Sync>(
+    pub async fn put_json<T: Serialize + Sync>(
         &self,
         path: &str,
         body: &T,
@@ -181,7 +181,7 @@ impl Client {
     }
 
     /// Make a DELETE request with a JSON body.
-    pub async fn delete_json<T: serde::Serialize + Sync>(
+    pub async fn delete_json<T: Serialize + Sync>(
         &self,
         path: &str,
         body: &T,
