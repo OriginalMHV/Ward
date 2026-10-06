@@ -12,7 +12,8 @@ use ward::config::manifest::{
 use ward::github::Client;
 use ward::github::security::SecurityAndAnalysisState;
 use ward::reconcile::security_rules::{
-    SecurityCollection, collect_security_category, plan_security_category, verify_security_category,
+    SecurityCollection, VerifyPolicy, collect_security_category, plan_security_category,
+    verify_security_category_with,
 };
 
 fn managed_sensitive_policy() -> CategoryPolicy {
@@ -290,9 +291,14 @@ async fn matching_attached_configuration_verifies_without_sensitive_policy() {
     };
     let client = Client::new_for_test("test-org", &server.uri());
 
-    let verification = verify_security_category(&client, "example", &desired)
-        .await
-        .unwrap();
+    let verification = verify_security_category_with(
+        &client,
+        "example",
+        &desired,
+        VerifyPolicy::immediate_for_tests(),
+    )
+    .await
+    .unwrap();
 
     assert!(verification.matches);
     assert!(!verification.plan.has_changes());
