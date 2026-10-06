@@ -286,7 +286,7 @@ Inherited organization or enterprise resources remain stable references. Unsuppo
 
 ```bash
 ward plan
-ward drift check --system payments
+ward drift --system payments
 ward audit --system payments
 ward doctor
 ```

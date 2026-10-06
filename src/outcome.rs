@@ -7,7 +7,7 @@ use std::process::ExitCode;
 /// (authentication, network, configuration, invalid arguments).
 #[derive(Debug)]
 pub enum Outcome {
-    /// `ward drift check` found drift or unreadable managed state.
+    /// `ward drift` found drift or unreadable managed state.
     Drift(String),
     /// A diagnostic or verification check failed.
     ChecksFailed(String),

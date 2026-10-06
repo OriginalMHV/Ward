@@ -45,7 +45,7 @@ For organization-wide operations, a personal access token or GitHub App token wi
 
 ## Drift detection
 
-`ward drift check` compares actual repo state against the desired state in `ward.toml`.
+`ward drift` compares actual repo state against the desired state in `ward.toml`.
 
 ### Exit codes
 
@@ -84,7 +84,7 @@ jobs:
       - name: Check drift
         env:
           GH_TOKEN: ${{ secrets.WARD_TOKEN }}
-        run: ward drift check --system backend --json
+        run: ward drift --system backend --json
 ```
 
 If drift is detected, the step fails with exit code 1. Deferred changes and unreadable state in managed categories also count as drift.
@@ -162,7 +162,7 @@ jobs:
       - name: Verify
         env:
           GH_TOKEN: ${{ secrets.WARD_TOKEN }}
-        run: ward drift check --system ${{ inputs.system }}
+        run: ward drift --system ${{ inputs.system }}
 ```
 
 ---

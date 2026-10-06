@@ -13,7 +13,7 @@ These flags are available on all commands:
 | `--org <ORG>` | string | from `ward.toml` | GitHub organization (overrides config) |
 | `--system <ID>` | string | -- | Filter to a specific system |
 | `--repo <REPO>` | string | -- | Narrow the run to one repository inside the manifest scope. The repository must be selected by a system. When the manifest has no `[[systems]]`, `--repo` is the explicit target. Names match case-insensitively. Archived repositories are allowed for read-only commands. `apply` skips them with a warning inside a scope and refuses an explicit `--repo` archived target |
-| `--json` | bool | `false` | Output the unified report as JSON. Honored by `plan`, `apply`, `drift check`, and the focused `plan` and `apply` subcommands. Audit and list commands ignore it (`audit` uses `--format`) |
+| `--json` | bool | `false` | Output the unified report as JSON. Honored by `plan`, `apply`, `drift`, and the focused `plan` and `apply` subcommands. Audit and list commands ignore it (`audit` uses `--format`) |
 | `--parallelism <N>` | integer | `5` | Max concurrent API calls |
 | `--config <PATH>` | string | `./ward.toml` | Path to config file |
 | `-v` / `-vv` / `-vvv` | count | `0` | Increase log verbosity |
@@ -218,17 +218,17 @@ Shows per-repo repository settings compliance and whether the Copilot Code Revie
 
 Compare actual repository state against the desired state in `ward.toml`. Designed for CI pipelines.
 
-### `ward drift check`
-
 ```bash
-ward drift check --system backend
-ward drift check --repo my-service
-ward drift check --system backend --json
+ward drift --system backend
+ward drift --repo my-service
+ward drift --system backend --json
 ```
 
 Exit code `0` means all repos are in sync with `ward.toml`. Exit code `1` means drift: actionable, blocked, or deferred changes, or state in a managed category that Ward could not read. Exit code `2` means Ward could not run the check. See [Exit codes](#exit-codes).
 
-Checks every configured category by default. Use repeatable `--category <CATEGORY>` filters to narrow the drift gate.
+`ward drift check` is a deprecated alias of `ward drift`. It prints `warning: 'ward drift check' is deprecated; use 'ward drift'` to stderr and runs the same check.
+
+Checks every configured category by default. Use `--category <CATEGORY>` (repeatable, comma-separated) to narrow the drift gate, and `--allow-high-impact` to count visibility and archive changes as actionable.
 
 ---
 
