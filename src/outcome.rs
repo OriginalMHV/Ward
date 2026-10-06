@@ -25,15 +25,69 @@ impl fmt::Display for Outcome {
 
 impl std::error::Error for Outcome {}
 
+fn count(n: usize, singular: &str, plural: &str) -> String {
+    format!("{n} {}", if n == 1 { singular } else { plural })
+}
+
+/// Join the non-zero parts with commas. `None` when every count is zero.
+fn non_zero(parts: &[(usize, &str, &str, &str)]) -> Option<String> {
+    let parts: Vec<String> = parts
+        .iter()
+        .filter(|(n, ..)| *n > 0)
+        .map(|(n, singular, plural, verb)| {
+            let noun = count(*n, singular, plural);
+            if verb.is_empty() {
+                noun
+            } else {
+                format!("{noun} {verb}")
+            }
+        })
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(", "))
+}
+
+/// The summary line for an apply with failed or blocked categories.
+pub fn apply_summary(failed: usize, blocked: usize) -> String {
+    let problems = non_zero(&[
+        (failed, "category", "categories", "failed"),
+        (blocked, "category", "categories", "blocked"),
+    ])
+    .unwrap_or_else(|| "unknown problems".to_owned());
+    format!("Apply finished with problems: {problems}. The reason is shown under each category.")
+}
+
+/// The summary line for a drift check that found drift.
+pub fn drift_summary(
+    actionable: usize,
+    deferred: usize,
+    failed: usize,
+    blocked: usize,
+    unreadable: bool,
+) -> String {
+    let mut findings = non_zero(&[
+        (actionable, "change", "changes", "to apply"),
+        (deferred, "deferred change", "deferred changes", ""),
+        (failed, "category", "categories", "failed"),
+        (blocked, "category", "categories", "blocked"),
+    ])
+    .unwrap_or_default();
+    if unreadable {
+        if !findings.is_empty() {
+            findings.push_str(". ");
+        }
+        findings.push_str("Some managed state could not be read");
+    }
+    format!("Drift found: {findings}. See the report above.")
+}
+
 /// Fail with [`Outcome::ApplyFailed`] when any repository failed during an apply.
 pub fn fail_when_any_failed(failed: &[(String, String)]) -> anyhow::Result<()> {
     if failed.is_empty() {
         return Ok(());
     }
     Err(Outcome::ApplyFailed(format!(
-        "{} repositor{} failed during apply; see the errors above",
-        failed.len(),
-        if failed.len() == 1 { "y" } else { "ies" }
+        "Apply finished with problems: {} failed. The reason is shown above.",
+        count(failed.len(), "repository", "repositories")
     ))
     .into())
 }
@@ -73,6 +127,37 @@ mod tests {
             Some(Outcome::ApplyFailed(_))
         ));
         assert_eq!(exit_code(&error), std::process::ExitCode::from(1));
+    }
+
+    #[test]
+    fn apply_summary_omits_zero_counts() {
+        use super::apply_summary;
+        assert_eq!(
+            apply_summary(1, 0),
+            "Apply finished with problems: 1 category failed. The reason is shown under each category."
+        );
+        assert_eq!(
+            apply_summary(0, 2),
+            "Apply finished with problems: 2 categories blocked. The reason is shown under each category."
+        );
+        assert!(apply_summary(2, 1).contains("2 categories failed, 1 category blocked"));
+    }
+
+    #[test]
+    fn drift_summary_covers_the_combinations() {
+        use super::drift_summary;
+        assert_eq!(
+            drift_summary(2, 0, 0, 1, false),
+            "Drift found: 2 changes to apply, 1 category blocked. See the report above."
+        );
+        assert_eq!(
+            drift_summary(0, 0, 0, 0, true),
+            "Drift found: Some managed state could not be read. See the report above."
+        );
+        assert_eq!(
+            drift_summary(1, 3, 0, 0, true),
+            "Drift found: 1 change to apply, 3 deferred changes. Some managed state could not be read. See the report above."
+        );
     }
 
     #[test]

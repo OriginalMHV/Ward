@@ -809,7 +809,7 @@ async fn commit_apply_reports_collection_failures_for_every_repository() {
     );
     let message = format!("{error}");
     assert!(
-        message.contains("2 blocked category result"),
+        message.contains("2 categories blocked"),
         "error should aggregate every failure, got: {message}"
     );
 }

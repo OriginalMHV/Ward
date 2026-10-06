@@ -70,16 +70,13 @@ fn fail_when_drifted(report: &UnifiedReport) -> Result<()> {
         return Ok(());
     }
 
-    Err(Outcome::Drift(format!(
-        "Drift check found {} actionable change(s), {} deferred change(s), {} blocked category result(s){}; see report above",
+    let (failed, blocked) = report.category_problem_counts();
+    Err(Outcome::Drift(crate::outcome::drift_summary(
         report.actionable,
         report.deferred,
-        report.blocked,
-        if unknown {
-            " and unreadable state in managed categories"
-        } else {
-            ""
-        }
+        failed,
+        blocked,
+        unknown,
     ))
     .into())
 }

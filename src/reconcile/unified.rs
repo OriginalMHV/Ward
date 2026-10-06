@@ -216,6 +216,18 @@ impl UnifiedReport {
         }
     }
 
+    /// How many categories ended as `failed` and as `blocked`, across all repositories.
+    pub fn category_problem_counts(&self) -> (usize, usize) {
+        let count = |status: &str| {
+            self.repos
+                .iter()
+                .flat_map(|repo| &repo.categories)
+                .filter(|category| category.status == status)
+                .count()
+        };
+        (count("failed"), count("blocked"))
+    }
+
     /// Whether any category is blocked or failed (drives a non-zero exit).
     pub fn has_failures(&self) -> bool {
         self.blocked > 0

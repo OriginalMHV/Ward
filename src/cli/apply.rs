@@ -135,11 +135,8 @@ pub(crate) async fn run_canonical_apply(
     }
 
     if report.has_failures() {
-        return Err(Outcome::ApplyFailed(format!(
-            "Apply completed with {} blocked category result(s) and failures; see report above",
-            report.blocked
-        ))
-        .into());
+        let (failed, blocked) = report.category_problem_counts();
+        return Err(Outcome::ApplyFailed(crate::outcome::apply_summary(failed, blocked)).into());
     }
 
     Ok(report)
