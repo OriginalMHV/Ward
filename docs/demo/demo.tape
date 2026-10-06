@@ -72,7 +72,7 @@ Type `clear; printf '\033[1;38;2;20;184;166m%s\033[0m\n' '# 5. CI drift check pa
 Enter
 Sleep 300ms
 Show
-Type `ward drift; echo "exit code: $?"`
+Type `ward drift --category repository; echo "exit code: $?"`
 Enter
-Sleep 7s
+Sleep 4s
 Sleep 3s
