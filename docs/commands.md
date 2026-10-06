@@ -12,7 +12,7 @@ These flags are available on all commands:
 |------|------|---------|-------------|
 | `--org <ORG>` | string | from `ward.toml` | GitHub organization (overrides config) |
 | `--system <ID>` | string | -- | Filter to a specific system |
-| `--repo <REPO>` | string | -- | Narrow the run to one repository inside the manifest scope. The repository must be selected by a system. When the manifest has no `[[systems]]`, `--repo` is the explicit target. Names match case-insensitively. Archived repositories are allowed for read-only commands and refused by `apply` |
+| `--repo <REPO>` | string | -- | Narrow the run to one repository inside the manifest scope. The repository must be selected by a system. When the manifest has no `[[systems]]`, `--repo` is the explicit target. Names match case-insensitively. Archived repositories are allowed for read-only commands. `apply` skips them with a warning inside a scope and refuses an explicit `--repo` archived target |
 | `--json` | bool | `false` | Output the unified report as JSON. Honored by `plan`, `apply`, `drift check`, and the focused `plan` and `apply` subcommands. Audit and list commands ignore it (`audit` uses `--format`) |
 | `--parallelism <N>` | integer | `5` | Max concurrent API calls |
 | `--config <PATH>` | string | `./ward.toml` | Path to config file |

@@ -579,7 +579,7 @@ async fn repo_flag_allows_an_archived_repository_for_read_only_commands() {
 }
 
 #[tokio::test]
-async fn apply_refuses_an_archived_repository_with_a_clear_message() {
+async fn an_explicit_archived_target_is_refused_for_apply_with_a_clear_message() {
     let server = MockServer::start().await;
     mock_repo(&server, "recall", true).await;
     let client = Client::new_for_test("test-org", &server.uri());
@@ -587,17 +587,43 @@ async fn apply_refuses_an_archived_repository_with_a_clear_message() {
         .await
         .unwrap();
 
-    let error = unified::prepare_apply(
+    let error = unified::reject_archived_explicit_target(&repos).unwrap_err();
+    assert!(
+        error.to_string().contains("'recall' is archived"),
+        "{error}"
+    );
+    assert!(error.to_string().contains("does not apply"), "{error}");
+}
+
+#[tokio::test]
+async fn archived_repositories_in_a_scope_are_skipped_not_fatal() {
+    let server = MockServer::start().await;
+    mock_repo(&server, "recall", true).await;
+    let client = Client::new_for_test("test-org", &server.uri());
+    let repos = unified::resolve_target_repos(&client, &scoped_manifest(), None, Some("recall"))
+        .await
+        .unwrap();
+
+    let prepared = unified::prepare_apply(
         &client,
         &scoped_manifest(),
         &repos,
         &options(vec![Category::Files], false),
     )
     .await
-    .map(|_| ())
-    .unwrap_err();
-    assert!(error.to_string().contains("archived"), "{error}");
-    assert!(error.to_string().contains("does not apply"), "{error}");
+    .unwrap();
+
+    assert!(prepared.report().repos.is_empty());
+    assert!(
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .all(|request| request.method.as_str() == "GET"
+                && request.url.path() == "/repos/test-org/recall"),
+        "an archived repository must not be planned or changed"
+    );
 }
 
 #[tokio::test]

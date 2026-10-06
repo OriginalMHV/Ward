@@ -1185,16 +1185,34 @@ impl PreparedApply {
 
 /// Complete every read-only plan and dependency preflight before the first
 /// mutation so a later repository cannot surprise a partially applied run.
+/// An explicitly named archived repository is an error for apply. Archived
+/// repositories found by a system scope are skipped by [`prepare_apply`] instead.
+pub fn reject_archived_explicit_target(repos: &[Repository]) -> Result<()> {
+    match repos.iter().find(|repository| repository.archived) {
+        Some(archived) => bail!(
+            "Repository '{}' is archived. Ward plans and audits archived repositories but does not apply changes to them",
+            archived.name
+        ),
+        None => Ok(()),
+    }
+}
+
 pub async fn prepare_apply(
     client: &Client,
     manifest: &Manifest,
     repos: &[Repository],
     options: &UnifiedOptions,
 ) -> Result<PreparedApply> {
-    if let Some(archived) = repos.iter().find(|repository| repository.archived) {
-        bail!(
-            "Repository '{}' is archived. Ward plans and audits archived repositories but does not apply changes to them",
-            archived.name
+    let (archived, repos): (Vec<&Repository>, Vec<&Repository>) =
+        repos.iter().partition(|repository| repository.archived);
+    for repository in archived {
+        tracing::warn!(
+            "Skipping archived repository {}. Ward plans and audits archived repositories but does not apply changes to them",
+            repository.name
+        );
+        eprintln!(
+            "  warning: skipping archived repository {}",
+            repository.name
         );
     }
     let branch = sync_branch(manifest);

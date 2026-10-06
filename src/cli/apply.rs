@@ -94,6 +94,9 @@ pub(crate) async fn run_canonical_apply(
     validate_confirmation_mode(run.json, yes)?;
 
     let repos = unified::resolve_target_repos(client, manifest, run.system, run.repo).await?;
+    if run.repo.is_some() {
+        unified::reject_archived_explicit_target(&repos)?;
+    }
     if repos.is_empty() {
         let report = UnifiedReport::from_repos(Vec::new());
         if run.json {
