@@ -135,3 +135,63 @@ pub enum Command {
         shell: clap_complete::Shell,
     },
 }
+
+/// The command tree for shell completions, without hidden commands and flags.
+pub fn completion_command() -> clap::Command {
+    without_hidden(&<Cli as clap::CommandFactory>::command())
+}
+
+fn without_hidden(command: &clap::Command) -> clap::Command {
+    let mut visible = clap::Command::new(command.get_name().to_owned())
+        .args(
+            command
+                .get_arguments()
+                .filter(|arg| !arg.is_hide_set())
+                .cloned(),
+        )
+        .subcommands(
+            command
+                .get_subcommands()
+                .filter(|sub| !sub.is_hide_set())
+                .map(without_hidden),
+        );
+    if let Some(about) = command.get_about() {
+        visible = visible.about(about.clone());
+    }
+    if let Some(version) = command.get_version() {
+        visible = visible.version(version.to_owned());
+    }
+    visible
+}
+
+#[cfg(test)]
+mod completion_tests {
+    use super::*;
+
+    #[test]
+    fn completion_command_leaves_out_hidden_commands_and_flags() {
+        let mut command = completion_command();
+        command.build();
+        let names: Vec<_> = command
+            .get_subcommands()
+            .map(|sub| sub.get_name())
+            .collect();
+        assert!(names.contains(&"plan"), "{names:?}");
+        for hidden in [
+            "security",
+            "rulesets",
+            "commit",
+            "teams",
+            "protection",
+            "settings",
+        ] {
+            assert!(!names.contains(&hidden), "{hidden} in {names:?}");
+        }
+        let plan = command.find_subcommand("plan").unwrap();
+        assert!(plan.get_arguments().any(|arg| arg.get_id() == "format"));
+        assert!(
+            plan.get_arguments()
+                .all(|arg| arg.get_long() != Some("json"))
+        );
+    }
+}

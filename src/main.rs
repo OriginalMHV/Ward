@@ -29,8 +29,10 @@ async fn run() -> Result<()> {
 
     // Completions need no tracing, token or manifest.
     if let Command::Completions { shell } = cli.command {
-        let mut cmd = <Cli as clap::CommandFactory>::command();
-        let name = cmd.get_name().to_string();
+        let mut cmd = ward::cli::completion_command();
+        let name = <Cli as clap::CommandFactory>::command()
+            .get_name()
+            .to_string();
         generate(shell, &mut cmd, name, &mut std::io::stdout());
         return Ok(());
     }

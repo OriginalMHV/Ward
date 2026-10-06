@@ -50,6 +50,7 @@ Changed or lost capabilities:
 
 ### Added (CLI)
 
+- `ward completions` leaves out the deprecated commands and the hidden `--json` flag
 - `ward audit --category security,rulesets,branch-protection,access`, with a ruleset table, branch-protection fields and team access. JSON keys `rulesets`, `branch_protection` and `access.teams` are additive. Copilot code review is detected by rule type.
 - `ward apply -y` and `ward apply --skip-verify`
 - `--format text|json` on `plan`, `apply`, `drift`, `audit`, `repos list` and `doctor`
