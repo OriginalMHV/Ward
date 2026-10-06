@@ -264,37 +264,4 @@ impl Client {
         )
         .await
     }
-
-    pub async fn create_copilot_review_ruleset(&self, repo: &str) -> Result<()> {
-        let existing = self.list_rulesets(repo).await?;
-        if existing
-            .iter()
-            .any(|ruleset| ruleset.name == "Copilot Code Review")
-        {
-            tracing::info!("Copilot review ruleset already exists for {repo}");
-            return Ok(());
-        }
-
-        let body = serde_json::json!({
-            "name": "Copilot Code Review",
-            "target": "branch",
-            "enforcement": "active",
-            "conditions": {
-                "ref_name": {
-                    "include": ["~DEFAULT_BRANCH"],
-                    "exclude": []
-                }
-            },
-            "rules": [{
-                "type": "copilot_code_review",
-                "parameters": {
-                    "review_on_push": true
-                }
-            }],
-            "bypass_actors": []
-        });
-
-        let path = format!("/repos/{}/{repo}/rulesets", self.org);
-        response::expect_empty(self.post_json(&path, &body).await?, "POST", &path).await
-    }
 }

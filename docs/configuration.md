@@ -221,6 +221,28 @@ type = "unresolved" # actor_type = "...", optional actor_id
 
 Inherited organization or enterprise rulesets are stored under `[[categories.rulesets.references]]` with name, target, enforcement, source, and source type. They are never recreated as repository-owned rulesets.
 
+### Copilot code review ruleset
+
+`ward settings --ruleset copilot-review` was removed. Declare the ruleset in the rulesets category instead. The category must be managed and sensitive:
+
+```toml
+[categories.rulesets.policy]
+disposition = "managed"
+prune = false
+sensitive = true
+
+[[categories.rulesets.repository_rulesets]]
+name = "Copilot Code Review"
+target = "branch"
+enforcement = "active"
+conditions_json = '{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}}'
+[[categories.rulesets.repository_rulesets.rules]]
+type = "copilot_code_review"
+parameters_json = '{"review_on_push":true,"review_draft_pull_requests":false}'
+```
+
+`review_draft_pull_requests` is set explicitly because GitHub returns it. Without it, every plan reports a change. Apply it with `ward apply --category rulesets`.
+
 ## `[categories.branch_protection]`
 
 The category supports both a compact default-branch policy and detailed per-branch state:

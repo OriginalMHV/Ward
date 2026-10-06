@@ -55,6 +55,31 @@ pub enum TeamsClapAction {
     Audit,
 }
 
+/// The actions of `ward settings`.
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum SettingsClapAction {
+    /// Show what would change
+    Plan {
+        /// Removed. Manage the Copilot review ruleset in ward.toml
+        #[arg(long, hide = true)]
+        ruleset: Option<String>,
+    },
+
+    /// Apply the changes
+    Apply {
+        /// Removed. Manage the Copilot review ruleset in ward.toml
+        #[arg(long, hide = true)]
+        ruleset: Option<String>,
+
+        /// Skip the confirmation prompt
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
+
+    /// Compare repository settings with the manifest
+    Audit,
+}
+
 /// What a legacy command runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LegacyAction {
@@ -76,6 +101,71 @@ pub struct LegacyArgs {
 pub struct TeamsArgs {
     #[command(subcommand)]
     action: TeamsClapAction,
+}
+
+/// The manifest entry that replaces `ward settings --ruleset copilot-review`.
+pub const COPILOT_REVIEW_SNIPPET: &str = r#"[[categories.rulesets.repository_rulesets]]
+name = "Copilot Code Review"
+target = "branch"
+enforcement = "active"
+conditions_json = '{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}}'
+[[categories.rulesets.repository_rulesets.rules]]
+type = "copilot_code_review"
+parameters_json = '{"review_on_push":true,"review_draft_pull_requests":false}'"#;
+
+const REPOSITORY_SCOPE_NOTE: &str = "note: the repository category is wider than 'ward settings'. It also covers metadata, custom properties, immutable releases, labels, and prune.";
+
+/// The arguments of the hidden `ward settings` command.
+#[derive(Args, Debug)]
+pub struct SettingsArgs {
+    #[command(subcommand)]
+    action: SettingsClapAction,
+}
+
+impl SettingsArgs {
+    /// Reject the removed `--ruleset` option. This needs no token or manifest.
+    pub fn precheck(&self) -> Result<()> {
+        let ruleset = match &self.action {
+            SettingsClapAction::Plan { ruleset } | SettingsClapAction::Apply { ruleset, .. } => {
+                ruleset.as_deref()
+            }
+            SettingsClapAction::Audit => None,
+        };
+        let Some(ruleset) = ruleset else {
+            return Ok(());
+        };
+        if ruleset == "copilot-review" {
+            bail!(
+                "`ward settings --ruleset copilot-review` was removed. Declare the ruleset in ward.toml and run `ward apply --category rulesets`. Set the rulesets category to disposition = \"managed\" and sensitive = true, then add:\n\n{COPILOT_REVIEW_SNIPPET}"
+            );
+        }
+        bail!("`ward settings --ruleset` was removed, and `{ruleset}` is not a known ruleset.");
+    }
+
+    /// `settings plan` and `apply` run the repository category. `audit` becomes a drift check.
+    pub fn into_legacy(self) -> LegacyCategory {
+        let (name, action, note) = match self.action {
+            SettingsClapAction::Plan { .. } => {
+                ("plan", LegacyAction::Plan, Some(REPOSITORY_SCOPE_NOTE))
+            }
+            SettingsClapAction::Apply { yes, .. } => (
+                "apply",
+                LegacyAction::Apply {
+                    yes,
+                    skip_verify: false,
+                },
+                Some(REPOSITORY_SCOPE_NOTE),
+            ),
+            SettingsClapAction::Audit => ("audit", LegacyAction::Drift, None),
+        };
+        LegacyCategory {
+            command: "settings",
+            subcommand: name,
+            category: Category::Repository,
+            action,
+            note,
+        }
+    }
 }
 
 const ACCESS_SCOPE_NOTE: &str = "note: the access category also covers collaborators. Ward manages them only when the manifest sets `collaborators`, and it never removes collaborators when the key is absent.";
@@ -286,6 +376,7 @@ mod tests {
             Command::Protection(args) => args.into_legacy("protection", Category::BranchProtection),
             Command::Commit(args) => args.into_legacy("commit", Category::Files),
             Command::Teams(args) => args.into_legacy(),
+            Command::Settings(args) => args.into_legacy(),
             _ => panic!("expected a legacy command"),
         }
     }
@@ -424,5 +515,53 @@ mod tests {
             audit.warning(),
             "warning: 'ward teams audit' is deprecated and will be removed in 0.6.0; use 'ward drift --category access'"
         );
+    }
+
+    #[test]
+    fn settings_maps_to_the_repository_category() {
+        let plan = legacy(&["ward", "settings", "plan"]);
+        assert_eq!(plan.category, Category::Repository);
+        assert_eq!(plan.action, LegacyAction::Plan);
+        assert!(plan.note.is_some_and(|note| note.contains("wider")));
+        assert_eq!(
+            plan.warning(),
+            "warning: 'ward settings plan' is deprecated and will be removed in 0.6.0; use 'ward plan --category repository'"
+        );
+
+        let audit = legacy(&["ward", "settings", "audit"]);
+        assert_eq!(audit.action, LegacyAction::Drift);
+        assert_eq!(
+            audit.warning(),
+            "warning: 'ward settings audit' is deprecated and will be removed in 0.6.0; use 'ward drift --category repository'"
+        );
+    }
+
+    fn settings_args(args: &[&str]) -> SettingsArgs {
+        let Command::Settings(args) = Cli::parse_from(args).command else {
+            panic!("expected settings command");
+        };
+        args
+    }
+
+    #[test]
+    fn settings_ruleset_option_errors_with_the_manifest_snippet() {
+        for action in ["plan", "apply"] {
+            let error = settings_args(&["ward", "settings", action, "--ruleset", "copilot-review"])
+                .precheck()
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(COPILOT_REVIEW_SNIPPET), "{error}");
+            assert!(error.contains("sensitive = true"), "{error}");
+        }
+    }
+
+    #[test]
+    fn settings_without_the_ruleset_option_passes_the_precheck() {
+        settings_args(&["ward", "settings", "plan"])
+            .precheck()
+            .unwrap();
+        settings_args(&["ward", "settings", "audit"])
+            .precheck()
+            .unwrap();
     }
 }

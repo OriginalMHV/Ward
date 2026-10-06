@@ -10,7 +10,6 @@ pub mod init;
 mod output;
 pub mod plan;
 pub mod repos;
-pub mod settings;
 
 use clap::Parser;
 
@@ -124,9 +123,9 @@ pub enum Command {
     #[command(hide = true)]
     Protection(deprecated::LegacyArgs),
 
-    /// Manage repository settings and rulesets
-    #[command(display_order = 27)]
-    Settings(settings::SettingsCommand),
+    /// Deprecated. Use `ward plan|apply --category repository`
+    #[command(hide = true)]
+    Settings(deprecated::SettingsArgs),
 
     // --- Monitor ---
     /// Detect configuration drift from desired state

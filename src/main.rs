@@ -64,6 +64,10 @@ async fn run() -> Result<()> {
         anyhow::bail!("{hint}");
     }
 
+    if let Command::Settings(args) = &cli.command {
+        args.precheck()?;
+    }
+
     let manifest = Manifest::load(cli.config.as_deref())?;
     let org = cli.org.as_deref().unwrap_or(&manifest.org.name);
 
@@ -98,7 +102,11 @@ async fn run() -> Result<()> {
                 .run(&client, &manifest, system, repo, cli.json)
                 .await
         }
-        Command::Settings(cmd) => cmd.run(&client, &manifest, system, repo).await,
+        Command::Settings(args) => {
+            args.into_legacy()
+                .run(&client, &manifest, system, repo, cli.json)
+                .await
+        }
         Command::Drift(cmd) => {
             cmd.run(
                 &client,

@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, reason = "test helpers outside #[test] functions")]
+
 use serde_json::json;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -323,4 +325,94 @@ async fn plan_limit_403_on_rulesets_names_the_status_and_github_message() {
     assert!(message.contains("403"), "{message}");
     assert!(message.contains("Upgrade to GitHub Pro"), "{message}");
     assert!(!message.contains("Failed to parse"), "{message}");
+}
+
+fn copilot_snippet_ruleset() -> RulesetsCategoryV2 {
+    let manifest: ward::config::Manifest = toml::from_str(&format!(
+        "[org]\nname = \"test-org\"\n\n[schema]\nversion = 2\n\n[categories.rulesets.policy]\ndisposition = \"managed\"\nsensitive = true\n\n{}\n",
+        ward::cli::deprecated::COPILOT_REVIEW_SNIPPET
+    ))
+    .unwrap();
+    manifest.categories.rulesets.unwrap()
+}
+
+#[tokio::test]
+async fn copilot_review_snippet_plans_create_on_an_empty_repository() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/example/rulesets"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let desired = copilot_snippet_ruleset();
+    let collected = collect_rulesets_category(&client, "example", Some(&desired))
+        .await
+        .unwrap();
+    let plan = plan_rulesets_category(&desired, &collected).unwrap();
+
+    assert!(
+        matches!(plan.actions.as_slice(), [RulesetPlanAction::Create { ruleset }] if ruleset.name == "Copilot Code Review"),
+        "{:?}",
+        plan.actions
+    );
+    assert!(plan.issues.is_empty(), "{:?}", plan.issues);
+}
+
+#[tokio::test]
+async fn copilot_review_snippet_is_a_noop_when_github_echoes_it_back() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/example/rulesets"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": 7,
+            "name": "Copilot Code Review",
+            "target": "branch",
+            "source_type": "Repository",
+            "source": "test-org/example",
+            "enforcement": "active"
+        }])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/example/rulesets/7"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 7,
+            "name": "Copilot Code Review",
+            "target": "branch",
+            "source_type": "Repository",
+            "source": "test-org/example",
+            "enforcement": "active",
+            "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+            "rules": [{
+                "type": "copilot_code_review",
+                "parameters": { "review_on_push": true, "review_draft_pull_requests": false }
+            }],
+            "bypass_actors": []
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let desired = copilot_snippet_ruleset();
+    let collected = collect_rulesets_category(&client, "example", Some(&desired))
+        .await
+        .unwrap();
+    let plan = plan_rulesets_category(&desired, &collected).unwrap();
+
+    assert!(
+        matches!(plan.actions.as_slice(), [RulesetPlanAction::Unchanged { name }] if name == "Copilot Code Review"),
+        "{:?}",
+        plan.actions
+    );
+    assert!(plan.issues.is_empty(), "{:?}", plan.issues);
 }

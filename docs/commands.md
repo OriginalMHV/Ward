@@ -28,7 +28,7 @@ Every command uses the same exit codes.
 | `1` | Ward ran and found a problem: drift found, a failed check (`ward doctor`), or a failed or blocked apply category. |
 | `2` | Ward could not run: authentication, network, configuration parse error, or invalid arguments. |
 
-`ward doctor` exits `0` when it reports only warnings. `ward settings apply` and `ward teams apply` exit `1` when any repository fails.
+`ward doctor` exits `0` when it reports only warnings. `ward apply` exits `1` when any category fails or is blocked.
 
 ---
 
@@ -55,7 +55,7 @@ Output columns: Repository, Language, Visibility, Default Branch.
 
 ## Deprecated per-category commands
 
-`ward security`, `ward rulesets`, `ward protection`, `ward commit`, and `ward teams` are hidden aliases in 0.5.x. Each one prints a warning to stderr and then runs the replacement. They are removed in 0.6.0.
+`ward security`, `ward rulesets`, `ward protection`, `ward commit`, `ward teams`, and `ward settings` are hidden aliases in 0.5.x. Each one prints a warning to stderr and then runs the replacement. They are removed in 0.6.0.
 
 | Old invocation | New invocation |
 |----------------|----------------|
@@ -68,6 +68,9 @@ Output columns: Repository, Language, Visibility, Default Branch.
 | `ward teams plan\|apply` | `ward plan\|apply --category access` |
 | `ward teams list` | `ward audit --category access` |
 | `ward teams audit` | `ward drift --category access` |
+| `ward settings plan\|apply` | `ward plan\|apply --category repository` |
+| `ward settings audit` | `ward drift --category repository` |
+| `ward settings ... --ruleset copilot-review` | Removed. Declare the ruleset in `ward.toml` (see [configuration](configuration.md#copilot-code-review-ruleset)) |
 
 The warning has this form:
 
@@ -79,55 +82,11 @@ warning: 'ward security plan' is deprecated and will be removed in 0.6.0; use 'w
 
 `ward teams plan` and `ward teams apply` also print a note about collaborators. The old command managed only teams. The access category also covers collaborators, but Ward manages them only when the manifest sets `collaborators`.
 
+`ward settings plan` and `ward settings apply` also print a note. The repository category is wider than the old command. It also covers metadata, custom properties, immutable releases, labels, and prune.
+
+`ward settings --ruleset copilot-review` fails with exit code 2 and prints the manifest entry to use instead. Ward checks this before it needs a token or a manifest.
+
 The aliases run the replacement command, so they behave like it. The audit aliases print the new audit section, and they cover all configured systems when you pass neither `--system` nor `--repo`.
-
----
-
-## `ward settings`
-
-Manage `[categories.repository.settings]` and optionally configure Copilot code review.
-
-### `ward settings plan`
-
-Preview what settings would change.
-
-```bash
-# Plan repository settings and topics
-ward settings plan --system backend
-
-# Include the optional Copilot review ruleset
-ward settings plan --ruleset copilot-review --system backend
-```
-
-### `ward settings apply`
-
-Apply settings and rulesets to repositories.
-
-```bash
-# Apply repository settings and topics
-ward settings apply --system backend
-
-# Optionally apply the Copilot review ruleset
-ward settings apply --ruleset copilot-review --system backend
-```
-
-| Flag | Description |
-|------|-------------|
-| `--ruleset <NAME>` | Ruleset to apply (e.g., `copilot-review`) |
-| `--yes` | Skip confirmation prompt |
-
-Without `--ruleset`, `plan` and `apply` manage only fields under `[categories.repository.settings]`, including feature toggles, merge policies and commit-message defaults, auto-merge, branch cleanup, update-branch support, web commit signoff, and topics.
-
-### `ward settings audit`
-
-Report current repository-settings compliance plus Copilot review ruleset state.
-
-```bash
-ward settings audit --system backend
-ward settings audit --repo my-service
-```
-
-Shows per-repo repository settings compliance and whether the Copilot Code Review ruleset is present.
 
 ---
 
