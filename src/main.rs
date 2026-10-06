@@ -57,6 +57,12 @@ async fn run() -> Result<()> {
         return cmd.run(cli.config.as_deref()).await;
     }
 
+    if let Command::Repos(cmd) = &cli.command
+        && let Some(hint) = cmd.removed_hint()
+    {
+        anyhow::bail!("{hint}");
+    }
+
     let manifest = Manifest::load(cli.config.as_deref())?;
     let org = cli.org.as_deref().unwrap_or(&manifest.org.name);
 

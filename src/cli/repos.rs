@@ -27,6 +27,16 @@ enum ReposAction {
 }
 
 impl ReposCommand {
+    /// The replacement hint for a removed subcommand, which needs no token or manifest.
+    pub fn removed_hint(&self) -> Option<&'static str> {
+        match self.action {
+            ReposAction::Inspect { .. } => {
+                Some("`ward repos inspect` was removed. Use `ward audit --repo NAME`.")
+            }
+            ReposAction::List => None,
+        }
+    }
+
     pub async fn run(
         &self,
         client: &Client,
@@ -36,7 +46,7 @@ impl ReposCommand {
         match &self.action {
             ReposAction::List => list_repos(client, manifest, system).await,
             ReposAction::Inspect { .. } => {
-                anyhow::bail!("`ward repos inspect` was removed. Use `ward audit --repo NAME`.")
+                anyhow::bail!("{}", self.removed_hint().unwrap_or_default())
             }
         }
     }

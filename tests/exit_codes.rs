@@ -59,15 +59,17 @@ fn removed_config_subcommands_exit_with_two_and_name_the_replacement() {
 
 #[test]
 fn removed_repos_inspect_exits_with_two_and_names_the_replacement() {
+    // No manifest and no token: the hint must not depend on either.
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("ward.toml");
-    std::fs::write(&path, "[org]\nname = \"test-org\"\n").unwrap();
     let home = tempfile::tempdir().unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_ward"))
-        .args(["--config", path.to_str().unwrap(), "repos", "inspect", "x"])
+        .args(["repos", "inspect", "x"])
+        .current_dir(dir.path())
         .env("HOME", home.path())
-        .env("GH_TOKEN", "dummy-token")
+        .env("PATH", dir.path())
+        .env_remove("GH_TOKEN")
+        .env_remove("GITHUB_TOKEN")
         .output()
         .unwrap();
 
