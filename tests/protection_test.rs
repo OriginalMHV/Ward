@@ -115,6 +115,7 @@ async fn empty_review_restrictions_are_omitted_so_user_owned_repositories_accept
     use ward::github::branch_protection::DesiredBranchProtection;
 
     let server = MockServer::start().await;
+    mount_repo_owner(&server, "User").await;
     Mock::given(method("PUT"))
         .and(path("/repos/test-org/my-repo/branches/main/protection"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
@@ -132,8 +133,7 @@ async fn empty_review_restrictions_are_omitted_so_user_owned_repositories_accept
         .await
         .unwrap();
 
-    let requests = server.received_requests().await.unwrap();
-    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let body = put_body(&server).await;
     let reviews = &body["required_pull_request_reviews"];
     assert_eq!(reviews["required_approving_review_count"], 1);
     assert!(reviews.get("dismissal_restrictions").is_none(), "{reviews}");
@@ -182,4 +182,65 @@ async fn organization_only_restriction_errors_name_the_cause() {
         message.contains("Only organization repositories"),
         "{message}"
     );
+}
+
+#[tokio::test]
+async fn empty_review_restrictions_are_sent_on_organization_repositories_to_clear_them() {
+    use ward::github::branch_protection::DesiredBranchProtection;
+
+    let server = MockServer::start().await;
+    mount_repo_owner(&server, "Organization").await;
+    Mock::given(method("PUT"))
+        .and(path("/repos/test-org/my-repo/branches/main/protection"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&server)
+        .await;
+
+    let desired = DesiredBranchProtection {
+        required_pull_request_reviews: true,
+        required_approving_review_count: 1,
+        ..DesiredBranchProtection::default()
+    };
+    let client = Client::new_for_test("test-org", &server.uri());
+    client
+        .update_branch_protection_detailed("my-repo", "main", &desired)
+        .await
+        .unwrap();
+
+    let body = put_body(&server).await;
+    let reviews = &body["required_pull_request_reviews"];
+    let empty = json!({ "users": [], "teams": [], "apps": [] });
+    assert_eq!(reviews["dismissal_restrictions"], empty, "{reviews}");
+    assert_eq!(
+        reviews["bypass_pull_request_allowances"], empty,
+        "{reviews}"
+    );
+}
+
+async fn mount_repo_owner(server: &MockServer, kind: &str) {
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/my-repo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "name": "my-repo",
+            "full_name": "test-org/my-repo",
+            "archived": false,
+            "default_branch": "main",
+            "visibility": "public",
+            "owner": { "login": "test-org", "type": kind }
+        })))
+        .mount(server)
+        .await;
+}
+
+#[allow(
+    clippy::unwrap_used,
+    reason = "test helper; a missing PUT should fail the test"
+)]
+async fn put_body(server: &MockServer) -> serde_json::Value {
+    let requests = server.received_requests().await.unwrap();
+    let put = requests
+        .iter()
+        .find(|request| request.method.as_str() == "PUT")
+        .unwrap();
+    serde_json::from_slice(&put.body).unwrap()
 }

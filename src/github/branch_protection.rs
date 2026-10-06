@@ -291,17 +291,22 @@ impl Client {
         };
 
         let required_pull_request_reviews = if desired.required_pull_request_reviews {
+            // If the owner cannot be read, keep the organization behaviour that clears lists.
+            let organization_owned = self
+                .get_repo(repo)
+                .await
+                .map_or(true, |repository| repository.is_organization_owned());
             let mut body = json!({
                 "dismiss_stale_reviews": desired.dismiss_stale_reviews,
                 "require_code_owner_reviews": desired.require_code_owner_reviews,
                 "required_approving_review_count": desired.required_approving_review_count,
             });
-            // GitHub rejects these objects on user-owned repositories even when they are
-            // empty. PUT replaces the whole protection, so omitting them means "none".
-            if !desired.dismissal_restrictions.is_empty() {
+            // On organization repositories an empty object is how GitHub clears these lists.
+            // User-owned repositories reject the objects even when they are empty.
+            if organization_owned || !desired.dismissal_restrictions.is_empty() {
                 body["dismissal_restrictions"] = actor_set_body(&desired.dismissal_restrictions);
             }
-            if !desired.pull_request_bypass_allowances.is_empty() {
+            if organization_owned || !desired.pull_request_bypass_allowances.is_empty() {
                 body["bypass_pull_request_allowances"] =
                     actor_set_body(&desired.pull_request_bypass_allowances);
             }

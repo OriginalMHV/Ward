@@ -23,6 +23,24 @@ pub struct Repository {
     /// Repository topics (tags) from GitHub.
     #[serde(default)]
     pub topics: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<RepositoryOwner>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepositoryOwner {
+    pub login: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+}
+
+impl Repository {
+    /// True unless GitHub reports a non-organization owner, so unknown owners keep org behaviour.
+    pub fn is_organization_owned(&self) -> bool {
+        self.owner
+            .as_ref()
+            .is_none_or(|owner| owner.kind == "Organization")
+    }
 }
 
 /// Response wrapper for the GitHub search repositories API.
