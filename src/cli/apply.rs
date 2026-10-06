@@ -1,8 +1,11 @@
+use std::io::IsTerminal;
+
 use anyhow::{Result, bail};
 use clap::Args;
 use console::style;
 use dialoguer::Confirm;
 
+use crate::cli::args::{CategoryArgs, OutputArgs, TargetArgs};
 use crate::cli::plan::CategoryRun;
 use crate::config::Manifest;
 use crate::engine::audit_log::AuditLog;
@@ -19,32 +22,31 @@ use crate::reconcile::unified::{self, UnifiedOptions, UnifiedReport};
 /// deletes repositories.
 #[derive(Args)]
 pub struct ApplyCommand {
-    /// Limit to one or more categories (repeatable). Valid: repository, files,
-    /// security, rulesets, branch-protection, actions, environments, access,
-    /// integrations.
-    #[arg(long = "category", value_name = "CATEGORY")]
-    categories: Vec<String>,
+    #[command(flatten)]
+    category: CategoryArgs,
 
     /// Allow high-impact repository changes (visibility, archive)
     #[arg(long)]
     allow_high_impact: bool,
 
-    /// Skip the confirmation prompt (required with --json)
+    /// Skip the post-apply verification step
     #[arg(long)]
+    skip_verify: bool,
+
+    /// Skip the confirmation prompt (required with --format json)
+    #[arg(short = 'y', long)]
     yes: bool,
+
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[command(flatten)]
+    output: OutputArgs,
 }
 
 impl ApplyCommand {
-    pub async fn run(
-        &self,
-        client: &Client,
-        manifest: &Manifest,
-        system: Option<&str>,
-        repo: Option<&str>,
-        json: bool,
-    ) -> Result<()> {
-        self.run_with_audit(client, manifest, system, repo, json, AuditLog::new)
-            .await
+    pub async fn run(&self, client: &Client, manifest: &Manifest) -> Result<()> {
+        self.run_with_audit(client, manifest, AuditLog::new).await
     }
 
     /// As [`Self::run`], with the audit log opened by `open_audit` when an apply starts.
@@ -52,15 +54,12 @@ impl ApplyCommand {
         &self,
         client: &Client,
         manifest: &Manifest,
-        system: Option<&str>,
-        repo: Option<&str>,
-        json: bool,
         open_audit: impl FnOnce() -> Result<AuditLog>,
     ) -> Result<()> {
         let options = UnifiedOptions {
-            categories: unified::parse_categories(&self.categories)?,
+            categories: unified::select_categories(&self.category.categories),
             allow_high_impact: self.allow_high_impact,
-            verify: true,
+            verify: !self.skip_verify,
         };
         run_canonical_apply(
             client,
@@ -69,9 +68,9 @@ impl ApplyCommand {
             options,
             open_audit,
             CategoryRun {
-                system,
-                repo,
-                json,
+                system: self.target.system.as_deref(),
+                repo: self.target.repo.as_deref(),
+                json: self.output.is_json(),
                 command: "apply",
                 title: "Ward Apply",
             },
@@ -92,6 +91,7 @@ pub(crate) async fn run_canonical_apply(
 ) -> Result<UnifiedReport> {
     crate::cli::plan::require_canonical_categories(manifest, run.command)?;
     validate_confirmation_mode(run.json, yes)?;
+    ensure_can_confirm(yes, std::io::stdin().is_terminal())?;
 
     let repos = unified::resolve_target_repos(client, manifest, run.system, run.repo).await?;
     if run.repo.is_some() {
@@ -145,21 +145,75 @@ pub(crate) async fn run_canonical_apply(
     Ok(report)
 }
 
+/// Without `--yes`, apply must ask. Refuse when nobody can answer.
+fn ensure_can_confirm(yes: bool, interactive: bool) -> Result<()> {
+    if !yes && !interactive {
+        bail!("refusing to prompt in a non-interactive session; pass --yes");
+    }
+    Ok(())
+}
+
 fn validate_confirmation_mode(json: bool, yes: bool) -> Result<()> {
     if json && !yes {
-        bail!("`ward apply --json` requires `--yes`; JSON output must not bypass confirmation");
+        bail!(
+            "`ward apply --format json` requires `--yes`; JSON output must not bypass confirmation"
+        );
     }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use clap::Parser;
+
     use super::validate_confirmation_mode;
+
+    #[test]
+    fn non_interactive_apply_without_yes_is_refused() {
+        let error = super::ensure_can_confirm(false, false).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "refusing to prompt in a non-interactive session; pass --yes"
+        );
+        assert!(
+            error.downcast_ref::<crate::outcome::Outcome>().is_none(),
+            "this is an operational error and exits with 2"
+        );
+    }
+
+    #[test]
+    fn apply_may_run_when_confirmed_or_interactive() {
+        super::ensure_can_confirm(true, false).unwrap();
+        super::ensure_can_confirm(false, true).unwrap();
+    }
+
+    #[test]
+    fn apply_accepts_short_yes_and_skip_verify() {
+        let cli = crate::cli::Cli::parse_from([
+            "ward",
+            "apply",
+            "-y",
+            "--skip-verify",
+            "--category",
+            "files,security",
+        ]);
+        let crate::cli::Command::Apply(command) = cli.command else {
+            panic!("expected apply command");
+        };
+
+        assert!(command.yes);
+        assert!(command.skip_verify);
+        assert_eq!(command.category.categories.len(), 2);
+    }
 
     #[test]
     fn json_apply_requires_explicit_confirmation() {
         let error = validate_confirmation_mode(true, false).unwrap_err();
-        assert!(error.to_string().contains("requires `--yes`"));
+        assert!(
+            error
+                .to_string()
+                .contains("`ward apply --format json` requires `--yes`")
+        );
     }
 
     #[test]

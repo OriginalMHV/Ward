@@ -12,7 +12,7 @@ use serde_json::json;
 use wiremock::matchers::{body_partial_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use ward::cli::commit::CommitCommand;
+use ward::cli::deprecated::LegacyCategory;
 use ward::cli::{Cli, Command};
 use ward::config::Manifest;
 use ward::config::manifest::{
@@ -21,6 +21,7 @@ use ward::config::manifest::{
 use ward::github::Client;
 use ward::github::commits::{AtomicCommitEntry, AtomicCommitFile, CommitContent, DeleteTreeEntry};
 use ward::github::contents::{GitEntryMode, GitObjectType};
+use ward::reconcile::unified::Category;
 
 #[tokio::test]
 async fn test_create_atomic_commit_supports_binary_bytes_and_delete_entries() {
@@ -714,14 +715,12 @@ async fn ensure_dedicated_branch_encodes_refs_when_refreshing_stale_unicode_bran
 // commit apply: canonical files and aggregated failures
 // ---------------------------------------------------------------------------
 
-fn parse_commit_command(args: &[&str]) -> (CommitCommand, Option<String>, Option<String>) {
+fn parse_commit_command(args: &[&str]) -> LegacyCategory {
     let cli = Cli::parse_from(args);
-    let system = cli.system.clone();
-    let repo = cli.repo.clone();
     let Command::Commit(command) = cli.command else {
         panic!("expected commit command");
     };
-    (command, system, repo)
+    command.into_legacy("commit", Category::Files)
 }
 
 #[tokio::test]
@@ -773,21 +772,15 @@ async fn commit_apply_reports_collection_failures_for_every_repository() {
         categories: ManifestCategories::default(),
     }];
 
-    let (command, system, repo) =
-        parse_commit_command(&["ward", "commit", "apply", "--yes", "--system", "sys"]);
+    let command = parse_commit_command(&["ward", "commit", "apply", "--yes", "--system", "sys"]);
 
     let client = Client::new_for_test("test-org", &server.uri());
     let audit_dir = tempfile::tempdir().unwrap();
     let audit_path = audit_dir.path().join("audit.log");
     let result = command
-        .run_with_audit(
-            &client,
-            &manifest,
-            system.as_deref(),
-            repo.as_deref(),
-            false,
-            || ward::engine::audit_log::AuditLog::open(&audit_path),
-        )
+        .run_with_audit(&client, &manifest, || {
+            ward::engine::audit_log::AuditLog::open(&audit_path)
+        })
         .await;
     let audit = std::fs::read_to_string(&audit_path).unwrap();
     assert!(

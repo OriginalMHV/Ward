@@ -45,7 +45,7 @@ For organization-wide operations, a personal access token or GitHub App token wi
 
 ## Drift detection
 
-`ward drift check` compares actual repo state against the desired state in `ward.toml`.
+`ward drift` compares actual repo state against the desired state in `ward.toml`.
 
 ### Exit codes
 
@@ -84,7 +84,7 @@ jobs:
       - name: Check drift
         env:
           GH_TOKEN: ${{ secrets.WARD_TOKEN }}
-        run: ward drift check --system backend --json
+        run: ward drift --system backend --format json
 ```
 
 If drift is detected, the step fails with exit code 1. Deferred changes and unreadable state in managed categories also count as drift.
@@ -96,13 +96,13 @@ If drift is detected, the step fails with exit code 1. Deferred changes and unre
 ### Security plan as JSON
 
 ```bash
-ward security plan --system backend --json
+ward plan --category security --system backend --format json
 ```
 
 The report is an object with a `repos` array and top-level `actionable`, `blocked`, `warnings`, and `deferred` counts. Pipe through `jq` to list repos that need changes:
 
 ```bash
-ward security plan --system backend --json | jq '.repos[] | select(.actionable > 0) | .repo'
+ward plan --category security --system backend --format json | jq '.repos[] | select(.actionable > 0) | .repo'
 ```
 
 ### Full audit as JSON
@@ -112,18 +112,18 @@ ward audit --system backend --format json
 ward audit --repo my-service --format json
 ```
 
-Returns per-repo security features, key GitHub configuration files, alert counts by severity, and dependency graph / SBOM audit data. The `dependency_graph` block is the primary signal for whether GitHub currently has usable dependency data for a repository.
+The audit covers `security`, `rulesets`, `branch-protection` and `access` for all configured systems. Use `--category` to select sections. JSON goes to stdout and progress goes to stderr, so the redirect above is safe. The report returns per-repo security features, key GitHub configuration files, alert counts by severity, and dependency graph / SBOM audit data. The `dependency_graph` block is the primary signal for whether GitHub currently has usable dependency data for a repository.
 
 ---
 
 ## Non-interactive apply
 
-Use `--yes` to skip confirmation prompts in CI:
+`ward apply` asks before it changes anything. CI has no terminal, so `--yes` (or `-y`) is required. Without it, `ward apply` exits with code 2 with `refusing to prompt in a non-interactive session; pass --yes`:
 
 ```bash
-ward security apply --system backend --yes
-ward commit apply --system backend --yes
-ward protection apply --system backend --yes
+ward apply --category security --system backend --yes
+ward apply --category files --system backend --yes
+ward apply --category branch-protection --system backend --yes
 ```
 
 ---
@@ -155,14 +155,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.WARD_TOKEN }}
         run: |
-          ward security apply --system ${{ inputs.system }} --yes
-          ward commit apply --system ${{ inputs.system }} --yes
-          ward protection apply --system ${{ inputs.system }} --yes
+          ward apply --category security --system ${{ inputs.system }} --yes
+          ward apply --category files --system ${{ inputs.system }} --yes
+          ward apply --category branch-protection --system ${{ inputs.system }} --yes
 
       - name: Verify
         env:
           GH_TOKEN: ${{ secrets.WARD_TOKEN }}
-        run: ward drift check --system ${{ inputs.system }}
+        run: ward drift --system ${{ inputs.system }}
 ```
 
 ---

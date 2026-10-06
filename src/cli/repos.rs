@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Args;
 use console::style;
 
+use super::args::{ListTargetArgs, OutputArgs};
 use super::output::print_table;
 use crate::config::Manifest;
 use crate::github::Client;
@@ -16,7 +17,13 @@ pub struct ReposCommand {
 #[derive(clap::Subcommand)]
 enum ReposAction {
     /// List repositories with metadata
-    List,
+    List {
+        #[command(flatten)]
+        target: ListTargetArgs,
+
+        #[command(flatten)]
+        output: OutputArgs,
+    },
 
     /// Removed. Use `ward audit --repo NAME`
     #[command(hide = true)]
@@ -33,31 +40,71 @@ impl ReposCommand {
             ReposAction::Inspect { .. } => {
                 Some("`ward repos inspect` was removed. Use `ward audit --repo NAME`.")
             }
-            ReposAction::List => None,
+            ReposAction::List { .. } => None,
         }
     }
 
-    pub async fn run(
-        &self,
-        client: &Client,
-        manifest: &Manifest,
-        system: Option<&str>,
-    ) -> Result<()> {
+    /// The organization override of `repos list`.
+    pub fn org(&self) -> Option<&str> {
         match &self.action {
-            ReposAction::List => list_repos(client, manifest, system).await,
+            ReposAction::List { target, .. } => target.org.as_deref(),
+            ReposAction::Inspect { .. } => None,
+        }
+    }
+
+    /// Reject the removed `repos inspect`. This needs no token or manifest.
+    pub fn precheck(&self) -> Result<()> {
+        match &self.action {
+            ReposAction::List { .. } => Ok(()),
             ReposAction::Inspect { .. } => {
                 anyhow::bail!("{}", self.removed_hint().unwrap_or_default())
             }
         }
     }
+
+    pub async fn run(&self, client: &Client, manifest: &Manifest) -> Result<()> {
+        match &self.action {
+            ReposAction::List { target, output } => {
+                list_repos(client, manifest, target.system.as_deref(), output.is_json()).await
+            }
+            ReposAction::Inspect { .. } => self.precheck(),
+        }
+    }
 }
 
-async fn list_repos(client: &Client, manifest: &Manifest, system: Option<&str>) -> Result<()> {
+#[derive(serde::Serialize)]
+struct RepoRow<'a> {
+    name: &'a str,
+    language: Option<&'a str>,
+    visibility: &'a str,
+    default_branch: &'a str,
+}
+
+async fn list_repos(
+    client: &Client,
+    manifest: &Manifest,
+    system: Option<&str>,
+    json: bool,
+) -> Result<()> {
     let repos = if system.is_some() {
         unified::resolve_target_repos(client, manifest, system, None).await?
     } else {
         client.list_repos().await?
     };
+
+    if json {
+        let rows: Vec<RepoRow<'_>> = repos
+            .iter()
+            .map(|r| RepoRow {
+                name: &r.name,
+                language: r.language.as_deref(),
+                visibility: &r.visibility,
+                default_branch: &r.default_branch,
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&rows)?);
+        return Ok(());
+    }
 
     if repos.is_empty() {
         println!("  No repositories found.");

@@ -61,10 +61,6 @@ pub struct ImportCommand {
     /// Replace an existing output file.
     #[arg(long)]
     force: bool,
-
-    /// Max concurrent API calls.
-    #[arg(long, default_value_t = 5)]
-    parallelism: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,7 +148,8 @@ struct SnapshotCounts {
 }
 
 impl ImportCommand {
-    pub async fn run(self) -> Result<()> {
+    /// Import the source. `parallelism` is the global `--parallelism` value.
+    pub async fn run(self, parallelism: usize) -> Result<()> {
         import_repository(ImportOptions {
             source: &self.source,
             targets: &self.target,
@@ -162,7 +159,7 @@ impl ImportCommand {
             output: &self.output,
             stdout: self.stdout,
             force: self.force,
-            parallelism: self.parallelism,
+            parallelism,
         })
         .await
     }
@@ -617,8 +614,8 @@ async fn snapshot_repository(
         inherited_rulesets: rulesets_category.references.len(),
         workflows: actions_category.workflows.len(),
         environments: environments_category.entries.len(),
-        access_entries: access_category.teams.len()
-            + access_category.collaborators.len()
+        access_entries: access_category.desired_teams().len()
+            + access_category.desired_collaborators().len()
             + access_category.references.len(),
         integrations: integrations_category.webhooks.len()
             + integrations_category.deploy_keys.len()

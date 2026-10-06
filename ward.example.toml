@@ -176,6 +176,8 @@ disposition = "observe"
 prune = false
 sensitive = true
 
+# A missing `teams` or `collaborators` key means that list is not managed.
+# Only an explicit list (even `collaborators = []`) with prune = true removes entries.
 [[categories.access.teams]]
 slug = "developers"
 permission = "push"

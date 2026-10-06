@@ -21,16 +21,27 @@ use crate::github::repos::Repository;
 use crate::reconcile::{access_integrations, actions_environments, files, general, security_rules};
 
 /// A managed category, addressable by a stable CLI name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum)]
 pub enum Category {
+    #[value(alias = "repo", alias = "general")]
     Repository,
+    #[value(alias = "file")]
     Files,
     Security,
+    #[value(alias = "ruleset")]
     Rulesets,
+    #[value(
+        name = "branch-protection",
+        alias = "branch_protection",
+        alias = "protection"
+    )]
     BranchProtection,
     Actions,
+    #[value(alias = "environment")]
     Environments,
+    #[value(alias = "teams")]
     Access,
+    #[value(alias = "integration")]
     Integrations,
 }
 
@@ -48,27 +59,6 @@ impl Category {
             Category::Access => "access",
             Category::Integrations => "integrations",
         }
-    }
-
-    /// Parse a stable category name (with a couple of forgiving aliases).
-    pub fn parse(value: &str) -> Result<Self> {
-        let normalized = value.trim().to_ascii_lowercase().replace('_', "-");
-        let category = match normalized.as_str() {
-            "repository" | "repo" | "general" => Category::Repository,
-            "files" | "file" => Category::Files,
-            "security" => Category::Security,
-            "rulesets" | "ruleset" => Category::Rulesets,
-            "branch-protection" | "protection" => Category::BranchProtection,
-            "actions" => Category::Actions,
-            "environments" | "environment" => Category::Environments,
-            "access" | "teams" => Category::Access,
-            "integrations" | "integration" => Category::Integrations,
-            other => bail!(
-                "Unknown category `{other}`. Valid categories: {}",
-                Self::all_stable_names().join(", ")
-            ),
-        };
-        Ok(category)
     }
 
     /// Every category, in the order safe apply must execute.
@@ -89,30 +79,22 @@ impl Category {
             Category::BranchProtection,
         ]
     }
-
-    fn all_stable_names() -> Vec<&'static str> {
-        Self::apply_order()
-            .iter()
-            .map(|category| category.stable_name())
-            .collect()
-    }
 }
 
-/// Parse and validate a set of `--category` values. An empty input selects all
-/// categories.
-pub fn parse_categories(values: &[String]) -> Result<Vec<Category>> {
+/// Resolve the `--category` values. An empty input selects all categories.
+/// Duplicates are dropped and the order of first appearance is kept.
+pub fn select_categories(values: &[Category]) -> Vec<Category> {
     if values.is_empty() {
-        return Ok(Category::apply_order().to_vec());
+        return Category::apply_order().to_vec();
     }
 
     let mut selected = Vec::new();
-    for value in values {
-        let category = Category::parse(value)?;
-        if !selected.contains(&category) {
-            selected.push(category);
+    for category in values {
+        if !selected.contains(category) {
+            selected.push(*category);
         }
     }
-    Ok(selected)
+    selected
 }
 
 /// Shared options for both plan and apply.
@@ -137,8 +119,11 @@ impl UnifiedOptions {
 pub struct CoverageCounts {
     pub total: usize,
     pub collected: usize,
+    /// Reads that failed: permission denied or unavailable.
     pub degraded: usize,
     pub not_applicable: usize,
+    /// Settings GitHub does not expose, or values it never returns, such as secrets.
+    pub unsupported: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -204,6 +189,7 @@ impl UnifiedReport {
                 coverage.collected += category.coverage.collected;
                 coverage.degraded += category.coverage.degraded;
                 coverage.not_applicable += category.coverage.not_applicable;
+                coverage.unsupported += category.coverage.unsupported;
             }
         }
         Self {
@@ -2130,10 +2116,7 @@ fn degraded_coverage(coverage: &[CoverageEntry]) -> usize {
         .filter(|entry| {
             matches!(
                 entry.outcome,
-                CoverageOutcome::PermissionDenied
-                    | CoverageOutcome::Unavailable
-                    | CoverageOutcome::Redacted
-                    | CoverageOutcome::Unsupported
+                CoverageOutcome::PermissionDenied | CoverageOutcome::Unavailable
             )
         })
         .count()
@@ -2148,10 +2131,10 @@ fn coverage_counts(coverage: &[CoverageEntry]) -> CoverageCounts {
         match entry.outcome {
             CoverageOutcome::Collected => counts.collected += 1,
             CoverageOutcome::NotApplicable => counts.not_applicable += 1,
-            CoverageOutcome::PermissionDenied
-            | CoverageOutcome::Unavailable
-            | CoverageOutcome::Redacted
-            | CoverageOutcome::Unsupported => counts.degraded += 1,
+            CoverageOutcome::PermissionDenied | CoverageOutcome::Unavailable => {
+                counts.degraded += 1;
+            }
+            CoverageOutcome::Redacted | CoverageOutcome::Unsupported => counts.unsupported += 1,
         }
     }
     counts
@@ -2405,7 +2388,7 @@ pub fn render_report_to(
             }
             let hidden = category.details.len().saturating_sub(SHOWN_DETAILS);
             if hidden > 0 {
-                writeln!(out, "        - {hidden} more, use --json")?;
+                writeln!(out, "        - {hidden} more, use --format json")?;
             }
         }
     }
@@ -2420,11 +2403,21 @@ pub fn render_report_to(
         style(report.warnings).bold(),
         report.repos.len(),
     )?;
-    writeln!(
-        out,
-        "  Coverage: {}/{} collected, {} degraded",
-        report.coverage.collected, report.coverage.total, report.coverage.degraded,
-    )
+    writeln!(out, "  Coverage: {}", coverage_line(&report.coverage))
+}
+
+fn coverage_line(counts: &CoverageCounts) -> String {
+    let mut parts = vec![format!("{}/{} read", counts.collected, counts.total)];
+    if counts.degraded > 0 {
+        parts.push(format!("{} could not be read", counts.degraded));
+    }
+    if counts.unsupported > 0 {
+        parts.push(format!("{} not exposed by GitHub", counts.unsupported));
+    }
+    if counts.not_applicable > 0 {
+        parts.push(format!("{} not applicable", counts.not_applicable));
+    }
+    parts.join(", ")
 }
 
 fn style_status(status: &str) -> console::StyledObject<&str> {
@@ -2445,29 +2438,15 @@ mod tests {
     use crate::config::manifest::CategoryPolicy;
 
     #[test]
-    fn parses_stable_category_names() {
-        assert_eq!(Category::parse("repository").unwrap(), Category::Repository);
-        assert_eq!(
-            Category::parse("branch-protection").unwrap(),
-            Category::BranchProtection
-        );
-        assert_eq!(
-            Category::parse("integrations").unwrap(),
-            Category::Integrations
-        );
-        assert!(Category::parse("nope").is_err());
-    }
-
-    #[test]
     fn empty_selection_is_all_categories() {
-        let all = parse_categories(&[]).unwrap();
+        let all = select_categories(&[]);
         assert_eq!(all.len(), 9);
         assert!(all.contains(&Category::Files));
     }
 
     #[test]
     fn category_selection_deduplicates() {
-        let selected = parse_categories(&["security".to_owned(), "security".to_owned()]).unwrap();
+        let selected = select_categories(&[Category::Security, Category::Security]);
         assert_eq!(selected, vec![Category::Security]);
     }
 
@@ -2495,6 +2474,35 @@ mod tests {
         assert_eq!(counts.collected, 1);
         assert_eq!(counts.degraded, 1);
         assert_eq!(degraded_coverage(&coverage), 1);
+    }
+
+    #[test]
+    fn known_github_limits_are_not_counted_as_degraded() {
+        use crate::config::manifest::ManifestCategoryName;
+        let entry = |outcome| CoverageEntry {
+            category: ManifestCategoryName::Repository,
+            endpoint: "x".to_owned(),
+            outcome,
+            reason: None,
+            required_permission: None,
+        };
+        let coverage = vec![
+            entry(CoverageOutcome::Collected),
+            entry(CoverageOutcome::Unsupported),
+            entry(CoverageOutcome::Redacted),
+            entry(CoverageOutcome::NotApplicable),
+            entry(CoverageOutcome::Unavailable),
+        ];
+
+        let counts = coverage_counts(&coverage);
+
+        assert_eq!(counts.degraded, 1);
+        assert_eq!(counts.unsupported, 2);
+        assert_eq!(degraded_coverage(&coverage), 1);
+        assert_eq!(
+            coverage_line(&counts),
+            "1/5 read, 1 could not be read, 2 not exposed by GitHub, 1 not applicable"
+        );
     }
 
     fn empty_files_plan() -> files::FilesPlan {
@@ -2958,6 +2966,6 @@ mod tests {
 
         assert!(text.contains("change 3"));
         assert!(!text.contains("change 4"));
-        assert!(text.contains("2 more, use --json"), "{text}");
+        assert!(text.contains("2 more, use --format json"), "{text}");
     }
 }

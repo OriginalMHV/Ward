@@ -69,7 +69,12 @@ async fn test_list_repo_teams() {
         .await;
 
     let client = Client::new_for_test("test-org", &server.uri());
-    let teams = client.list_repo_teams("my-repo").await.unwrap();
+    let teams = client
+        .list_repo_teams_checked("my-repo")
+        .await
+        .unwrap()
+        .available()
+        .expect("teams should be readable");
 
     assert_eq!(teams.len(), 1);
     assert_eq!(teams[0].slug, "devops");

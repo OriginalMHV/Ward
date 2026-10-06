@@ -34,11 +34,11 @@ Each category stores:
 - stable references to externally owned resources
 - placeholders for write-only values
 
-Manually authored and imported manifests use the same categories. Focused commands such as `security`, `commit`, `rulesets`, `protection`, `settings`, and `teams` are exact-scope views over that same desired state.
+Manually authored and imported manifests use the same categories. `ward plan --category C` and `ward apply --category C` are exact-scope views over that same desired state. The old per-category commands (`security`, `commit`, `rulesets`, `protection`, `settings`, `teams`) are hidden aliases of them in 0.5.x.
 
 ## Import pipeline
 
-`ward import` and `ward init --from` share one importer.
+`ward import` is the only importer. The deprecated `ward init --from` delegates to it.
 
 The source repository metadata is the required baseline. All other collectors run independently:
 

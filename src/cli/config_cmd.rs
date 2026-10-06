@@ -177,8 +177,8 @@ fn run_show(config_override: Option<&str>) -> Result<()> {
             &category.policy,
             &format!(
                 "{} team(s), {} collaborator(s)",
-                category.teams.len(),
-                category.collaborators.len()
+                category.desired_teams().len(),
+                category.desired_collaborators().len()
             ),
         );
         category_count += 1;

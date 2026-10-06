@@ -6,17 +6,35 @@ Every mutating command in Ward follows the **plan, apply, verify** pattern. `pla
 
 ## Global flags
 
-These flags are available on all commands:
+Only these flags are global. They work before or after the subcommand.
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--parallelism <N>` | integer | `5` | Max concurrent API calls |
+| `--config <PATH>` | string | `./ward.toml` | Path to config file |
+| `-v` / `-vv` / `-vvv` | count | `0` | Increase log verbosity |
+
+## Target flags
+
+`plan`, `apply`, `drift` and `audit` take the target flags. Pass them **after** the subcommand: `ward plan --repo my-service`. `ward --repo my-service plan` is an error.
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--org <ORG>` | string | from `ward.toml` | GitHub organization (overrides config) |
-| `--system <ID>` | string | -- | Filter to a specific system |
+| `--system <ID>` | string | all configured systems | Narrow the run to one system |
 | `--repo <REPO>` | string | -- | Narrow the run to one repository inside the manifest scope. The repository must be selected by a system. When the manifest has no `[[systems]]`, `--repo` is the explicit target. Names match case-insensitively. Archived repositories are allowed for read-only commands. `apply` skips them with a warning inside a scope and refuses an explicit `--repo` archived target |
-| `--json` | bool | `false` | Output the unified report as JSON. Honored by `plan`, `apply`, `drift check`, and the focused `plan` and `apply` subcommands. Audit and list commands ignore it (`audit` uses `--format`) |
-| `--parallelism <N>` | integer | `5` | Max concurrent API calls |
-| `--config <PATH>` | string | `./ward.toml` | Path to config file |
-| `-v` / `-vv` / `-vvv` | count | `0` | Increase log verbosity |
+
+`ward repos list` takes `--org` and `--system` only.
+
+## Output flags
+
+`plan`, `apply`, `drift`, `audit`, `repos list` and `doctor` take `--format text|json`. The default is `text`. JSON goes to stdout. Progress lines and warnings go to stderr, so you can pipe JSON to `jq`.
+
+`--format table` is accepted as an alias of `--format text`. The old `--json` flag is hidden and deprecated. It works as `--format json` and prints `warning: '--json' is deprecated and will be removed in 0.6.0; use '--format json'` to stderr. It is removed in 0.6.0.
+
+## Confirmation
+
+`ward apply` shows the plan and asks before it changes anything. Pass `--yes` (or `-y`) to skip the prompt. Without `--yes`, a session with no terminal on stdin fails with exit code 2: `refusing to prompt in a non-interactive session; pass --yes`. JSON output also requires `--yes`.
 
 ## Exit codes
 
@@ -28,7 +46,7 @@ Every command uses the same exit codes.
 | `1` | Ward ran and found a problem: drift found, a failed check (`ward doctor`), or a failed or blocked apply category. |
 | `2` | Ward could not run: authentication, network, configuration parse error, or invalid arguments. |
 
-`ward doctor` exits `0` when it reports only warnings. `ward settings apply` and `ward teams apply` exit `1` when any repository fails.
+`ward doctor` exits `0` when it reports only warnings. `ward apply` exits `1` when any category fails or is blocked.
 
 ---
 
@@ -45,6 +63,12 @@ ward repos list --system backend
 ward repos list --org my-org
 ```
 
+| Flag | Description |
+|------|-------------|
+| `--org <ORG>` | GitHub organization (overrides config) |
+| `--system <ID>` | List only the repositories of one system |
+| `--format text\|json` | Output format. JSON is an array of `name`, `language`, `visibility`, `default_branch` |
+
 Output columns: Repository, Language, Visibility, Default Branch.
 
 ### Removed: `ward repos inspect`
@@ -53,164 +77,40 @@ Output columns: Repository, Language, Visibility, Default Branch.
 
 ---
 
-## `ward security`
+## Deprecated per-category commands
 
-Manage security features (Dependabot, secret scanning, push protection) across repositories.
+`ward security`, `ward rulesets`, `ward protection`, `ward commit`, `ward teams`, and `ward settings` are hidden aliases in 0.5.x. Each one prints a warning to stderr and then runs the replacement. They are removed in 0.6.0.
 
-### `ward security plan`
+| Old invocation | New invocation |
+|----------------|----------------|
+| `ward security plan` | `ward plan --category security` |
+| `ward security apply [-y] [--skip-verify]` | `ward apply --category security [-y] [--skip-verify]` |
+| `ward security audit` | `ward audit --category security` |
+| `ward rulesets plan\|apply\|audit` | `ward plan\|apply\|audit --category rulesets` |
+| `ward protection plan\|apply\|audit` | `ward plan\|apply\|audit --category branch-protection` |
+| `ward commit plan\|apply` | `ward plan\|apply --category files` |
+| `ward teams plan\|apply` | `ward plan\|apply --category access` |
+| `ward teams list` | `ward audit --category access` |
+| `ward teams audit` | `ward drift --category access` |
+| `ward settings plan\|apply` | `ward plan\|apply --category repository` |
+| `ward settings audit` | `ward drift --category repository` |
+| `ward settings ... --ruleset copilot-review` | Removed. Declare the ruleset in `ward.toml` (see [configuration](configuration.md#copilot-code-review-ruleset)) |
 
-Dry-run showing what security changes would be made.
+The warning has this form:
 
-```bash
-ward security plan --system backend
-ward security plan --repo my-service
-ward security plan --system backend --json
+```
+warning: 'ward security plan' is deprecated and will be removed in 0.6.0; use 'ward plan --category security'
 ```
 
-### `ward security apply`
+`ward commit audit` never existed and has no replacement. Use `ward plan --category files`.
 
-Apply security settings and verify the result.
+`ward teams plan` and `ward teams apply` also print a note about collaborators. The old command managed only teams. The access category also covers collaborators, but Ward manages them only when the manifest sets `collaborators`.
 
-```bash
-ward security apply --system backend
-ward security apply --system backend --yes
-ward security apply --repo my-service --yes
-ward security apply --system backend --skip-verify
-```
+`ward settings plan` and `ward settings apply` also print a note. The repository category is wider than the old command. It also covers metadata, custom properties, immutable releases, labels, and prune.
 
-| Flag | Description |
-|------|-------------|
-| `--yes` | Skip confirmation prompt |
-| `--skip-verify` | Skip post-apply verification step |
+`ward settings --ruleset copilot-review` fails with exit code 2 and prints the manifest entry to use instead. Ward checks this before it needs a token or a manifest.
 
-### `ward security audit`
-
-Report current security state for all repos in a system.
-
-```bash
-ward security audit --system backend
-ward security audit --repo my-service
-```
-
-Output columns: Dependabot Alerts, Dependabot Security Updates, Secret Scanning, AI Detection, Push Protection.
-
----
-
-## `ward protection`
-
-Manage branch protection rules on default branches.
-
-### `ward protection plan`
-
-Preview what branch protection changes would be made.
-
-```bash
-ward protection plan --system backend
-ward protection plan --repo my-service
-```
-
-### `ward protection apply`
-
-Apply branch protection rules to default branches.
-
-```bash
-ward protection apply --system backend
-ward protection apply --system backend --yes
-ward protection apply --repo my-service --yes
-```
-
-| Flag | Description |
-|------|-------------|
-| `--yes` | Skip confirmation prompt |
-
-### `ward protection audit`
-
-Show current branch protection state.
-
-```bash
-ward protection audit --system backend
-ward protection audit --repo my-service
-```
-
-Audited fields: Required PR Reviews, Required Approvals, Dismiss Stale Reviews, Code Owner Reviews, Status Checks, Strict Status Checks, Enforce Admins, Linear History, Force Pushes, Deletions.
-
----
-
-## `ward commit`
-
-Synchronize managed files without cloning. Uses the Git Trees API for atomic multi-file commits.
-
-### `ward commit plan`
-
-Preview what files would be committed.
-
-```bash
-ward commit plan --system backend
-ward commit plan --repo my-service
-```
-
-### `ward commit apply`
-
-Commit changed files and create pull requests.
-
-```bash
-ward commit apply --system backend
-ward commit apply --repo my-service --yes
-```
-
-| Flag | Description |
-|------|-------------|
-| `--yes` | Skip confirmation prompt |
-
-Ward compares every `[[categories.files.entries]]` entry, commits all changed files together, and opens one pull request per target repository. Target-only files are deleted only when the files category enables pruning.
-
----
-
-## `ward settings`
-
-Manage `[categories.repository.settings]` and optionally configure Copilot code review.
-
-### `ward settings plan`
-
-Preview what settings would change.
-
-```bash
-# Plan repository settings and topics
-ward settings plan --system backend
-
-# Include the optional Copilot review ruleset
-ward settings plan --ruleset copilot-review --system backend
-```
-
-### `ward settings apply`
-
-Apply settings and rulesets to repositories.
-
-```bash
-# Apply repository settings and topics
-ward settings apply --system backend
-
-# Optionally apply the Copilot review ruleset
-ward settings apply --ruleset copilot-review --system backend
-```
-
-| Flag | Description |
-|------|-------------|
-| `--ruleset <NAME>` | Ruleset to apply (e.g., `copilot-review`) |
-| `--yes` | Skip confirmation prompt |
-
-Without `--ruleset`, `plan` and `apply` manage only fields under `[categories.repository.settings]`, including feature toggles, merge policies and commit-message defaults, auto-merge, branch cleanup, update-branch support, web commit signoff, and topics.
-
-### `ward settings audit`
-
-Report current repository-settings compliance plus Copilot review ruleset state.
-
-```bash
-ward settings audit --system backend
-ward settings audit --repo my-service
-```
-
-Shows per-repo repository settings compliance and whether the Copilot Code Review ruleset is present.
+The aliases run the replacement command, so they behave like it. The audit aliases print the new audit section, and they cover all configured systems when you pass neither `--system` nor `--repo`.
 
 ---
 
@@ -218,132 +118,56 @@ Shows per-repo repository settings compliance and whether the Copilot Code Revie
 
 Compare actual repository state against the desired state in `ward.toml`. Designed for CI pipelines.
 
-### `ward drift check`
-
 ```bash
-ward drift check --system backend
-ward drift check --repo my-service
-ward drift check --system backend --json
+ward drift --system backend
+ward drift --repo my-service
+ward drift --system backend --format json
 ```
 
 Exit code `0` means all repos are in sync with `ward.toml`. Exit code `1` means drift: actionable, blocked, or deferred changes, or state in a managed category that Ward could not read. Exit code `2` means Ward could not run the check. See [Exit codes](#exit-codes).
 
-Checks every configured category by default. Use repeatable `--category <CATEGORY>` filters to narrow the drift gate.
+`ward drift check` is a deprecated alias of `ward drift`. It prints `warning: 'ward drift check' is deprecated; use 'ward drift'` to stderr and runs the same check.
 
----
-
-## `ward rulesets`
-
-Manage GitHub repository rulesets (the successor to branch protection rules).
-
-### `ward rulesets plan`
-
-Preview ruleset changes.
-
-```bash
-ward rulesets plan --system backend
-ward rulesets plan --repo my-service
-```
-
-### `ward rulesets apply`
-
-Create, update, or prune repository-owned rulesets according to `[categories.rulesets]`. Stable actor references such as team slugs and app slugs are resolved for each target repository.
-
-```bash
-ward rulesets apply --system backend
-ward rulesets apply --system backend --yes
-ward rulesets apply --repo my-service --yes
-```
-
-| Flag | Description |
-|------|-------------|
-| `--yes` / `-y` | Skip confirmation prompt |
-
-### `ward rulesets audit`
-
-Show current rulesets across repositories.
-
-```bash
-ward rulesets audit --system backend
-ward rulesets audit --repo my-service
-```
-
-Exact rulesets are configured under `[[categories.rulesets.repository_rulesets]]`. They preserve arbitrary conditions, rule parameters, enforcement, and bypass actors. Target-only rulesets are deleted only when the category enables pruning.
-
----
-
-## `ward teams`
-
-Manage only the team portion of `[categories.access]`. Team configuration may be global or replaced per system under `[systems.categories.access]`.
-Team changes require `disposition = "managed"` and `sensitive = true`; target-only teams are removed only when `prune = true`.
-
-### `ward teams list`
-
-Show current team access per repository.
-
-```bash
-ward teams list --system backend
-ward teams list --repo my-service
-```
-
-### `ward teams plan`
-
-Preview team access changes.
-
-```bash
-ward teams plan --system backend
-ward teams plan --repo my-service
-```
-
-Use either `--system` or `--repo`.
-
-### `ward teams apply`
-
-Apply team access to repositories.
-
-```bash
-ward teams apply --system backend
-ward teams apply --system backend --yes
-ward teams apply --repo my-service --yes
-```
-
-| Flag | Description |
-|------|-------------|
-| `--yes` / `-y` | Skip confirmation prompt |
-
-### `ward teams audit`
-
-Full access matrix for a system.
-
-```bash
-ward teams audit --system backend
-```
+Checks every configured category by default. Use `--category <CATEGORY>` (repeatable, comma-separated) to narrow the drift gate, and `--allow-high-impact` to count visibility and archive changes as actionable.
 
 ---
 
 ## `ward audit`
 
-Full compliance audit with alert counts, security posture, and dependency graph / SBOM availability.
+Read-only compliance audit. The report has one section per category. By default it covers all four sections for every repository in the configured systems, like `ward plan`. Use `--system` or `--repo` to narrow the scope.
 
 ```bash
+ward audit
 ward audit --system backend
 ward audit --repo my-service
+ward audit --category security,access
 ward audit --system backend --format json
-ward audit --system backend --format table
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--format` | string | `"table"` | Output format: `table` or `json` |
+| `--category <CATEGORY>` | list | all four | Report only these sections: `security`, `rulesets`, `branch-protection`, `access`. Repeat the flag or separate values with commas. Aliases: `ruleset`, `protection`, `teams` |
+| `--format` | `text` or `json` | `text` | Output format (`table` is accepted as an alias of `text`) |
 
-Use the global `--system <ID>` or `--repo <NAME>` scope flags to choose the repositories to audit.
+Progress lines go to stderr. The report goes to stdout, so `--format json` can be piped.
 
-Per-repo data includes repository identity, security feature state, key GitHub configuration files, Copilot review state, alert counts by severity, and a `dependency_graph` section with:
+| Section | Text columns | JSON key |
+|---------|--------------|----------|
+| `security` | Dependabot alerts (`Dep.A`), Dependabot security updates (`Dep.SU`), secret scanning (`SecSc`), AI detection (`AI`), push protection (`Push`), Dependabot config (`DBot`), CodeQL (`CQL`), SBOM, open alert count | `security`, `dependency_graph` |
+| `rulesets` | Ruleset name and enforcement per repository, and Copilot code review (`CopRv`) | `rulesets`, `settings` |
+| `branch-protection` | Branch, required reviews, approvals, stale review dismissal, enforce admins, linear history, force pushes | `branch_protection` |
+| `access` | Team slug and permission per repository | `access.teams` |
+
+Copilot code review is detected by the rule type `copilot_code_review` in the rules that apply to the default branch. If GitHub does not return those rules, Ward falls back to a ruleset named `Copilot Code Review`.
+
+Per-repo data also includes repository identity, key GitHub configuration files, alert counts by severity, and a `dependency_graph` section with:
 
 - status: `available`, `empty`, `unavailable`, or `unknown`
 - reason: human-readable explanation of the SBOM export result
 - package and dependency counts when SBOM export succeeds
 - SBOM generation timestamp when GitHub returns it
+
+Sections that you do not select are omitted from the JSON. Data that GitHub refuses to return (for example a 403) is listed under `unavailable` and does not stop the audit.
 
 ---
 
@@ -384,45 +208,23 @@ ward config edit
 
 ## `ward init`
 
-Create `ward.toml` as a minimal scaffold, or bootstrap it from an existing repository. For real onboarding, use `ward import OWNER/REPO`.
+Create a minimal `ward.toml` scaffold. It does not contact GitHub and never overwrites an existing `ward.toml`. To build a manifest from an existing repository, use [`ward import`](#ward-import).
 
 ```bash
-# Minimal scaffold
 ward init
-
-# Repository bootstrap
-ward init --from acme/reference-service
-ward init --from https://github.com/acme/reference-service
-ward init --from acme/reference-service --target api-service --target worker-service
-ward init --from acme/reference-service --include '.github/**' --exclude '.github/workflows/old-*'
-ward init --from acme/reference-service --strict
-ward init --from acme/reference-service --stdout
-ward init --from acme/reference-service --output configs/ward.toml
-ward init --from acme/reference-service --force
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--from <SOURCE>` | -- | Snapshot `OWNER/REPO` or a GitHub URL |
 | `--non-interactive` | `false` | Accepted for compatibility. It changes nothing, because init never prompts |
-| `--output <PATH>` | `ward.toml` | Output path for `--from` |
-| `--stdout` | `false` | Print the generated config instead of writing it |
-| `--force` | `false` | Replace an existing output file |
-| `--parallelism <N>` | `5` | Max concurrent import API calls |
-| `--target <OWNER/REPO>` | source repository | Existing same-owner target; repeatable |
-| `--include <GLOB>` | built-in config registry | Include matching configuration files; repeatable |
-| `--exclude <GLOB>` | none | Exclude matching configuration files; repeatable |
-| `--strict` | `false` | Fail on permission-denied or unavailable source state |
 
-Manual setup and `--from` are equal entry points to the same Ward lifecycle. Use manual setup for deliberate policy authoring; use `--from` as a read-only shortcut when an existing repository is the best baseline. The generated manifest is a static snapshot. Without `--target`, it initially targets only the source repository.
-
-Without `--from`, init writes the minimal scaffold and does not contact GitHub. It never overwrites an existing `ward.toml`.
+`ward init --from OWNER/REPO` is a hidden deprecated alias of `ward import OWNER/REPO`. It accepts the same options, prints `warning: 'ward init --from' is deprecated and will be removed in 0.6.0; use 'ward import <SOURCE>'` to stderr, and is removed in 0.6.0.
 
 ---
 
 ## `ward import`
 
-Snapshot all reusable repository state available through documented public GitHub APIs. This is the standalone equivalent of `ward init --from`.
+Snapshot all reusable repository state available through documented public GitHub APIs. It replaces the deprecated `ward init --from`.
 
 ```bash
 ward import acme/reference-service
@@ -443,11 +245,12 @@ ward import acme/reference-service --force
 | `--output <PATH>` | path | `ward.toml` | Output path |
 | `--stdout` | bool | `false` | Print to stdout instead of writing ward.toml |
 | `--force` | bool | `false` | Replace an existing output file |
-| `--parallelism <N>` | integer | `5` | Max concurrent API calls |
 | `--target <OWNER/REPO>` | string | source repository | Existing same-owner target; repeatable |
 | `--include <GLOB>` | string | built-in config registry | Include matching configuration files; repeatable |
 | `--exclude <GLOB>` | string | none | Exclude matching configuration files; repeatable |
 | `--strict` | bool | `false` | Fail on permission-denied or unavailable source state |
+
+Import uses the global `--parallelism` flag (default `5`).
 
 How it works:
 
@@ -469,7 +272,10 @@ Diagnose your Ward setup. Checks configuration, authentication, GitHub CLI avail
 ```bash
 ward doctor
 ward doctor --config /path/to/ward.toml
+ward doctor --format json
 ```
+
+`--format json` prints `checks` (name, status `pass`, `warn` or `fail`, detail) and the counts `passed`, `warnings` and `errors`.
 
 Doctor runs **before** loading the full manifest, so it can diagnose a missing or broken config file. Checks performed:
 
@@ -512,21 +318,22 @@ Read-only Ward manifest plan across every repository category.
 ward plan --repo backend-api
 ward plan --system backend
 ward plan --category files --category actions
-ward plan --json
+ward plan --format json
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--category <CATEGORY>` | repeatable | all | Limit the plan to selected categories |
+| `--category <CATEGORY>` | list | all | Limit the plan to selected categories. Repeat the flag or separate values with commas, for example `--category files,security` |
 | `--allow-high-impact` | bool | `false` | Allow visibility and archive changes to become actionable |
-| `--all` | bool | `false` | Compatibility flag; all configured systems are already selected when neither `--repo` nor `--system` is set |
 
 The Ward manifest planner covers these categories in safe apply order:
 
 `repository`, `files`, `security`, `actions`, `environments`, `access`,
 `integrations`, `rulesets`, and `branch-protection`.
 
-Output distinguishes actionable, blocked, warning, and deferred changes. `--json`
+Category names are case-insensitive. These aliases are also accepted: `repo` and `general` for `repository`, `file` for `files`, `ruleset` for `rulesets`, `protection` and `branch_protection` for `branch-protection`, `teams` for `access`, `environment` for `environments`, and `integration` for `integrations`.
+
+Output distinguishes actionable, blocked, warning, and deferred changes. `--format json`
 emits the stable unified report shape.
 
 ---
@@ -541,16 +348,17 @@ categories in safe order, and verifies the result.
 ward plan --system backend
 ward apply --system backend
 ward apply --repo backend-api --category files
-ward apply --system backend --json --yes
+ward apply --system backend --format json --yes
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--category <CATEGORY>` | repeatable | all | Limit apply to selected categories |
+| `--category <CATEGORY>` | list | all | Limit apply to selected categories. Repeat the flag or separate values with commas |
 | `--allow-high-impact` | bool | `false` | Permit planned visibility and archive changes |
-| `--yes` | bool | `false` | Skip interactive confirmation |
+| `--skip-verify` | bool | `false` | Skip the post-apply verification step |
+| `--yes` / `-y` | bool | `false` | Skip interactive confirmation |
 
-`--json` never authorizes a mutation by itself; JSON apply requires `--yes`.
+`--format json` never authorizes a mutation by itself; JSON apply requires `--yes`.
 Managed files are committed to the configured Ward branch and opened as a pull
 request. Workflow state, Pages, rulesets, and branch-protection changes that
 depend on that pull request are reported as deferred until it merges.

@@ -1,37 +1,34 @@
 pub mod apply;
+pub mod args;
 pub mod audit;
-pub mod commit;
 pub mod config_cmd;
+pub mod deprecated;
 pub mod doctor;
 pub mod drift;
 pub mod import;
 pub mod init;
 mod output;
 pub mod plan;
-pub mod protection;
 pub mod repos;
-pub mod rulesets;
-pub mod security;
-pub mod settings;
-pub mod teams;
 
 use clap::Parser;
 
 const AFTER_HELP: &str = "\x1b[1mGetting Started:\x1b[0m
-  init, doctor, config          Set up Ward and configure repos
+  init, import, doctor, config  Create or import a manifest, check your setup
 
 \x1b[1mPlan & Apply:\x1b[0m
   plan, apply                   Preview and apply changes across categories
-  security, rulesets, commit    Manage specific features
-  teams, protection, settings   Access control & repo settings
 
 \x1b[1mMonitor:\x1b[0m
-  drift, audit                  Detect drift, audit compliance
+  drift, audit                  Detect drift, report current state
+  repos                         List repositories
 
-\x1b[1mAdvanced:\x1b[0m
-  import                        Import existing repository state
+\x1b[1mCommon options (after the subcommand):\x1b[0m
+  --category C,..               Limit to categories (plan, apply, drift, audit)
+  --org, --system, --repo       Narrow the target
+  --format text|json            Output format
 
-\x1b[2mNew to Ward? Run: ward init --from OWNER/REPO → ward plan\x1b[0m
+\x1b[2mNew to Ward? Run: ward import OWNER/REPO → ward plan\x1b[0m
 \x1b[2mFull tutorial: https://github.com/OriginalMHV/Ward/blob/main/docs/getting-started.md\x1b[0m";
 
 #[derive(Parser)]
@@ -41,7 +38,7 @@ const AFTER_HELP: &str = "\x1b[1mGetting Started:\x1b[0m
     long_about = "Ward treats GitHub repository management as infrastructure-as-code.\n\
                   Declare your desired state in ward.toml, preview changes with plan,\n\
                   apply them, and verify the result.\n\n\
-                  Start here: ward init → ward doctor → ward plan",
+                  Start here: ward import OWNER/REPO → ward doctor → ward plan",
     version,
     propagate_version = true,
     after_long_help = AFTER_HELP,
@@ -49,22 +46,6 @@ const AFTER_HELP: &str = "\x1b[1mGetting Started:\x1b[0m
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
-
-    /// GitHub organization (overrides ward.toml)
-    #[arg(long, global = true)]
-    pub org: Option<String>,
-
-    /// Filter to a specific system (e.g., backend)
-    #[arg(long, global = true)]
-    pub system: Option<String>,
-
-    /// Target a single repository
-    #[arg(long, global = true)]
-    pub repo: Option<String>,
-
-    /// Output as JSON
-    #[arg(long, global = true, default_value_t = false)]
-    pub json: bool,
 
     /// Max concurrent operations
     #[arg(long, global = true, default_value_t = 5)]
@@ -82,7 +63,7 @@ pub struct Cli {
 #[derive(clap::Subcommand)]
 pub enum Command {
     // --- Getting Started ---
-    /// Create a minimal ward.toml, or build one from an existing repository
+    /// Create a minimal ward.toml (use `ward import` to build one from a repository)
     #[command(display_order = 1)]
     Init(init::InitCommand),
 
@@ -108,29 +89,29 @@ pub enum Command {
     #[command(display_order = 21)]
     Apply(apply::ApplyCommand),
 
-    /// Manage security features (Dependabot, secret scanning, CodeQL)
-    #[command(display_order = 22)]
-    Security(security::SecurityCommand),
+    /// Deprecated. Use `ward plan|apply|audit --category security`
+    #[command(hide = true)]
+    Security(deprecated::LegacyArgs),
 
-    /// Manage repository rulesets (branch protection successor)
-    #[command(display_order = 23)]
-    Rulesets(rulesets::RulesetsCommand),
+    /// Deprecated. Use `ward plan|apply|audit --category rulesets`
+    #[command(hide = true)]
+    Rulesets(deprecated::LegacyArgs),
 
-    /// Commit managed files to repositories (no cloning needed)
-    #[command(display_order = 24)]
-    Commit(commit::CommitCommand),
+    /// Deprecated. Use `ward plan|apply --category files`
+    #[command(hide = true)]
+    Commit(deprecated::LegacyArgs),
 
-    /// Manage team access to repositories
-    #[command(display_order = 25)]
-    Teams(teams::TeamsCommand),
+    /// Deprecated. Use `ward plan|apply --category access`
+    #[command(hide = true)]
+    Teams(deprecated::TeamsArgs),
 
-    /// Manage classic branch protection rules
-    #[command(display_order = 26)]
-    Protection(protection::ProtectionCommand),
+    /// Deprecated. Use `ward plan|apply|audit --category branch-protection`
+    #[command(hide = true)]
+    Protection(deprecated::LegacyArgs),
 
-    /// Manage repository settings and rulesets
-    #[command(display_order = 27)]
-    Settings(settings::SettingsCommand),
+    /// Deprecated. Use `ward plan|apply --category repository`
+    #[command(hide = true)]
+    Settings(deprecated::SettingsArgs),
 
     // --- Monitor ---
     /// Detect configuration drift from desired state
@@ -153,4 +134,64 @@ pub enum Command {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+}
+
+/// The command tree for shell completions, without hidden commands and flags.
+pub fn completion_command() -> clap::Command {
+    without_hidden(&<Cli as clap::CommandFactory>::command())
+}
+
+fn without_hidden(command: &clap::Command) -> clap::Command {
+    let mut visible = clap::Command::new(command.get_name().to_owned())
+        .args(
+            command
+                .get_arguments()
+                .filter(|arg| !arg.is_hide_set())
+                .cloned(),
+        )
+        .subcommands(
+            command
+                .get_subcommands()
+                .filter(|sub| !sub.is_hide_set())
+                .map(without_hidden),
+        );
+    if let Some(about) = command.get_about() {
+        visible = visible.about(about.clone());
+    }
+    if let Some(version) = command.get_version() {
+        visible = visible.version(version.to_owned());
+    }
+    visible
+}
+
+#[cfg(test)]
+mod completion_tests {
+    use super::*;
+
+    #[test]
+    fn completion_command_leaves_out_hidden_commands_and_flags() {
+        let mut command = completion_command();
+        command.build();
+        let names: Vec<_> = command
+            .get_subcommands()
+            .map(|sub| sub.get_name())
+            .collect();
+        assert!(names.contains(&"plan"), "{names:?}");
+        for hidden in [
+            "security",
+            "rulesets",
+            "commit",
+            "teams",
+            "protection",
+            "settings",
+        ] {
+            assert!(!names.contains(&hidden), "{hidden} in {names:?}");
+        }
+        let plan = command.find_subcommand("plan").unwrap();
+        assert!(plan.get_arguments().any(|arg| arg.get_id() == "format"));
+        assert!(
+            plan.get_arguments()
+                .all(|arg| arg.get_long() != Some("json"))
+        );
+    }
 }

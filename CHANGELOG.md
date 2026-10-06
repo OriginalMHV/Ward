@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking changes
+
+The CLI is consolidated around `plan`, `apply`, `drift` and `audit`. Per-category commands become hidden aliases that warn and then run the new command. They are removed in 0.6.0.
+
+| Old invocation | New invocation | Status in 0.5.x |
+|---|---|---|
+| `ward security plan\|apply\|audit` | `ward plan\|apply\|audit --category security` | Alias, warns |
+| `ward rulesets plan\|apply\|audit` | `ward plan\|apply\|audit --category rulesets` | Alias, warns |
+| `ward protection plan\|apply\|audit` | `ward plan\|apply\|audit --category branch-protection` | Alias, warns |
+| `ward commit plan\|apply` | `ward plan\|apply --category files` | Alias, warns |
+| `ward teams plan\|apply` | `ward plan\|apply --category access` | Alias, warns |
+| `ward teams list` | `ward audit --category access` | Alias, warns |
+| `ward teams audit` | `ward drift --category access` | Alias, warns |
+| `ward settings plan\|apply` | `ward plan\|apply --category repository` | Alias, warns |
+| `ward settings audit` | `ward drift --category repository` | Alias, warns |
+| `ward settings ... --ruleset copilot-review` | Declare the ruleset in `ward.toml` (see [Configuration](docs/configuration.md#copilot-code-review-ruleset)) | Removed, exits 2 with the snippet |
+| `ward drift check` | `ward drift` | Alias, warns |
+| `ward init --from SOURCE` | `ward import SOURCE` | Alias, warns |
+| `--json` | `--format json` | Hidden flag, warns |
+| `--format table` | `--format text` | Accepted as an alias |
+| `ward --repo X plan` (flag before the subcommand) | `ward plan --repo X` | Removed, usage error |
+| `ward import --parallelism N`, `ward init --parallelism N` | `ward --parallelism N import ...` or `ward import ... --parallelism N` (the global flag) | Same flag, now global only |
+| `ward security apply --skip-verify` | `ward apply --category security --skip-verify` | New flag on `apply` |
+
+Changed or lost capabilities:
+
+- `ward settings apply` now has a wider scope. It runs the whole repository category, so it also covers metadata, custom properties, immutable releases, labels, and prune. The old command managed only `[categories.repository.settings]` and topics.
+- The Copilot code review ruleset is declarative. `ward settings --ruleset copilot-review` is gone. Add the `Copilot Code Review` entry to `[categories.rulesets]` instead. The rulesets category must be managed and sensitive. The entry sets `review_draft_pull_requests = false` because GitHub echoes it back.
+- `ward teams apply` includes collaborators only when the manifest lists them. A missing `teams` or `collaborators` key now means the list is not managed. Before, a missing key was an empty list, so `prune = true` removed every collaborator (or every team) that the manifest did not name. Only an explicit list, including `collaborators = []`, with `prune = true` removes entries. `ward import` writes both lists explicitly. It leaves out a list that it could not read completely (permission denied or unavailable), so the key means not managed.
+- The default scope is wider. `ward audit` and the former per-category commands now default to all configured systems, like `ward plan`. Before, `audit`, `teams`, `settings`, `rulesets` and `protection` required `--system` or `--repo`.
+- Coverage counts only real read failures as `degraded` and as warnings: permission denied or unavailable. Settings that GitHub does not expose and secret values it never returns are counted in a new `unsupported` field. The text summary reads, for example, `Coverage: 5/9 read, 4 not exposed by GitHub`. Before, a healthy run reported these known limits as degraded coverage and warnings.
+- The repository category records its successful reads in coverage. Before, it listed only failures, so it reported `0/5 collected` after a successful read.
+- The audit-log records change. Apply runs through the aliases write the unified `apply.<category>` actions (for example `apply.access` and `apply.repository`) instead of per-command actions such as `update_repository_settings` and `create_copilot_review_ruleset`.
+- The text output changes. The aliases print the standard plan and apply report instead of their own tables. `ward audit` prints one section per category. Its security table gains the `Dep.SU` and `AI` columns, and `CopRv` moves to the rulesets section. The rulesets, branch protection and access audit views are sections of `ward audit`.
+- Flags must follow the subcommand. `--org`, `--system`, `--repo` and `--json` are no longer global. Only `--config`, `--parallelism` and `-v` are global.
+- `ward apply` without `--yes` fails with exit code 2 when stdin is not a terminal.
+- `ward doctor` no longer prints any part of the GitHub token. It reports only the token source, in text and in JSON.
+- `ward teams audit` now maps to `ward drift --category access`. Like drift, it reports differences only for categories with `disposition = "managed"`. The old command listed mismatches for any disposition.
+- `ward drift` exits with code 1 when `ward teams audit` or `ward settings audit` finds drift. The old `audit` commands exited with code 0.
+- `--category` is validated at parse time and accepts comma-separated values. The old names stay as aliases (`repo`, `general`, `file`, `ruleset`, `protection`, `teams`, `environment`, `integration`). `branch_protection` with an underscore also works.
+
+### Added (CLI)
+
+- `ward completions` leaves out the deprecated commands and the hidden `--json` flag
+- `ward audit --category security,rulesets,branch-protection,access`, with a ruleset table, branch-protection fields and team access. JSON keys `rulesets`, `branch_protection` and `access.teams` are additive. Copilot code review is detected by rule type.
+- `ward apply -y` and `ward apply --skip-verify`
+- `--format text|json` on `plan`, `apply`, `drift`, `audit`, `repos list` and `doctor`
+
 ### Added
 
 - One category-based Ward manifest with source provenance, management policies, coverage evidence, stable references, and external-value placeholders

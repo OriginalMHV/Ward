@@ -195,12 +195,12 @@ fn system_categories_replace_only_the_configured_global_categories() {
     let unrelated = manifest.categories_for_repo("frontend");
 
     assert_eq!(
-        backend.access.unwrap().teams[0].slug,
+        backend.access.unwrap().desired_teams()[0].slug,
         "backend-admins".to_owned()
     );
     assert!(backend.security.unwrap().secret_scanning.unwrap());
     assert_eq!(
-        unrelated.access.unwrap().teams[0].slug,
+        unrelated.access.unwrap().desired_teams()[0].slug,
         "developers".to_owned()
     );
 }

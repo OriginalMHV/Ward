@@ -47,11 +47,7 @@ ward import https://github.com/acme/reference-service
 ward import git@github.com:acme/reference-service.git
 ```
 
-`ward init --from` uses the same bootstrap implementation:
-
-```bash
-ward init --from acme/reference-service
-```
+`ward init --from` is a deprecated alias of `ward import` and is removed in 0.6.0.
 
 The default file registry selects repository configuration such as `.github/**`, CODEOWNERS, devcontainers, Renovate, lint, pre-commit, and release files. Customize it with repeatable globs:
 
@@ -189,7 +185,7 @@ The plan reports, per repository and category:
 Machine-readable output:
 
 ```bash
-ward plan --json
+ward plan --format json
 ```
 
 Focused plan:
@@ -210,7 +206,7 @@ ward plan --allow-high-impact
 ward apply
 ```
 
-Ward prompts before mutation. CI or other reviewed non-interactive execution can use:
+Ward shows the plan and prompts before mutation. CI or other reviewed non-interactive execution must pass `--yes` (or `-y`). Without a terminal and without `--yes`, `ward apply` exits with code 2 and does not change anything:
 
 ```bash
 ward apply --yes
@@ -286,8 +282,8 @@ Inherited organization or enterprise resources remain stable references. Unsuppo
 
 ```bash
 ward plan
-ward drift check --system payments
-ward audit --system payments
+ward drift --system payments
+ward audit --system payments --category security,access
 ward doctor
 ```
 

@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use super::Client;
+use super::actions::{ReadOutcome, classify_read};
+use super::encoding::encode_unreserved;
 use super::pagination;
 use super::response;
 
@@ -81,7 +83,38 @@ struct InstallationsResponse {
     installations: Vec<InstalledApp>,
 }
 
+#[derive(Debug, Deserialize)]
+struct BranchRule {
+    #[serde(rename = "type")]
+    rule_type: String,
+}
+
 impl Client {
+    /// The rule types that apply to `branch`, from every ruleset that targets it.
+    /// One request covers repository and inherited organization rulesets.
+    pub async fn list_branch_rule_types(
+        &self,
+        repo: &str,
+        branch: &str,
+    ) -> Result<ReadOutcome<Vec<String>>> {
+        let branch = encode_unreserved(branch);
+        let path = format!(
+            "/repos/{}/{repo}/rules/branches/{branch}?per_page=100",
+            self.org
+        );
+        let outcome = classify_read::<Vec<BranchRule>>(self.get(&path).await?, "GET", &path, true)
+            .await
+            .context("Failed to parse branch rules response")?;
+        Ok(match outcome {
+            ReadOutcome::Available(rules) => {
+                ReadOutcome::Available(rules.into_iter().map(|rule| rule.rule_type).collect())
+            }
+            ReadOutcome::NotApplicable(reason) => ReadOutcome::NotApplicable(reason),
+            ReadOutcome::PermissionDenied(reason) => ReadOutcome::PermissionDenied(reason),
+            ReadOutcome::Unavailable(reason) => ReadOutcome::Unavailable(reason),
+        })
+    }
+
     pub async fn list_rulesets(&self, repo: &str) -> Result<Vec<Ruleset>> {
         self.list_rulesets_scoped(repo, true).await
     }
@@ -230,38 +263,5 @@ impl Client {
             },
         )
         .await
-    }
-
-    pub async fn create_copilot_review_ruleset(&self, repo: &str) -> Result<()> {
-        let existing = self.list_rulesets(repo).await?;
-        if existing
-            .iter()
-            .any(|ruleset| ruleset.name == "Copilot Code Review")
-        {
-            tracing::info!("Copilot review ruleset already exists for {repo}");
-            return Ok(());
-        }
-
-        let body = serde_json::json!({
-            "name": "Copilot Code Review",
-            "target": "branch",
-            "enforcement": "active",
-            "conditions": {
-                "ref_name": {
-                    "include": ["~DEFAULT_BRANCH"],
-                    "exclude": []
-                }
-            },
-            "rules": [{
-                "type": "copilot_code_review",
-                "parameters": {
-                    "review_on_push": true
-                }
-            }],
-            "bypass_actors": []
-        });
-
-        let path = format!("/repos/{}/{repo}/rulesets", self.org);
-        response::expect_empty(self.post_json(&path, &body).await?, "POST", &path).await
     }
 }

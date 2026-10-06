@@ -2,66 +2,108 @@ use crate::outcome::Outcome;
 use anyhow::Result;
 use clap::Args;
 
+use crate::cli::args::{CategoryArgs, OutputArgs, TargetArgs};
 use crate::config::Manifest;
 use crate::github::Client;
 use crate::reconcile::unified::{self, UnifiedOptions, UnifiedReport};
 
+/// Detect configuration drift from the desired manifest state.
 #[derive(Args)]
+#[command(args_conflicts_with_subcommands = true)]
 pub struct DriftCommand {
     #[command(subcommand)]
-    action: DriftAction,
+    action: Option<DriftAction>,
+
+    #[command(flatten)]
+    args: DriftArgs,
+}
+
+#[derive(Args, Debug, Default)]
+struct DriftArgs {
+    #[command(flatten)]
+    category: CategoryArgs,
+
+    /// Include high-impact repository changes in the actionable drift count
+    #[arg(long)]
+    allow_high_impact: bool,
+
+    #[command(flatten)]
+    target: TargetArgs,
+
+    #[command(flatten)]
+    output: OutputArgs,
 }
 
 #[derive(clap::Subcommand)]
 enum DriftAction {
-    /// Check for configuration drift across repos
-    Check {
-        /// Limit to one or more categories (repeatable). Defaults to all categories.
-        #[arg(long = "category", value_name = "CATEGORY")]
-        categories: Vec<String>,
-
-        /// Include high-impact repository changes in the actionable drift count
-        #[arg(long)]
-        allow_high_impact: bool,
-    },
+    /// Deprecated alias of `ward drift`
+    #[command(hide = true)]
+    Check(DriftArgs),
 }
 
 impl DriftCommand {
-    pub async fn run(
-        &self,
-        client: &Client,
-        manifest: &Manifest,
-        system: Option<&str>,
-        repo: Option<&str>,
-        json: bool,
-    ) -> Result<()> {
+    fn active_args(&self) -> &DriftArgs {
         match &self.action {
-            DriftAction::Check {
-                categories,
-                allow_high_impact,
-            } => {
-                let options = UnifiedOptions {
-                    categories: unified::parse_categories(categories)?,
-                    allow_high_impact: *allow_high_impact,
-                    verify: true,
-                };
-                let report = crate::cli::plan::run_canonical_plan(
-                    client,
-                    manifest,
-                    options,
-                    crate::cli::plan::CategoryRun {
-                        system,
-                        repo,
-                        json,
-                        command: "drift check",
-                        title: "Ward Drift Check",
-                    },
-                )
-                .await?;
-                fail_when_drifted(&report)
-            }
+            Some(DriftAction::Check(args)) => args,
+            None => &self.args,
         }
     }
+
+    pub fn target(&self) -> &TargetArgs {
+        &self.active_args().target
+    }
+
+    /// Print the deprecation warning when the run uses the `check` alias.
+    pub fn announce(&self) {
+        if self.action.is_some() {
+            eprintln!("warning: 'ward drift check' is deprecated; use 'ward drift'");
+        }
+    }
+
+    pub async fn run(&self, client: &Client, manifest: &Manifest) -> Result<()> {
+        let args = self.active_args();
+        run_drift(
+            client,
+            manifest,
+            args.target.system.as_deref(),
+            args.target.repo.as_deref(),
+            args.output.is_json(),
+            unified::select_categories(&args.category.categories),
+            args.allow_high_impact,
+        )
+        .await
+    }
+}
+
+/// Plan the selected categories and fail with a drift outcome when anything differs.
+pub(crate) async fn run_drift(
+    client: &Client,
+    manifest: &Manifest,
+    system: Option<&str>,
+    repo: Option<&str>,
+    json: bool,
+    categories: Vec<unified::Category>,
+    allow_high_impact: bool,
+) -> Result<()> {
+    let options = UnifiedOptions {
+        categories,
+        allow_high_impact,
+        verify: true,
+    };
+    let report = crate::cli::plan::run_canonical_plan(
+        client,
+        manifest,
+        options,
+        crate::cli::plan::CategoryRun {
+            system,
+            repo,
+            json,
+            command: "drift",
+            title: "Ward Drift Check",
+        },
+    )
+    .await?;
+    fail_when_drifted(&report)
 }
 
 fn fail_when_drifted(report: &UnifiedReport) -> Result<()> {
@@ -101,41 +143,66 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn drift_check_defaults_to_all_categories() {
-        let cli = crate::cli::Cli::parse_from(["ward", "drift", "check", "--repo", "target"]);
+    fn parse(args: &[&str]) -> DriftCommand {
+        let cli = crate::cli::Cli::parse_from(args);
         let crate::cli::Command::Drift(command) = cli.command else {
             panic!("expected drift command");
         };
-
-        assert!(matches!(
-            command.action,
-            DriftAction::Check {
-                categories,
-                allow_high_impact: false,
-            } if categories.is_empty()
-        ));
+        command
     }
 
     #[test]
-    fn drift_check_accepts_category_filtering() {
-        let cli = crate::cli::Cli::parse_from([
+    fn drift_defaults_to_all_categories() {
+        let command = parse(&["ward", "drift", "--repo", "target"]);
+
+        assert!(command.action.is_none());
+        assert!(command.args.category.categories.is_empty());
+        assert!(!command.args.allow_high_impact);
+    }
+
+    #[test]
+    fn drift_accepts_category_filtering() {
+        let command = parse(&["ward", "drift", "--category", "files,access", "--repo", "t"]);
+
+        assert!(command.action.is_none());
+        assert_eq!(
+            command.args.category.categories,
+            [unified::Category::Files, unified::Category::Access]
+        );
+    }
+
+    #[test]
+    fn deprecated_check_alias_still_parses_its_arguments() {
+        let command = parse(&[
             "ward",
             "drift",
             "check",
             "--category",
             "files",
-            "--repo",
-            "target",
+            "--allow-high-impact",
         ]);
-        let crate::cli::Command::Drift(command) = cli.command else {
-            panic!("expected drift command");
-        };
 
-        assert!(matches!(
-            command.action,
-            DriftAction::Check { categories, .. } if categories == ["files"]
-        ));
+        let Some(DriftAction::Check(args)) = command.action else {
+            panic!("expected the check alias");
+        };
+        assert_eq!(args.category.categories, [unified::Category::Files]);
+        assert!(args.allow_high_impact);
+    }
+
+    #[test]
+    fn check_alias_is_hidden_from_help() {
+        use clap::CommandFactory;
+        let mut cli = crate::cli::Cli::command();
+        let drift = cli.find_subcommand_mut("drift").unwrap();
+        let help = drift.render_help().to_string();
+        assert!(!help.contains("check"), "{help}");
+    }
+
+    #[test]
+    fn drift_flags_and_the_check_subcommand_cannot_be_mixed() {
+        let result =
+            crate::cli::Cli::try_parse_from(["ward", "drift", "--category", "files", "check"]);
+        assert!(result.is_err());
     }
 
     #[test]
