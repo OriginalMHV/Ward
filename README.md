@@ -170,10 +170,10 @@ JSON goes to stdout and progress goes to stderr. See [CI integration](docs/ci-in
 ## Ward compared with other tools
 
 <p align="center">
-  <img src="docs/assets/comparison.svg" alt="Comparison of Ward, the Terraform GitHub provider and safe-settings. Rows: Preview before change; Drift check with CI exit codes; No state file to store or lock; Manages repo config files (.github/) through a pull request; Enforces automatically on GitHub events; Import an existing repository; Resource breadth (rulesets, environments, access, Actions, webhooks); Organization-level settings. Ward supports preview, drift checks, no state file, config files through a pull request, import and resource breadth. It is partial on organization-level settings and has no automatic enforcement on GitHub events." width="100%">
+  <img src="docs/assets/comparison.svg" alt="Comparison of Ward, the Terraform GitHub provider and safe-settings. Rows: Preview before change; Drift check with CI exit codes; No state file to store or lock; Config files through a pull request; Enforces automatically on GitHub events; Import an existing repository; Resource breadth; Organization-level settings. Ward supports preview, drift checks, no state file, config files through a pull request, import and resource breadth. It is partial on organization-level settings and has no automatic enforcement on GitHub events." width="100%">
 </p>
 
-Compared on 2026-10-06 using each project's public README and documentation: Ward 0.5.0 docs, [terraform-provider-github](https://github.com/integrations/terraform-provider-github) (README, registry and resource docs), [safe-settings](https://github.com/github/safe-settings) README, Terraform CLI and state docs. [Probot Settings](https://github.com/repository-settings/app) is left out because its README does not document these features. Partial means the project does part of the row or documents only part of it.
+Compared on 2026-10-06 using each project's public README and documentation: Ward 0.5.0 docs, [terraform-provider-github](https://github.com/integrations/terraform-provider-github) (README, registry and resource docs), [safe-settings](https://github.com/github/safe-settings) README, Terraform CLI and state docs. [Probot Settings](https://github.com/repository-settings/app) is left out because its README does not document these features. Partial means the project does part of the row or documents only part of it. "Config files through a pull request" means repository config files under `.github/`. "Resource breadth" covers rulesets, environments, access, Actions and webhooks.
 
 <details>
 <summary>Comparison as text</summary>
@@ -183,13 +183,11 @@ Compared on 2026-10-06 using each project's public README and documentation: War
 | Preview before change | Yes | Yes | Yes |
 | Drift check with CI exit codes | Yes | Yes | Partial |
 | No state file to store or lock | Yes | No | Yes |
-| Manages repo config files (.github/) through a pull request | Yes | Partial | No |
+| Config files through a pull request | Yes | Partial | No |
 | Enforces automatically on GitHub events | No | No | Yes |
 | Import an existing repository | Yes | Partial | Yes |
-| Resource breadth (rulesets, environments, access, Actions, webhooks) | Yes | Yes | Partial |
+| Resource breadth | Yes | Yes | Partial |
 | Organization-level settings | Partial | Yes | Partial |
-
-Compared on 2026-10-06 using each project's public README and documentation: Ward 0.5.0 docs, terraform-provider-github (README, registry and resource docs), safe-settings README, Terraform CLI and state docs. Probot Settings is left out because its README does not document these features. Partial means the project does part of the row or documents only part of it.
 
 How we compared: Ward cells come from [commands](docs/commands.md), [architecture](docs/architecture.md), [GitHub coverage](docs/github-coverage.md) and [CI integration](docs/ci-integration.md). Competitor cells come from the [Terraform provider](https://github.com/integrations/terraform-provider-github), the [Terraform state docs](https://developer.hashicorp.com/terraform/language/state) and the [safe-settings README](https://github.com/github/safe-settings).
 
