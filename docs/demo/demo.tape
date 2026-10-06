@@ -7,13 +7,13 @@ Set Theme { "name": "Ward", "background": "#0B1F44", "foreground": "#E6EDF8", "c
 Set WindowBar Colorful
 Set WindowBarSize 40
 Set BorderRadius 16
-Set Margin 40
+Set Margin 24
 Set MarginFill "#2563EB"
 Set Padding 28
 Set FontFamily "JetBrains Mono"
-Set FontSize 22
-Set Width 1200
-Set Height 560
+Set FontSize 20
+Set Width 1300
+Set Height 640
 Set LineHeight 1.35
 Set TypingSpeed 45ms
 Set Framerate 24
