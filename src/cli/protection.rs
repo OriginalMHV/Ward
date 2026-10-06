@@ -2,9 +2,11 @@ use anyhow::Result;
 use clap::Args;
 use console::style;
 
+use super::output::{ok_icon, print_table};
 use crate::config::Manifest;
+use crate::engine::audit_log::AuditLog;
 use crate::github::Client;
-use crate::reconcile::unified::{Category, UnifiedOptions};
+use crate::reconcile::unified::{self, Category, UnifiedOptions};
 
 #[derive(Args)]
 pub struct ProtectionCommand {
@@ -35,6 +37,21 @@ impl ProtectionCommand {
         manifest: &Manifest,
         system: Option<&str>,
         repo: Option<&str>,
+        json: bool,
+    ) -> Result<()> {
+        self.run_with_audit(client, manifest, system, repo, json, AuditLog::new)
+            .await
+    }
+
+    /// As [`Self::run`], with the audit log opened by `open_audit` when an apply starts.
+    pub async fn run_with_audit(
+        &self,
+        client: &Client,
+        manifest: &Manifest,
+        system: Option<&str>,
+        repo: Option<&str>,
+        json: bool,
+        open_audit: impl FnOnce() -> Result<AuditLog>,
     ) -> Result<()> {
         let options = UnifiedOptions {
             categories: vec![Category::BranchProtection],
@@ -49,7 +66,7 @@ impl ProtectionCommand {
                 crate::cli::plan::CategoryRun {
                     system,
                     repo,
-                    json: false,
+                    json,
                     command: "protection plan",
                     title: "Ward Protection Plan",
                 },
@@ -61,10 +78,11 @@ impl ProtectionCommand {
                 manifest,
                 *yes,
                 options,
+                open_audit,
                 crate::cli::plan::CategoryRun {
                     system,
                     repo,
-                    json: false,
+                    json,
                     command: "protection apply",
                     title: "Ward Protection Apply",
                 },
@@ -82,24 +100,10 @@ async fn resolve_repos_with_branches(
     system: Option<&str>,
     repo: Option<&str>,
 ) -> Result<Vec<(String, String)>> {
-    if let Some(repo_name) = repo {
-        let repository = client.get_repo(repo_name).await?;
-        return Ok(vec![(repository.name, repository.default_branch)]);
+    if system.is_none() && repo.is_none() {
+        anyhow::bail!("Either --system or --repo is required for protection commands");
     }
-
-    let system = system.ok_or_else(|| {
-        anyhow::anyhow!("Either --system or --repo is required for protection commands")
-    })?;
-    let excludes = manifest.exclude_patterns_for_system(system);
-    let explicit = manifest.explicit_repos_for_system(system);
-    let repos = client
-        .list_repos_for_system(
-            system,
-            manifest.matches_prefix_for_system(system),
-            &excludes,
-            &explicit,
-        )
-        .await?;
+    let repos = unified::resolve_target_repos(client, manifest, system, repo).await?;
     Ok(repos
         .into_iter()
         .map(|repo| (repo.name, repo.default_branch))
@@ -122,8 +126,6 @@ async fn audit(
     );
 
     use tabled::builder::Builder;
-    use tabled::settings::object::{Columns, Rows};
-    use tabled::settings::{Alignment, Modify, Style};
 
     let mut builder = Builder::default();
     builder.push_record([
@@ -140,11 +142,15 @@ async fn audit(
     let mut total_ok = 0;
     let mut total_issues = 0;
 
-    for (repo_name, default_branch) in &repos {
-        let state = client
+    let states = crate::reconcile::map_buffered(&repos, |(repo_name, default_branch)| async move {
+        client
             .get_branch_protection(repo_name, default_branch)
-            .await?
-            .unwrap_or_default();
+            .await
+    })
+    .await;
+
+    for ((repo_name, default_branch), state) in repos.iter().zip(states) {
+        let state = state?.unwrap_or_default();
 
         let protected = state.required_pull_request_reviews;
         if protected {
@@ -153,41 +159,20 @@ async fn audit(
             total_issues += 1;
         }
 
-        let icon = |value: bool| {
-            if value {
-                format!("{}", style("[ok]").green())
-            } else {
-                format!("{}", style("[!!]").red())
-            }
-        };
-
         builder.push_record([
             repo_name.clone(),
             default_branch.clone(),
-            icon(state.required_pull_request_reviews),
+            ok_icon(state.required_pull_request_reviews),
             state.required_approving_review_count.to_string(),
-            icon(state.dismiss_stale_reviews),
-            icon(state.enforce_admins),
-            icon(state.required_linear_history),
-            icon(state.allow_force_pushes),
+            ok_icon(state.dismiss_stale_reviews),
+            ok_icon(state.enforce_admins),
+            ok_icon(state.required_linear_history),
+            ok_icon(state.allow_force_pushes),
         ]);
     }
 
-    let table = builder
-        .build()
-        .with(Style::blank())
-        .with(
-            Modify::new(Rows::first()).with(tabled::settings::Format::content(|value| {
-                format!("{}", style(value).bold().underlined())
-            })),
-        )
-        .with(Modify::new(Columns::new(..)).with(Alignment::left()))
-        .to_string();
-
     println!();
-    for line in table.lines() {
-        println!("  {line}");
-    }
+    print_table(builder);
 
     println!();
     println!(

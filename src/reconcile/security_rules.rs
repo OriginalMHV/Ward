@@ -227,10 +227,21 @@ pub async fn collect_security_category(
     repo: &str,
     category: Option<&SecurityCategoryV2>,
 ) -> Result<SecurityCollection> {
+    let baseline = client.get_repository_security_baseline(repo).await?;
+    collect_security_category_with_baseline(client, repo, baseline, category).await
+}
+
+/// Collect security state from an already fetched `GET /repos/{repo}` response.
+pub async fn collect_security_category_with_baseline(
+    client: &Client,
+    repo: &str,
+    baseline: RepositorySecurityBaseline,
+    category: Option<&SecurityCategoryV2>,
+) -> Result<SecurityCollection> {
     let RepositorySecurityBaseline {
         id: repository_id,
         security_and_analysis,
-    } = client.get_repository_security_baseline(repo).await?;
+    } = baseline;
     let mut issues = Vec::new();
     let mut coverage = vec![collected_entry(
         ManifestCategoryName::Security,
@@ -428,7 +439,7 @@ pub async fn collect_security_category(
             coverage.push(unavailable_entry(
                 ManifestCategoryName::Security,
                 "GET /orgs/{org}/code-security/configurations",
-                error.to_string(),
+                format!("{error:#}"),
             ));
             Vec::new()
         }
@@ -455,7 +466,7 @@ pub async fn collect_security_category(
                 coverage.push(unavailable_entry(
                     ManifestCategoryName::Security,
                     "GET /orgs/{org}/teams",
-                    error.to_string(),
+                    format!("{error:#}"),
                 ));
                 issues.push(warning_issue(
                     Some(repo.to_owned()),
@@ -474,7 +485,7 @@ pub async fn collect_security_category(
                 coverage.push(unavailable_entry(
                     ManifestCategoryName::Security,
                     "GET /orgs/{org}/custom-repository-roles",
-                    error.to_string(),
+                    format!("{error:#}"),
                 ));
                 issues.push(warning_issue(
                     Some(repo.to_owned()),
@@ -543,23 +554,29 @@ pub async fn collect_security_category(
         repository_id,
         category: SecurityCategoryV2 {
             policy,
-            advanced_security: bool_field(&analysis.advanced_security),
-            code_security: bool_field(&analysis.code_security),
+            advanced_security: bool_field(analysis.advanced_security.as_ref()),
+            code_security: bool_field(analysis.code_security.as_ref()),
             dependabot_alerts,
             dependabot_security_updates: dependabot_security_updates_endpoint
-                .or_else(|| bool_field(&analysis.dependabot_security_updates)),
-            secret_scanning: bool_field(&analysis.secret_scanning),
-            secret_scanning_push_protection: bool_field(&analysis.secret_scanning_push_protection),
-            secret_scanning_validity_checks: bool_field(&analysis.secret_scanning_validity_checks),
-            secret_scanning_non_provider_patterns: bool_field(
-                &analysis.secret_scanning_non_provider_patterns,
+                .or_else(|| bool_field(analysis.dependabot_security_updates.as_ref())),
+            secret_scanning: bool_field(analysis.secret_scanning.as_ref()),
+            secret_scanning_push_protection: bool_field(
+                analysis.secret_scanning_push_protection.as_ref(),
             ),
-            secret_scanning_ai_detection: bool_field(&analysis.secret_scanning_ai_detection),
+            secret_scanning_validity_checks: bool_field(
+                analysis.secret_scanning_validity_checks.as_ref(),
+            ),
+            secret_scanning_non_provider_patterns: bool_field(
+                analysis.secret_scanning_non_provider_patterns.as_ref(),
+            ),
+            secret_scanning_ai_detection: bool_field(
+                analysis.secret_scanning_ai_detection.as_ref(),
+            ),
             secret_scanning_delegated_alert_dismissal: bool_field(
-                &analysis.secret_scanning_delegated_alert_dismissal,
+                analysis.secret_scanning_delegated_alert_dismissal.as_ref(),
             ),
             secret_scanning_delegated_bypass: bool_field(
-                &analysis.secret_scanning_delegated_bypass,
+                analysis.secret_scanning_delegated_bypass.as_ref(),
             ),
             secret_scanning_delegated_alert_dismissal_options: delegated_alert_dismissal_options,
             secret_scanning_delegated_bypass_options: delegated_bypass_options,
@@ -859,7 +876,7 @@ pub fn plan_security_category(
                 .map(codeql_state_to_manifest)
                 != Some(codeql.clone())
             {
-                codeql_default_setup = Some(desired_codeql.clone());
+                codeql_default_setup = Some(desired_codeql);
             }
         }
     }
@@ -963,7 +980,9 @@ pub async fn verify_security_category(
     repo: &str,
     desired: &SecurityCategoryV2,
 ) -> Result<SecurityVerifyResult> {
-    for attempt in 0..10 {
+    const MAX_ATTEMPTS: u32 = 10;
+    let mut attempt = 1;
+    loop {
         let actual = collect_security_category(client, repo, Some(desired)).await?;
         let plan = plan_security_category(desired, &actual)?;
         let waiting_on_codeql = plan.codeql_default_setup.is_some()
@@ -984,8 +1003,9 @@ pub async fn verify_security_category(
                 plan,
             });
         }
-        if waiting_on_codeql && attempt < 9 {
+        if waiting_on_codeql && attempt < MAX_ATTEMPTS {
             tokio::time::sleep(Duration::from_millis(100)).await;
+            attempt += 1;
             continue;
         }
         return Ok(SecurityVerifyResult {
@@ -993,8 +1013,6 @@ pub async fn verify_security_category(
             plan,
         });
     }
-
-    unreachable!()
 }
 
 pub async fn collect_rulesets_category(
@@ -1008,6 +1026,20 @@ pub async fn collect_rulesets_category(
         "GET /repos/{owner}/{repo}/rulesets",
     )];
 
+    let needs = |matches: fn(&ActorReference) -> bool| {
+        category.is_none_or(|category| {
+            category
+                .repository_rulesets
+                .iter()
+                .flat_map(|ruleset| &ruleset.bypass_actors)
+                .any(|bypass| matches(&bypass.actor))
+        })
+    };
+    let needs_teams = needs(|actor| matches!(actor, ActorReference::Team { .. }));
+    let needs_roles = needs(|actor| matches!(actor, ActorReference::Role { .. }));
+    let needs_apps = needs(|actor| matches!(actor, ActorReference::App { .. }));
+    let needs_users = needs(|actor| matches!(actor, ActorReference::User { .. }));
+
     let all_rulesets = client.list_rulesets(repo).await?;
     let org_teams = match client.list_org_teams().await {
         Ok(value) => {
@@ -1018,10 +1050,11 @@ pub async fn collect_rulesets_category(
             value
         }
         Err(error) => {
-            coverage.push(unavailable_entry(
+            coverage.push(lookup_failure_entry(
                 ManifestCategoryName::Rulesets,
                 "GET /orgs/{org}/teams",
-                error.to_string(),
+                format!("{error:#}"),
+                needs_teams,
             ));
             Vec::new()
         }
@@ -1035,10 +1068,11 @@ pub async fn collect_rulesets_category(
             value
         }
         Err(error) => {
-            coverage.push(unavailable_entry(
+            coverage.push(lookup_failure_entry(
                 ManifestCategoryName::Rulesets,
                 "GET /orgs/{org}/custom-repository-roles",
-                error.to_string(),
+                format!("{error:#}"),
+                needs_roles,
             ));
             Vec::new()
         }
@@ -1052,10 +1086,11 @@ pub async fn collect_rulesets_category(
             value
         }
         Err(error) => {
-            coverage.push(unavailable_entry(
+            coverage.push(lookup_failure_entry(
                 ManifestCategoryName::Rulesets,
                 "GET /orgs/{org}/installations",
-                error.to_string(),
+                format!("{error:#}"),
+                needs_apps,
             ));
             Vec::new()
         }
@@ -1083,10 +1118,11 @@ pub async fn collect_rulesets_category(
                 .collect()
         }
         Err(error) => {
-            coverage.push(unavailable_entry(
+            coverage.push(lookup_failure_entry(
                 ManifestCategoryName::Rulesets,
                 "GET /repos/{owner}/{repo}/collaborators?affiliation=all",
-                error.to_string(),
+                format!("{error:#}"),
+                needs_users,
             ));
             HashMap::new()
         }
@@ -1114,7 +1150,7 @@ pub async fn collect_rulesets_category(
                 coverage.push(unavailable_entry(
                     ManifestCategoryName::Rulesets,
                     "GET /repos/{owner}/{repo}/rulesets/{ruleset_id}",
-                    error.to_string(),
+                    format!("{error:#}"),
                 ));
                 issues.push(blocker_issue(
                     Some(ruleset.name.clone()),
@@ -1234,7 +1270,7 @@ pub fn plan_rulesets_category(
     }
 
     for desired_ruleset in &desired.repository_rulesets {
-        validate_ruleset_bypass_actors(desired_ruleset, &mut issues)?;
+        validate_ruleset_bypass_actors(desired_ruleset, &mut issues);
         match actual_by_name.get(desired_ruleset.name.as_str()) {
             None => actions.push(RulesetPlanAction::Create {
                 ruleset: desired_ruleset.clone(),
@@ -1401,7 +1437,17 @@ pub async fn collect_branch_protection_category(
     category: Option<&BranchProtectionCategoryV2>,
 ) -> Result<BranchProtectionCollection> {
     let repository = client.get_repo(repo).await?;
-    let default_branch_name = repository.default_branch;
+    collect_branch_protection_category_for_branch(client, repo, repository.default_branch, category)
+        .await
+}
+
+/// Collect branch protection when the default branch is already known.
+pub async fn collect_branch_protection_category_for_branch(
+    client: &Client,
+    repo: &str,
+    default_branch_name: String,
+    category: Option<&BranchProtectionCategoryV2>,
+) -> Result<BranchProtectionCollection> {
     let branches = client.list_protected_branches(repo).await?;
 
     let issues = Vec::new();
@@ -1427,11 +1473,21 @@ pub async fn collect_branch_protection_category(
                 .map(|app| (app.app_id as i64, app.app_slug))
                 .collect()
         }
+        // User-owned accounts have no organization installations endpoint.
+        Err(error) if crate::github::is_not_found(&error) => {
+            coverage.push(not_applicable_entry(
+                ManifestCategoryName::BranchProtection,
+                "GET /orgs/{org}/installations",
+                "the owner is not an organization, so there are no organization app installations"
+                    .to_owned(),
+            ));
+            HashMap::new()
+        }
         Err(error) => {
             coverage.push(unavailable_entry(
                 ManifestCategoryName::BranchProtection,
                 "GET /orgs/{org}/installations",
-                error.to_string(),
+                format!("{error:#}"),
             ));
             HashMap::new()
         }
@@ -2087,10 +2143,7 @@ fn normalize_ruleset_references(
     normalized
 }
 
-fn validate_ruleset_bypass_actors(
-    ruleset: &RepositoryRulesetV2,
-    issues: &mut Vec<ReconcileIssue>,
-) -> Result<()> {
+fn validate_ruleset_bypass_actors(ruleset: &RepositoryRulesetV2, issues: &mut Vec<ReconcileIssue>) {
     for actor in &ruleset.bypass_actors {
         match &actor.actor {
             ActorReference::Unresolved {
@@ -2117,7 +2170,6 @@ fn validate_ruleset_bypass_actors(
             _ => {}
         }
     }
-    Ok(())
 }
 
 fn ruleset_action_sort_key(action: &RulesetPlanAction) -> (u8, String) {
@@ -2423,11 +2475,11 @@ fn desired_branch_protection_from_parts(
     app_ids_by_slug: &HashMap<String, i64>,
     issues: &mut Vec<ReconcileIssue>,
 ) -> Result<DesiredBranchProtection> {
-    let push_restrictions = actor_refs_to_actor_set(branch_name, push_restrictions, issues)?;
+    let push_restrictions = actor_refs_to_actor_set(branch_name, push_restrictions, issues);
     let dismissal_restrictions =
-        actor_refs_to_actor_set(branch_name, dismissal_restrictions, issues)?;
+        actor_refs_to_actor_set(branch_name, dismissal_restrictions, issues);
     let pull_request_bypass_allowances =
-        actor_refs_to_actor_set(branch_name, pull_request_bypass_allowances, issues)?;
+        actor_refs_to_actor_set(branch_name, pull_request_bypass_allowances, issues);
     let desired_status_checks = desired_status_checks(
         branch_name,
         status_check_contexts,
@@ -2674,7 +2726,7 @@ fn actor_refs_to_actor_set(
     branch_name: &str,
     actors: &[ActorReference],
     issues: &mut Vec<ReconcileIssue>,
-) -> Result<ActorSet> {
+) -> ActorSet {
     let mut set = ActorSet::default();
     for actor in actors {
         match actor {
@@ -2697,7 +2749,7 @@ fn actor_refs_to_actor_set(
         .sort_by(|left, right| left.login.cmp(&right.login));
     set.teams.sort_by(|left, right| left.slug.cmp(&right.slug));
     set.apps.sort_by(|left, right| left.slug.cmp(&right.slug));
-    Ok(set)
+    set
 }
 
 fn protected_branch_matches(
@@ -2778,8 +2830,8 @@ fn normalize_strings(values: &[String]) -> Vec<String> {
     normalized
 }
 
-fn bool_field(value: &Option<crate::github::security::SecurityFeatureStatus>) -> Option<bool> {
-    value.as_ref().map(|status| status.status == "enabled")
+fn bool_field(value: Option<&crate::github::security::SecurityFeatureStatus>) -> Option<bool> {
+    value.map(|status| status.status == "enabled")
 }
 
 fn branch_action_sort_key(action: &BranchProtectionPlanAction) -> (u8, String) {
@@ -2825,6 +2877,27 @@ fn not_applicable_entry(
         outcome: CoverageOutcome::NotApplicable,
         reason: Some(reason),
         required_permission: None,
+    }
+}
+
+/// Record a failed lookup. A lookup the manifest does not need is not applicable,
+/// so it does not make the category count as unknown.
+fn lookup_failure_entry(
+    category: ManifestCategoryName,
+    endpoint: &str,
+    reason: String,
+    requested: bool,
+) -> CoverageEntry {
+    if requested {
+        unavailable_entry(category, endpoint, reason)
+    } else {
+        CoverageEntry {
+            category,
+            endpoint: endpoint.to_owned(),
+            outcome: CoverageOutcome::NotApplicable,
+            reason: Some(format!("not required by the manifest: {reason}")),
+            required_permission: None,
+        }
     }
 }
 

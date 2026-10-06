@@ -248,6 +248,6 @@ Entries contain repository, category/action, status, and structural before/after
 | `reqwest` | GitHub HTTP client |
 | `serde`, `serde_json`, `toml` | manifest and API serialization |
 | `crypto_box` | sealed-box encryption for secret writes |
-| `dialoguer` | confirmation prompts and setup wizard |
+| `dialoguer` | confirmation prompts |
 | `wiremock` | deterministic API integration tests |
 | `tracing` | structured diagnostic logging |

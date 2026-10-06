@@ -1,17 +1,19 @@
-use std::fmt;
-
 use anyhow::Result;
 use clap::Args;
 use console::style;
 use dialoguer::Confirm;
 
+use super::output::{ok_icon, print_table};
 use crate::config::Manifest;
 use crate::config::manifest::{
     ManagementDisposition, RepositoryCategoryV2, RepositorySettingsConfig,
 };
 use crate::engine::audit_log::AuditLog;
 use crate::github::Client;
-use crate::github::settings::RepoSettings;
+use crate::reconcile::general::{
+    self, GeneralChange, GeneralChangeKind, GeneralDesiredState, GeneralPlan,
+};
+use crate::reconcile::unified;
 
 #[derive(Args)]
 pub struct SettingsCommand {
@@ -74,14 +76,6 @@ fn repository_category_for_repo<'a>(
     system_repository.or(manifest.categories.repository.as_ref())
 }
 
-fn repository_settings_for_repo<'a>(
-    manifest: &'a Manifest,
-    repo_name: &str,
-) -> Option<&'a RepositorySettingsConfig> {
-    repository_category_for_repo(manifest, repo_name)
-        .and_then(|repository| repository.settings.as_ref())
-}
-
 fn managed_repository_settings_for_repo<'a>(
     manifest: &'a Manifest,
     repo_name: &str,
@@ -91,23 +85,72 @@ fn managed_repository_settings_for_repo<'a>(
         .and_then(|repository| repository.settings.as_ref())
 }
 
+fn settings_desired_for_repo(
+    manifest: &Manifest,
+    repo_name: &str,
+    managed_only: bool,
+) -> Option<GeneralDesiredState> {
+    let category = repository_category_for_repo(manifest, repo_name)?;
+    if managed_only && category.policy.disposition != ManagementDisposition::Managed {
+        return None;
+    }
+    let settings = category.settings.as_ref()?;
+    Some(settings_desired_state(category, settings))
+}
+
 struct RepoRulesetState {
     repo: String,
     has_copilot_review: bool,
     repository_changes: Vec<RepositorySettingChange>,
+    plan: Option<GeneralPlan>,
 }
 
 #[derive(Debug)]
 struct RepositorySettingChange {
-    field: &'static str,
+    field: String,
     current: String,
     desired: String,
+}
+
+impl From<&GeneralChange> for RepositorySettingChange {
+    fn from(change: &GeneralChange) -> Self {
+        let field = match &change.kind {
+            GeneralChangeKind::RestField { field } | GeneralChangeKind::GraphqlField { field } => {
+                field.clone()
+            }
+            GeneralChangeKind::Topics => "topics".to_owned(),
+            other => format!("{other:?}"),
+        };
+        Self {
+            field,
+            current: change.current.clone(),
+            desired: change.desired.clone(),
+        }
+    }
+}
+
+/// Desired state for the legacy settings command: only `settings` and topics.
+/// Pruning is off so labels and custom properties are never touched.
+fn settings_desired_state(
+    category: &RepositoryCategoryV2,
+    settings: &RepositorySettingsConfig,
+) -> GeneralDesiredState {
+    let mut repository = RepositoryCategoryV2 {
+        policy: category.policy.clone(),
+        settings: Some(settings.clone()),
+        metadata: None,
+        custom_properties: Vec::new(),
+        immutable_releases: None,
+        references: Vec::new(),
+    };
+    repository.policy.prune = false;
+    GeneralDesiredState::from(repository)
 }
 
 async fn scan_repo(
     client: &Client,
     repo: &str,
-    desired_repository: Option<&RepositorySettingsConfig>,
+    desired_repository: Option<GeneralDesiredState>,
     check_copilot_review: bool,
 ) -> Result<RepoRulesetState> {
     let has_copilot_review = if check_copilot_review {
@@ -120,216 +163,40 @@ async fn scan_repo(
         true
     };
 
-    let repository_changes = if let Some(desired) = desired_repository {
-        let (settings, topics) =
-            tokio::try_join!(client.get_settings(repo), client.get_topics(repo))?;
-        diff_repository_settings(&settings, &topics, desired)
+    let (repository_changes, plan) = if let Some(desired) = desired_repository {
+        let current = general::collect(client, repo).await?;
+        let plan = general::plan(repo, &desired, &current);
+        let changes = plan
+            .changes
+            .iter()
+            .chain(plan.blocked_changes.iter())
+            .map(RepositorySettingChange::from)
+            .collect();
+        (changes, Some(plan))
     } else {
-        Vec::new()
+        (Vec::new(), None)
     };
 
     Ok(RepoRulesetState {
         repo: repo.to_owned(),
         has_copilot_review,
         repository_changes,
+        plan,
     })
 }
 
-fn diff_repository_settings(
-    current: &RepoSettings,
-    topics: &[String],
-    desired: &RepositorySettingsConfig,
-) -> Vec<RepositorySettingChange> {
-    let mut changes = Vec::new();
-
-    compare_value(
-        &mut changes,
-        "has_issues",
-        current.has_issues,
-        desired.has_issues,
-    );
-    compare_value(
-        &mut changes,
-        "has_projects",
-        current.has_projects,
-        desired.has_projects,
-    );
-    compare_value(&mut changes, "has_wiki", current.has_wiki, desired.has_wiki);
-    compare_value(
-        &mut changes,
-        "has_discussions",
-        current.has_discussions,
-        desired.has_discussions,
-    );
-    compare_value(
-        &mut changes,
-        "allow_squash_merge",
-        current.allow_squash_merge,
-        desired.allow_squash_merge,
-    );
-    compare_value(
-        &mut changes,
-        "allow_merge_commit",
-        current.allow_merge_commit,
-        desired.allow_merge_commit,
-    );
-    compare_value(
-        &mut changes,
-        "allow_rebase_merge",
-        current.allow_rebase_merge,
-        desired.allow_rebase_merge,
-    );
-    compare_value(
-        &mut changes,
-        "allow_auto_merge",
-        current.allow_auto_merge,
-        desired.allow_auto_merge,
-    );
-    compare_value(
-        &mut changes,
-        "delete_branch_on_merge",
-        current.delete_branch_on_merge,
-        desired.delete_branch_on_merge,
-    );
-    compare_value(
-        &mut changes,
-        "allow_update_branch",
-        current.allow_update_branch,
-        desired.allow_update_branch,
-    );
-    compare_optional_string(
-        &mut changes,
-        "squash_merge_commit_title",
-        current.squash_merge_commit_title.as_deref(),
-        desired.squash_merge_commit_title.as_deref(),
-    );
-    compare_optional_string(
-        &mut changes,
-        "squash_merge_commit_message",
-        current.squash_merge_commit_message.as_deref(),
-        desired.squash_merge_commit_message.as_deref(),
-    );
-    compare_optional_string(
-        &mut changes,
-        "merge_commit_title",
-        current.merge_commit_title.as_deref(),
-        desired.merge_commit_title.as_deref(),
-    );
-    compare_optional_string(
-        &mut changes,
-        "merge_commit_message",
-        current.merge_commit_message.as_deref(),
-        desired.merge_commit_message.as_deref(),
-    );
-    compare_value(
-        &mut changes,
-        "web_commit_signoff_required",
-        current.web_commit_signoff_required,
-        desired.web_commit_signoff_required,
-    );
-
-    if let Some(desired_topics) = &desired.topics
-        && topics != desired_topics
-    {
-        changes.push(RepositorySettingChange {
-            field: "topics",
-            current: format!("{topics:?}"),
-            desired: format!("{desired_topics:?}"),
-        });
-    }
-
-    changes
-}
-
-fn compare_value<T>(
-    changes: &mut Vec<RepositorySettingChange>,
-    field: &'static str,
-    current: T,
-    desired: Option<T>,
-) where
-    T: fmt::Display + PartialEq,
-{
-    if let Some(desired) = desired
-        && current != desired
-    {
-        changes.push(RepositorySettingChange {
-            field,
-            current: current.to_string(),
-            desired: desired.to_string(),
-        });
-    }
-}
-
-fn compare_optional_string(
-    changes: &mut Vec<RepositorySettingChange>,
-    field: &'static str,
-    current: Option<&str>,
-    desired: Option<&str>,
-) {
-    if let Some(desired) = desired
-        && current != Some(desired)
-    {
-        changes.push(RepositorySettingChange {
-            field,
-            current: current.unwrap_or("<unset>").to_owned(),
-            desired: desired.to_owned(),
-        });
-    }
-}
-
-fn repository_settings_patch(config: &RepositorySettingsConfig) -> serde_json::Value {
-    let mut body = serde_json::Map::new();
-
-    macro_rules! insert {
-        ($field:ident) => {
-            if let Some(value) = &config.$field {
-                body.insert(stringify!($field).to_owned(), serde_json::json!(value));
-            }
-        };
-    }
-
-    insert!(has_issues);
-    insert!(has_projects);
-    insert!(has_wiki);
-    insert!(has_discussions);
-    insert!(allow_squash_merge);
-    insert!(allow_merge_commit);
-    insert!(allow_rebase_merge);
-    insert!(allow_auto_merge);
-    insert!(delete_branch_on_merge);
-    insert!(allow_update_branch);
-    insert!(squash_merge_commit_title);
-    insert!(squash_merge_commit_message);
-    insert!(merge_commit_title);
-    insert!(merge_commit_message);
-    insert!(web_commit_signoff_required);
-
-    serde_json::Value::Object(body)
-}
-
-async fn apply_repository_settings(
+async fn scan_repos(
     client: &Client,
-    repo: &str,
-    desired: &RepositorySettingsConfig,
-) -> Result<()> {
-    let patch = repository_settings_patch(desired);
-    if patch.as_object().is_some_and(|body| !body.is_empty()) {
-        client.update_settings(repo, &patch).await?;
-    }
-    if let Some(topics) = &desired.topics {
-        client.replace_topics(repo, topics).await?;
-    }
-
-    let (current, topics) = tokio::try_join!(client.get_settings(repo), client.get_topics(repo))?;
-    let remaining = diff_repository_settings(&current, &topics, desired);
-    if !remaining.is_empty() {
-        anyhow::bail!(
-            "Repository settings verification failed for {repo}: {} field(s) still differ",
-            remaining.len()
-        );
-    }
-
-    Ok(())
+    manifest: &Manifest,
+    repos: &[String],
+    managed_only: bool,
+    check_copilot_review: bool,
+) -> Vec<Result<RepoRulesetState>> {
+    crate::reconcile::map_buffered(repos, |repo_name| async move {
+        let desired = settings_desired_for_repo(manifest, repo_name, managed_only);
+        scan_repo(client, repo_name, desired, check_copilot_review).await
+    })
+    .await
 }
 
 async fn resolve_repos(
@@ -338,20 +205,10 @@ async fn resolve_repos(
     system: Option<&str>,
     repo: Option<&str>,
 ) -> Result<Vec<String>> {
-    if let Some(repo_name) = repo {
-        return Ok(vec![repo_name.to_owned()]);
+    if system.is_none() && repo.is_none() {
+        anyhow::bail!("Either --system or --repo is required");
     }
-    let sys = system.ok_or_else(|| anyhow::anyhow!("Either --system or --repo is required"))?;
-    let excludes = manifest.exclude_patterns_for_system(sys);
-    let explicit = manifest.explicit_repos_for_system(sys);
-    let repos = client
-        .list_repos_for_system(
-            sys,
-            manifest.matches_prefix_for_system(sys),
-            &excludes,
-            &explicit,
-        )
-        .await?;
+    let repos = unified::resolve_target_repos(client, manifest, system, repo).await?;
     Ok(repos.into_iter().map(|r| r.name).collect())
 }
 
@@ -386,9 +243,10 @@ async fn plan(
     let mut repository_settings_needed = 0;
     let mut up_to_date = 0;
 
-    for repo_name in &repos {
-        let desired = managed_repository_settings_for_repo(manifest, repo_name);
-        let state = scan_repo(client, repo_name, desired, do_ruleset).await?;
+    let states = scan_repos(client, manifest, &repos, true, do_ruleset).await;
+
+    for (repo_name, state) in repos.iter().zip(states) {
+        let state = state?;
         let mut changes: Vec<String> = state
             .repository_changes
             .iter()
@@ -466,9 +324,8 @@ async fn apply(
 
     // Scan all repos
     let mut work: Vec<RepoRulesetState> = Vec::new();
-    for repo_name in &repos {
-        let desired = managed_repository_settings_for_repo(manifest, repo_name);
-        let state = scan_repo(client, repo_name, desired, do_ruleset).await?;
+    for state in scan_repos(client, manifest, &repos, true, do_ruleset).await {
+        let state = state?;
         let needs_work =
             !state.repository_changes.is_empty() || (do_ruleset && !state.has_copilot_review);
         if needs_work {
@@ -521,10 +378,10 @@ async fn apply(
         println!("  {} {} ...", style(">>").magenta(), state.repo);
 
         if !state.repository_changes.is_empty()
-            && let Some(desired) = managed_repository_settings_for_repo(manifest, &state.repo)
+            && let Some(plan) = state.plan.as_ref()
         {
-            match apply_repository_settings(client, &state.repo, desired).await {
-                Ok(()) => {
+            match general::apply(client, plan).await {
+                Ok(_) => {
                     println!("    {} Repository settings updated", style("[ok]").green());
                     audit_log.log(
                         &state.repo,
@@ -594,7 +451,7 @@ async fn apply(
         audit_log.path().display()
     );
 
-    Ok(())
+    crate::outcome::fail_when_any_failed(&failed)
 }
 
 async fn audit(
@@ -613,8 +470,6 @@ async fn audit(
     );
 
     use tabled::builder::Builder;
-    use tabled::settings::object::{Columns, Rows};
-    use tabled::settings::{Alignment, Modify, Style};
 
     let mut builder = Builder::default();
     builder.push_record(["Repository", "Repo Settings", "Review Rule"]);
@@ -622,20 +477,13 @@ async fn audit(
     let mut all_ok = 0;
     let mut issues = 0;
 
-    for repo_name in &repos {
-        let desired = repository_settings_for_repo(manifest, repo_name);
-        let state = scan_repo(client, repo_name, desired, true).await?;
+    let states = scan_repos(client, manifest, &repos, false, true).await;
 
-        let repository_icon = if state.repository_changes.is_empty() {
-            format!("{}", style("[ok]").green())
-        } else {
-            format!("{}", style("[!!]").red())
-        };
-        let ruleset_icon = if state.has_copilot_review {
-            format!("{}", style("[ok]").green())
-        } else {
-            format!("{}", style("[!!]").red())
-        };
+    for (repo_name, state) in repos.iter().zip(states) {
+        let state = state?;
+
+        let repository_icon = ok_icon(state.repository_changes.is_empty());
+        let ruleset_icon = ok_icon(state.has_copilot_review);
 
         let ok = state.repository_changes.is_empty() && state.has_copilot_review;
         if ok {
@@ -647,21 +495,8 @@ async fn audit(
         builder.push_record([repo_name.as_str(), &repository_icon, &ruleset_icon]);
     }
 
-    let table = builder
-        .build()
-        .with(Style::blank())
-        .with(
-            Modify::new(Rows::first()).with(tabled::settings::Format::content(|s| {
-                format!("{}", style(s).bold().underlined())
-            })),
-        )
-        .with(Modify::new(Columns::new(..)).with(Alignment::left()))
-        .to_string();
-
     println!();
-    for line in table.lines() {
-        println!("  {line}");
-    }
+    print_table(builder);
 
     println!();
     println!(
@@ -680,86 +515,98 @@ async fn audit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::manifest::CategoryPolicy;
 
-    fn repository_settings() -> RepoSettings {
-        RepoSettings {
-            has_issues: true,
-            has_projects: false,
-            has_wiki: false,
-            has_discussions: true,
-            has_pull_requests: true,
-            pull_request_creation_policy: Some("all".to_owned()),
-            allow_squash_merge: true,
-            allow_merge_commit: false,
-            allow_rebase_merge: true,
-            allow_auto_merge: true,
-            delete_branch_on_merge: true,
-            allow_update_branch: true,
-            squash_merge_commit_title: Some("PR_TITLE".to_owned()),
-            squash_merge_commit_message: Some("PR_BODY".to_owned()),
-            merge_commit_title: Some("PR_TITLE".to_owned()),
-            merge_commit_message: Some("PR_BODY".to_owned()),
-            web_commit_signoff_required: true,
-            use_squash_pr_title_as_default: Some(false),
+    fn managed_category(settings: RepositorySettingsConfig) -> RepositoryCategoryV2 {
+        RepositoryCategoryV2 {
+            policy: CategoryPolicy::managed(),
+            settings: Some(settings),
+            metadata: None,
+            custom_properties: Vec::new(),
+            immutable_releases: None,
+            references: Vec::new(),
+        }
+    }
+
+    fn collected(topics: &[&str]) -> general::CollectedGeneralState {
+        let mut state = general::CollectedGeneralState {
+            repository: managed_category(RepositorySettingsConfig {
+                has_issues: Some(true),
+                use_squash_pr_title_as_default: None,
+                topics: Some(topics.iter().map(|topic| (*topic).to_owned()).collect()),
+                ..RepositorySettingsConfig::default()
+            }),
+            labels: Vec::new(),
+            custom_properties: Vec::new(),
+            coverage: Vec::new(),
+            extensions: general::GeneralCollectedExtensions::default(),
+        };
+        state.extensions.graphql_settings_collected = true;
+        state.extensions.has_pull_requests = Some(true);
+        state.extensions.pull_request_creation_policy = Some("all".to_owned());
+        state.extensions.has_sponsorships_enabled = Some(false);
+        state.extensions.issue_creation_policy = Some("all".to_owned());
+        state.extensions.use_squash_pr_title_as_default = Some(false);
+        state
+    }
+
+    fn changed_fields(
+        settings: &RepositorySettingsConfig,
+        current: &general::CollectedGeneralState,
+    ) -> Vec<String> {
+        let category = managed_category(settings.clone());
+        let desired = settings_desired_state(&category, settings);
+        general::plan("repo", &desired, current)
+            .changes
+            .iter()
+            .map(|change| RepositorySettingChange::from(change).field)
+            .collect()
+    }
+
+    #[test]
+    fn settings_plan_covers_pull_request_sponsorship_and_policy_fields() {
+        let fields = changed_fields(
+            &RepositorySettingsConfig {
+                has_pull_requests: Some(false),
+                pull_request_creation_policy: Some("collaborators_only".to_owned()),
+                has_sponsorships_enabled: Some(true),
+                issue_creation_policy: Some("collaborators_only".to_owned()),
+                use_squash_pr_title_as_default: Some(true),
+                ..RepositorySettingsConfig::default()
+            },
+            &collected(&[]),
+        );
+        for expected in [
+            "has_pull_requests",
+            "pull_request_creation_policy",
+            "has_sponsorships_enabled",
+            "issue_creation_policy",
+            "use_squash_pr_title_as_default",
+        ] {
+            assert!(
+                fields.iter().any(|field| field == expected),
+                "{expected} missing from {fields:?}"
+            );
         }
     }
 
     #[test]
-    fn repository_settings_diff_is_empty_for_matching_snapshot() {
-        let desired = RepositorySettingsConfig {
-            has_issues: Some(true),
-            has_projects: Some(false),
-            has_wiki: Some(false),
-            has_discussions: Some(true),
-            has_pull_requests: None,
-            pull_request_creation_policy: None,
-            has_sponsorships_enabled: None,
-            issue_creation_policy: None,
-            allow_squash_merge: Some(true),
-            allow_merge_commit: Some(false),
-            allow_rebase_merge: Some(true),
-            allow_auto_merge: Some(true),
-            delete_branch_on_merge: Some(true),
-            allow_update_branch: Some(true),
-            squash_merge_commit_title: Some("PR_TITLE".to_owned()),
-            squash_merge_commit_message: Some("PR_BODY".to_owned()),
-            merge_commit_title: Some("PR_TITLE".to_owned()),
-            merge_commit_message: Some("PR_BODY".to_owned()),
-            web_commit_signoff_required: Some(true),
-            use_squash_pr_title_as_default: None,
-            topics: Some(vec!["managed".to_owned()]),
-        };
-
-        let changes =
-            diff_repository_settings(&repository_settings(), &["managed".to_owned()], &desired);
-        assert!(changes.is_empty());
+    fn settings_plan_ignores_topic_order_and_case() {
+        let fields = changed_fields(
+            &RepositorySettingsConfig {
+                topics: Some(vec!["Beta".to_owned(), "alpha".to_owned()]),
+                ..RepositorySettingsConfig::default()
+            },
+            &collected(&["alpha", "beta"]),
+        );
+        assert!(fields.is_empty(), "{fields:?}");
     }
 
     #[test]
-    fn repository_settings_diff_reports_only_configured_drift() {
-        let desired = RepositorySettingsConfig {
-            allow_auto_merge: Some(false),
-            topics: Some(vec!["baseline".to_owned()]),
-            ..RepositorySettingsConfig::default()
-        };
-
-        let changes =
-            diff_repository_settings(&repository_settings(), &["managed".to_owned()], &desired);
-        assert_eq!(changes.len(), 2);
-        assert_eq!(changes[0].field, "allow_auto_merge");
-        assert_eq!(changes[1].field, "topics");
-    }
-
-    #[test]
-    fn repository_settings_patch_excludes_topics() {
-        let desired = RepositorySettingsConfig {
-            has_issues: Some(false),
-            topics: Some(vec!["baseline".to_owned()]),
-            ..RepositorySettingsConfig::default()
-        };
-
-        let patch = repository_settings_patch(&desired);
-        assert_eq!(patch["has_issues"], false);
-        assert!(patch.get("topics").is_none());
+    fn settings_desired_state_never_prunes() {
+        let mut category = managed_category(RepositorySettingsConfig::default());
+        category.policy.prune = true;
+        let desired = settings_desired_state(&category, &RepositorySettingsConfig::default());
+        assert!(!desired.repository.policy.prune);
     }
 }

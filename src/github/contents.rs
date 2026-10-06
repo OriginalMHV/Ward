@@ -194,19 +194,31 @@ struct CommitTree {
     sha: String,
 }
 
+/// Why a repository tree could not be listed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GitTreeReadStatus {
-    Available,
+pub enum GitTreeUnavailable {
     EmptyRepository,
     PermissionDenied,
     NotFound,
 }
 
+/// The outcome of reading a repository tree. A listing exists only when the read succeeded.
 #[derive(Debug, Clone)]
-pub struct GitTreeReadResult {
-    pub status: GitTreeReadStatus,
-    pub listing: Option<GitTreeListing>,
-    pub detail: Option<String>,
+pub enum GitTreeRead {
+    Available(GitTreeListing),
+    Unavailable {
+        reason: GitTreeUnavailable,
+        detail: String,
+    },
+}
+
+impl GitTreeRead {
+    fn unavailable(reason: GitTreeUnavailable, detail: impl Into<String>) -> Self {
+        Self::Unavailable {
+            reason,
+            detail: detail.into(),
+        }
+    }
 }
 
 pub(crate) fn validate_relative_git_path(path: &str) -> Result<()> {
@@ -333,56 +345,31 @@ impl Client {
             .context("Failed to parse file content response")
     }
 
-    /// Decode base64-encoded file content from the Contents API into raw bytes.
-    pub fn decode_content_bytes(content: &FileContent) -> Result<Vec<u8>> {
-        let raw = content.content.as_deref().unwrap_or("");
-        if raw.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        match content.encoding.as_deref() {
-            Some("base64") | None => decode_base64_payload(raw),
-            Some(other) => anyhow::bail!(
-                "Unsupported Contents API encoding {other} for {}",
-                content.path
-            ),
-        }
-    }
-
-    /// Decode base64-encoded file content from the Contents API.
-    pub fn decode_content(content: &FileContent) -> Result<String> {
-        String::from_utf8(Self::decode_content_bytes(content)?)
-            .context("File content is not valid UTF-8")
-    }
-
     /// Inspect the repository tree recursively using the Git Trees API.
     pub async fn read_git_tree_recursive(
         &self,
         repo: &str,
         branch: Option<&str>,
-    ) -> Result<GitTreeReadResult> {
+    ) -> Result<GitTreeRead> {
         let branch = match self.resolve_branch_status(repo, branch).await? {
             ResolveBranchStatus::Resolved(branch) => branch,
             ResolveBranchStatus::Empty(detail) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::EmptyRepository,
-                    listing: None,
-                    detail: Some(detail),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::EmptyRepository,
+                    detail,
+                ));
             }
             ResolveBranchStatus::PermissionDenied(detail) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::PermissionDenied,
-                    listing: None,
-                    detail: Some(detail),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::PermissionDenied,
+                    detail,
+                ));
             }
             ResolveBranchStatus::NotFound(detail) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::NotFound,
-                    listing: None,
-                    detail: Some(detail),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::NotFound,
+                    detail,
+                ));
             }
         };
 
@@ -400,25 +387,22 @@ impl Client {
         {
             ClassifiedResponse::Success(value) => value,
             ClassifiedResponse::NotFound(error) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::EmptyRepository,
-                    listing: None,
-                    detail: Some(error.to_string()),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::EmptyRepository,
+                    error.to_string(),
+                ));
             }
             ClassifiedResponse::Forbidden(error) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::PermissionDenied,
-                    listing: None,
-                    detail: Some(error.to_string()),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::PermissionDenied,
+                    error.to_string(),
+                ));
             }
             ClassifiedResponse::Other(error) if error.status() == Some(StatusCode::CONFLICT) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::EmptyRepository,
-                    listing: None,
-                    detail: Some(error.to_string()),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::EmptyRepository,
+                    error.to_string(),
+                ));
             }
             ClassifiedResponse::NoContent
             | ClassifiedResponse::Unprocessable(_)
@@ -450,25 +434,22 @@ impl Client {
         {
             ClassifiedResponse::Success(value) => value,
             ClassifiedResponse::NotFound(error) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::EmptyRepository,
-                    listing: None,
-                    detail: Some(error.to_string()),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::EmptyRepository,
+                    error.to_string(),
+                ));
             }
             ClassifiedResponse::Forbidden(error) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::PermissionDenied,
-                    listing: None,
-                    detail: Some(error.to_string()),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::PermissionDenied,
+                    error.to_string(),
+                ));
             }
             ClassifiedResponse::Other(error) if error.status() == Some(StatusCode::CONFLICT) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::EmptyRepository,
-                    listing: None,
-                    detail: Some(error.to_string()),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::EmptyRepository,
+                    error.to_string(),
+                ));
             }
             ClassifiedResponse::NoContent
             | ClassifiedResponse::Unprocessable(_)
@@ -498,25 +479,22 @@ impl Client {
         {
             ClassifiedResponse::Success(value) => value,
             ClassifiedResponse::NotFound(error) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::EmptyRepository,
-                    listing: None,
-                    detail: Some(error.to_string()),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::EmptyRepository,
+                    error.to_string(),
+                ));
             }
             ClassifiedResponse::Forbidden(error) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::PermissionDenied,
-                    listing: None,
-                    detail: Some(error.to_string()),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::PermissionDenied,
+                    error.to_string(),
+                ));
             }
             ClassifiedResponse::Other(error) if error.status() == Some(StatusCode::CONFLICT) => {
-                return Ok(GitTreeReadResult {
-                    status: GitTreeReadStatus::EmptyRepository,
-                    listing: None,
-                    detail: Some(error.to_string()),
-                });
+                return Ok(GitTreeRead::unavailable(
+                    GitTreeUnavailable::EmptyRepository,
+                    error.to_string(),
+                ));
             }
             ClassifiedResponse::NoContent
             | ClassifiedResponse::Unprocessable(_)
@@ -540,37 +518,11 @@ impl Client {
             .collect::<Vec<_>>();
         entries.sort_by(|left, right| left.path.cmp(&right.path));
 
-        Ok(GitTreeReadResult {
-            status: GitTreeReadStatus::Available,
-            listing: Some(GitTreeListing {
-                sha: tree.sha,
-                truncated: tree.truncated,
-                entries,
-            }),
-            detail: None,
-        })
-    }
-
-    /// Resolve the repository tree recursively using the Git Trees API.
-    /// Returns `None` if the repository or ref doesn't exist.
-    pub async fn list_git_tree_recursive(
-        &self,
-        repo: &str,
-        branch: Option<&str>,
-    ) -> Result<Option<GitTreeListing>> {
-        let tree = self.read_git_tree_recursive(repo, branch).await?;
-        match tree.status {
-            GitTreeReadStatus::Available => Ok(tree.listing),
-            GitTreeReadStatus::EmptyRepository | GitTreeReadStatus::NotFound => Ok(None),
-            GitTreeReadStatus::PermissionDenied => {
-                anyhow::bail!(
-                    "{}",
-                    tree.detail.unwrap_or_else(|| {
-                        format!("Permission denied while reading repository tree for {repo}")
-                    })
-                )
-            }
-        }
+        Ok(GitTreeRead::Available(GitTreeListing {
+            sha: tree.sha,
+            truncated: tree.truncated,
+            entries,
+        }))
     }
 
     /// Retrieve raw blob bytes using the Git Blobs API.
@@ -642,23 +594,14 @@ enum ResolveBranchStatus {
 
 #[cfg(test)]
 mod tests {
-    use super::{FileContent, GitEntryMode, validate_relative_git_path};
-    use crate::github::Client;
+    use super::{GitEntryMode, decode_base64_payload, validate_relative_git_path};
 
     #[test]
-    fn decode_content_bytes_ignores_whitespace() {
-        let file = FileContent {
-            name: "data.bin".to_owned(),
-            path: "data.bin".to_owned(),
-            sha: "blob-sha".to_owned(),
-            size: 4,
-            content: Some("AAEC\n/w==".to_owned()),
-            encoding: Some("base64".to_owned()),
-            kind: Some("file".to_owned()),
-        };
-
-        let decoded = Client::decode_content_bytes(&file).unwrap();
-        assert_eq!(decoded, vec![0, 1, 2, 255]);
+    fn decode_base64_payload_ignores_whitespace() {
+        assert_eq!(
+            decode_base64_payload("AAEC\n/w==").unwrap(),
+            vec![0, 1, 2, 255]
+        );
     }
 
     #[test]

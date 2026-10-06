@@ -7,6 +7,7 @@ use crate::cli::plan::CategoryRun;
 use crate::config::Manifest;
 use crate::engine::audit_log::AuditLog;
 use crate::github::Client;
+use crate::outcome::Outcome;
 use crate::reconcile::unified::{self, UnifiedOptions, UnifiedReport};
 
 /// Apply the desired manifest state to existing repositories.
@@ -42,6 +43,20 @@ impl ApplyCommand {
         repo: Option<&str>,
         json: bool,
     ) -> Result<()> {
+        self.run_with_audit(client, manifest, system, repo, json, AuditLog::new)
+            .await
+    }
+
+    /// As [`Self::run`], with the audit log opened by `open_audit` when an apply starts.
+    pub async fn run_with_audit(
+        &self,
+        client: &Client,
+        manifest: &Manifest,
+        system: Option<&str>,
+        repo: Option<&str>,
+        json: bool,
+        open_audit: impl FnOnce() -> Result<AuditLog>,
+    ) -> Result<()> {
         let options = UnifiedOptions {
             categories: unified::parse_categories(&self.categories)?,
             allow_high_impact: self.allow_high_impact,
@@ -52,6 +67,7 @@ impl ApplyCommand {
             manifest,
             self.yes,
             options,
+            open_audit,
             CategoryRun {
                 system,
                 repo,
@@ -71,12 +87,16 @@ pub(crate) async fn run_canonical_apply(
     manifest: &Manifest,
     yes: bool,
     options: UnifiedOptions,
+    open_audit: impl FnOnce() -> Result<AuditLog>,
     run: CategoryRun<'_>,
 ) -> Result<UnifiedReport> {
     crate::cli::plan::require_canonical_categories(manifest, run.command)?;
     validate_confirmation_mode(run.json, yes)?;
 
     let repos = unified::resolve_target_repos(client, manifest, run.system, run.repo).await?;
+    if run.repo.is_some() {
+        unified::reject_archived_explicit_target(&repos)?;
+    }
     if repos.is_empty() {
         let report = UnifiedReport::from_repos(Vec::new());
         if run.json {
@@ -87,17 +107,17 @@ pub(crate) async fn run_canonical_apply(
         return Ok(report);
     }
 
+    let prepared = unified::prepare_apply(client, manifest, &repos, &options).await?;
+
     if !yes {
+        unified::render_report(&prepared.report(), "Ward Plan (to apply)");
         println!();
         println!(
-            "  {} Apply managed categories to {} repositor{}:",
+            "  {} Apply this plan to {} repositor{}?",
             style("[!]").yellow().bold(),
             style(repos.len()).bold(),
             if repos.len() == 1 { "y" } else { "ies" }
         );
-        for repository in &repos {
-            println!("    - {}", repository.name);
-        }
         let proceed = Confirm::new()
             .with_prompt("  Proceed?")
             .default(false)
@@ -108,8 +128,8 @@ pub(crate) async fn run_canonical_apply(
         }
     }
 
-    let audit = AuditLog::new()?;
-    let report = unified::apply(client, manifest, &repos, &options, &audit).await?;
+    let audit = open_audit()?;
+    let report = unified::apply_prepared(client, manifest, prepared, &options, &audit).await;
 
     if run.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -118,10 +138,8 @@ pub(crate) async fn run_canonical_apply(
     }
 
     if report.has_failures() {
-        anyhow::bail!(
-            "Apply completed with {} blocked category result(s) and failures; see report above",
-            report.blocked
-        );
+        let (failed, blocked) = report.category_problem_counts();
+        return Err(Outcome::ApplyFailed(crate::outcome::apply_summary(failed, blocked)).into());
     }
 
     Ok(report)

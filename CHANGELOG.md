@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Removed `ward repos inspect`. It now exits with code 2 and points to `ward audit --repo NAME`
+- Removed `ward config set`, `ward config add-system` and `ward config remove-system`. They now exit with code 2 and point to `ward config edit` or editing `ward.toml` directly. The `toml_edit` dependency is gone
+- Removed the interactive `ward init` wizard. `ward init` now writes only the minimal scaffold and `--non-interactive` is an accepted no-op. Use `ward import OWNER/REPO` or `ward init --from OWNER/REPO` for onboarding
 - Removed the interactive TUI, its disk cache, and the `ratatui`/`crossterm` dependencies
 - Removed built-in/custom templates, ecosystem detection, and target-project version inference
 - Removed the unsafe `rollback`, redundant `setup`, template-management, and custom policy DSL commands

@@ -7,7 +7,7 @@ use serde_json::{Map, Value};
 use crate::config::manifest::{AutolinkConfigV2, PagesConfigV2, WebhookConfigV2};
 
 use super::Client;
-use super::actions::{ReadOutcome, classify_read};
+use super::actions::ReadOutcome;
 use super::pagination;
 use super::response;
 
@@ -141,7 +141,7 @@ impl Client {
         &self,
         repo: &str,
     ) -> Result<ReadOutcome<Vec<RepositoryWebhook>>> {
-        collect_paginated_checked::<WebhookApiResponse, _>(self, |page| {
+        pagination::collect_paginated_checked::<WebhookApiResponse, _>(self, |page| {
             format!(
                 "/repos/{}/{repo}/hooks?per_page={}&page={}",
                 self.org, page.per_page, page.number
@@ -206,7 +206,7 @@ impl Client {
         &self,
         repo: &str,
     ) -> Result<ReadOutcome<Vec<RepositoryDeployKey>>> {
-        collect_paginated_checked::<DeployKeyApiResponse, _>(self, |page| {
+        pagination::collect_paginated_checked::<DeployKeyApiResponse, _>(self, |page| {
             format!(
                 "/repos/{}/{repo}/keys?per_page={}&page={}",
                 self.org, page.per_page, page.number
@@ -298,7 +298,7 @@ impl Client {
         &self,
         repo: &str,
     ) -> Result<ReadOutcome<Vec<RepositoryAutolink>>> {
-        collect_paginated_checked(self, |page| {
+        pagination::collect_paginated_checked(self, |page| {
             format!(
                 "/repos/{}/{repo}/autolinks?per_page={}&page={}",
                 self.org, page.per_page, page.number
@@ -487,41 +487,4 @@ fn pages_request_body(pages: &PagesConfigV2) -> Value {
     }
 
     Value::Object(payload)
-}
-
-async fn collect_paginated_checked<T, F>(
-    client: &Client,
-    mut build_path: F,
-) -> Result<ReadOutcome<Vec<T>>>
-where
-    T: for<'de> Deserialize<'de>,
-    F: FnMut(pagination::Page) -> String,
-{
-    let mut page = pagination::Page::default();
-    let mut items = Vec::new();
-
-    loop {
-        let path = build_path(page);
-        let page_items: Vec<T> = match classify_read(client.get(&path).await?, "GET", &path, false)
-            .await?
-        {
-            ReadOutcome::Available(values) => values,
-            ReadOutcome::NotApplicable(reason) => return Ok(ReadOutcome::NotApplicable(reason)),
-            ReadOutcome::PermissionDenied(reason) => {
-                return Ok(ReadOutcome::PermissionDenied(reason));
-            }
-            ReadOutcome::Unavailable(reason) => return Ok(ReadOutcome::Unavailable(reason)),
-        };
-        let count = page_items.len();
-        items.extend(page_items);
-        if count < page.per_page as usize {
-            break;
-        }
-        page = pagination::Page {
-            number: page.number + 1,
-            ..page
-        };
-    }
-
-    Ok(ReadOutcome::Available(items))
 }

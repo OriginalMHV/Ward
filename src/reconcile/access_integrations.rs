@@ -72,14 +72,6 @@ pub struct AccessPlan {
     pub issues: Vec<ReconcileIssue>,
 }
 
-impl AccessPlan {
-    pub fn is_empty(&self) -> bool {
-        self.team_actions.is_empty()
-            && self.collaborator_actions.is_empty()
-            && self.reference_actions.is_empty()
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum TeamAccessAction {
     Ensure(TeamAccess),
@@ -1870,7 +1862,7 @@ async fn collect_org_secret_reference(
     reference: &ReferencedResourceConfig,
     coverage: &mut Vec<CoverageEntry>,
 ) -> Result<CollectedAccessReference> {
-    collect_selected_repository_reference(
+    Ok(collect_selected_repository_reference(
         repo,
         reference,
         (
@@ -1888,7 +1880,7 @@ async fn collect_org_secret_reference(
             .list_org_secret_selected_repositories_checked(&reference.name)
             .await?,
         coverage,
-    )
+    ))
 }
 
 async fn collect_org_variable_reference(
@@ -1897,7 +1889,7 @@ async fn collect_org_variable_reference(
     reference: &ReferencedResourceConfig,
     coverage: &mut Vec<CoverageEntry>,
 ) -> Result<CollectedAccessReference> {
-    collect_selected_repository_reference(
+    Ok(collect_selected_repository_reference(
         repo,
         reference,
         (
@@ -1919,7 +1911,7 @@ async fn collect_org_variable_reference(
             .list_org_variable_selected_repositories_checked(&reference.name)
             .await?,
         coverage,
-    )
+    ))
 }
 
 fn collect_selected_repository_reference(
@@ -1929,7 +1921,7 @@ fn collect_selected_repository_reference(
     metadata: ReadOutcome<Option<OrgScopedResourceMetadata>>,
     repositories: ReadOutcome<Option<Vec<NamedRepository>>>,
     coverage: &mut Vec<CoverageEntry>,
-) -> Result<CollectedAccessReference> {
+) -> CollectedAccessReference {
     let (metadata_endpoint, repositories_endpoint) = endpoints;
     let metadata = match metadata {
         ReadOutcome::Available(value) => value,
@@ -1940,28 +1932,28 @@ fn collect_selected_repository_reference(
                 metadata_endpoint,
                 outcome,
             );
-            return Ok(CollectedAccessReference {
+            return CollectedAccessReference {
                 resource: reference.clone(),
                 present: None,
                 associated: None,
                 supported: true,
                 detail: Some("Referenced organization resource lookup was unavailable.".to_owned()),
-            });
+            };
         }
     };
 
     let Some(metadata) = metadata else {
-        return Ok(CollectedAccessReference {
+        return CollectedAccessReference {
             resource: reference.clone(),
             present: Some(false),
             associated: None,
             supported: true,
             detail: Some("Referenced organization resource was not found.".to_owned()),
-        });
+        };
     };
 
     if metadata.visibility.as_deref() != Some("selected") {
-        return Ok(CollectedAccessReference {
+        return CollectedAccessReference {
             resource: reference.clone(),
             present: Some(true),
             associated: None,
@@ -1970,7 +1962,7 @@ fn collect_selected_repository_reference(
                 "{} visibility is {:?}; selected-repository association is not applicable.",
                 reference.name, metadata.visibility
             )),
-        });
+        };
     }
 
     let repositories = match repositories {
@@ -1982,17 +1974,17 @@ fn collect_selected_repository_reference(
                 repositories_endpoint,
                 outcome,
             );
-            return Ok(CollectedAccessReference {
+            return CollectedAccessReference {
                 resource: reference.clone(),
                 present: Some(true),
                 associated: None,
                 supported: true,
                 detail: Some("Selected-repository association lookup was unavailable.".to_owned()),
-            });
+            };
         }
     };
 
-    Ok(CollectedAccessReference {
+    CollectedAccessReference {
         resource: reference.clone(),
         present: Some(true),
         associated: repositories
@@ -2000,7 +1992,7 @@ fn collect_selected_repository_reference(
             .map(|repositories| repositories.iter().any(|entry| entry.name == repo)),
         supported: true,
         detail: None,
-    })
+    }
 }
 
 fn collect_collaborators(
@@ -2290,12 +2282,13 @@ pub fn canonicalize_url(url: &str) -> String {
     }
     match reqwest::Url::parse(url) {
         Ok(mut parsed) => {
-            let _ = parsed.set_username("");
-            let _ = parsed.set_password(None);
+            // Setters fail only for cannot-be-a-base URLs, which carry no credentials to remove.
+            parsed.set_username("").ok();
+            parsed.set_password(None).ok();
             if (parsed.scheme() == "http" && parsed.port() == Some(80))
                 || (parsed.scheme() == "https" && parsed.port() == Some(443))
             {
-                let _ = parsed.set_port(None);
+                parsed.set_port(None).ok();
             }
             let mut canonical = parsed.to_string();
             if canonical.ends_with('/') && parsed.query().is_none() && parsed.fragment().is_none() {
@@ -2331,8 +2324,8 @@ fn imported_webhook_identity(url: &str) -> (String, Option<ExternalValueReferenc
 fn redact_credentialed_url(url: &str) -> String {
     match reqwest::Url::parse(url) {
         Ok(mut parsed) if !parsed.username().is_empty() || parsed.password().is_some() => {
-            let _ = parsed.set_username("***");
-            let _ = parsed.set_password(None);
+            parsed.set_username("***").ok();
+            parsed.set_password(None).ok();
             parsed.to_string()
         }
         Ok(_) => canonicalize_url(url),

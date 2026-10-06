@@ -174,14 +174,14 @@ pub async fn import_repository(options: ImportOptions<'_>) -> Result<()> {
 
     progress(
         options.stdout,
-        format!(
+        &format!(
             "{} Reading all documented repository configuration from {}...",
             style("[..]").dim(),
             style(source.to_string()).cyan().bold()
         ),
     );
 
-    let client = Client::new(&source.owner, options.parallelism).await?;
+    let client = Client::new(&source.owner, options.parallelism)?;
     let source_repository = client
         .get_repo(&source.repo)
         .await
@@ -346,7 +346,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::Repository,
                 "repository/general collector",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -370,7 +370,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::Security,
                 "security collector",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -394,7 +394,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::Rulesets,
                 "rulesets collector",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -418,7 +418,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::BranchProtection,
                 "branch-protection collector",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -442,7 +442,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::Files,
                 "configuration-files collector",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -467,7 +467,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::Actions,
                 "Actions collector",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -492,7 +492,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::Environments,
                 "environments collector",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -511,7 +511,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::Access,
                 "access collector",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -536,7 +536,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::Integrations,
                 "integrations collector",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -551,7 +551,7 @@ async fn snapshot_repository(
             record_collector_failure(
                 ManifestCategoryName::Repository,
                 "default-branch head",
-                error,
+                &error,
                 &mut coverage,
                 &mut warnings,
             );
@@ -572,9 +572,9 @@ async fn snapshot_repository(
     strict_failures.dedup();
 
     let categories = ManifestCategories {
-        security: Some(security_category.clone()),
-        repository: Some(repository_category.clone()),
-        branch_protection: Some(branch_protection_category.clone()),
+        security: Some(security_category),
+        repository: Some(repository_category),
+        branch_protection: Some(branch_protection_category),
         rulesets: Some(rulesets_category.clone()),
         files: Some(files_category.clone()),
         actions: Some(actions_category.clone()),
@@ -670,11 +670,11 @@ fn absorb_coverage(target: &mut Vec<CoverageEntry>, entries: Vec<CoverageEntry>)
 fn record_collector_failure(
     category: ManifestCategoryName,
     collector: &str,
-    error: anyhow::Error,
+    error: &anyhow::Error,
     coverage: &mut Vec<CoverageEntry>,
     warnings: &mut Vec<String>,
 ) {
-    let message = error.to_string();
+    let message = format!("{error:#}");
     coverage.push(CoverageEntry {
         category,
         endpoint: collector.to_owned(),
@@ -855,15 +855,27 @@ fn write_manifest(output: &Path, content: &str) -> Result<()> {
     }
 
     let temporary = output.with_extension(format!("tmp.{}", std::process::id()));
-    std::fs::write(&temporary, content)
-        .with_context(|| format!("Failed to write {}", temporary.display()))?;
-    std::fs::rename(&temporary, output)
-        .with_context(|| format!("Failed to replace {}", output.display()))?;
+    // `create_new` refuses to follow a pre-placed symlink at the predictable name.
+    let write_result = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .and_then(|mut file| std::io::Write::write_all(&mut file, content.as_bytes()));
+    if let Err(error) = write_result {
+        return Err(error).with_context(|| format!("Failed to write {}", temporary.display()));
+    }
+    if let Err(error) = std::fs::rename(&temporary, output) {
+        if let Err(cleanup) = std::fs::remove_file(&temporary) {
+            tracing::debug!("Could not remove {}: {cleanup}", temporary.display());
+        }
+        return Err(error).with_context(|| format!("Failed to replace {}", output.display()));
+    }
     Ok(())
 }
 
-fn progress(stdout: bool, message: String) {
-    if stdout {
+/// Print progress to stderr when the manifest goes to stdout, so it never mixes with the output.
+fn progress(manifest_on_stdout: bool, message: &str) {
+    if manifest_on_stdout {
         eprintln!("\n  {message}");
     } else {
         println!("\n  {message}");
@@ -924,6 +936,31 @@ mod tests {
         SecretPlaceholderConfig,
     };
     use crate::reconcile::general::GeneralLabel;
+
+    #[test]
+    fn write_manifest_replaces_the_output_and_leaves_no_temporary_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("ward.toml");
+        std::fs::write(&output, "old").unwrap();
+
+        write_manifest(&output, "new").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&output).unwrap(), "new");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_manifest_does_not_follow_a_pre_placed_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("ward.toml");
+        let victim = dir.path().join("victim.txt");
+        let temporary = output.with_extension(format!("tmp.{}", std::process::id()));
+        std::os::unix::fs::symlink(&victim, &temporary).unwrap();
+
+        assert!(write_manifest(&output, "new").is_err());
+        assert!(!victim.exists());
+    }
 
     #[test]
     fn parses_supported_repository_references() {

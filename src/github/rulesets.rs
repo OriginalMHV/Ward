@@ -86,10 +86,6 @@ impl Client {
         self.list_rulesets_scoped(repo, true).await
     }
 
-    pub async fn list_repository_rulesets(&self, repo: &str) -> Result<Vec<Ruleset>> {
-        self.list_rulesets_scoped(repo, false).await
-    }
-
     async fn list_rulesets_scoped(
         &self,
         repo: &str,
@@ -102,7 +98,7 @@ impl Client {
             )
         })
         .await
-        .context("Failed to parse rulesets response")
+        .context("Failed to read rulesets response")
     }
 
     pub async fn get_ruleset(&self, repo: &str, ruleset_id: u64) -> Result<RulesetDetail> {
@@ -139,6 +135,15 @@ impl Client {
     }
 
     pub async fn get_team_id(&self, team_slug: &str) -> Result<u64> {
+        self.cached_org_keyed(
+            |lookups| &lookups.team_ids,
+            team_slug,
+            self.fetch_team_id(team_slug),
+        )
+        .await
+    }
+
+    async fn fetch_team_id(&self, team_slug: &str) -> Result<u64> {
         #[derive(Deserialize)]
         struct TeamIdResponse {
             id: u64,
@@ -154,6 +159,15 @@ impl Client {
     }
 
     pub async fn get_user_by_login(&self, login: &str) -> Result<GitHubUser> {
+        self.cached_org_keyed(
+            |lookups| &lookups.users,
+            login,
+            self.fetch_user_by_login(login),
+        )
+        .await
+    }
+
+    async fn fetch_user_by_login(&self, login: &str) -> Result<GitHubUser> {
         let path = format!("/users/{login}");
         response::expect_json(self.get(&path).await?, "GET", &path)
             .await
@@ -192,36 +206,30 @@ impl Client {
     }
 
     pub async fn list_org_installations(&self) -> Result<Vec<InstalledApp>> {
-        let mut page = pagination::Page::default();
-        let mut installations = Vec::new();
+        self.cached_org(
+            |lookups| &lookups.installations,
+            self.fetch_org_installations(),
+        )
+        .await
+    }
 
-        loop {
-            let path = format!(
-                "/orgs/{}/installations?per_page={}&page={}",
-                self.org, page.per_page, page.number
-            );
-            let payload: InstallationsResponse =
-                response::expect_json(self.get(&path).await?, "GET", &path)
-                    .await
-                    .context("Failed to parse organization installations response")?;
-            let item_count = payload.installations.len();
-            installations.extend(payload.installations);
-
-            if item_count < page.per_page as usize
-                || payload
-                    .total_count
-                    .is_some_and(|total_count| installations.len() >= total_count)
-            {
-                break;
-            }
-
-            page = pagination::Page {
-                number: page.number + 1,
-                ..page
-            };
-        }
-
-        Ok(installations)
+    async fn fetch_org_installations(&self) -> Result<Vec<InstalledApp>> {
+        pagination::collect_paginated_wrapped(
+            self,
+            pagination::PAGE_SIZE,
+            "Failed to parse organization installations response",
+            |page| {
+                format!(
+                    "/orgs/{}/installations?per_page={}&page={}",
+                    self.org, page.per_page, page.number
+                )
+            },
+            |payload: InstallationsResponse| pagination::WrappedPage {
+                items: payload.installations,
+                total_count: payload.total_count,
+            },
+        )
+        .await
     }
 
     pub async fn create_copilot_review_ruleset(&self, repo: &str) -> Result<()> {

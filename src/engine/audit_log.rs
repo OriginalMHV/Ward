@@ -24,15 +24,16 @@ pub struct AuditLog {
 
 impl AuditLog {
     pub fn new() -> Result<Self> {
-        let dir = dirs_path()?;
+        let dir = ward_dir()?;
         fs::create_dir_all(&dir).context("Failed to create ~/.ward/ directory")?;
 
-        let path = dir.join("audit.log");
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .context("Failed to open audit log")?;
+        Self::open(dir.join("audit.log"))
+    }
+
+    /// Open (or create) an audit log at `path`, appending to existing entries.
+    pub fn open(path: impl Into<PathBuf>) -> Result<Self> {
+        let path = path.into();
+        let file = open_append(&path).context("Failed to open audit log")?;
 
         Ok(Self {
             path,
@@ -93,9 +94,22 @@ impl AuditLog {
     }
 }
 
-fn dirs_path() -> Result<PathBuf> {
-    let home = std::env::var("HOME").context("HOME not set")?;
-    Ok(PathBuf::from(home).join(".ward"))
+/// Open `path` for appending, creating it with owner-only permissions on Unix.
+fn open_append(path: &std::path::Path) -> std::io::Result<fs::File> {
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+/// The per-user Ward state directory (`~/.ward`).
+pub fn ward_dir() -> Result<PathBuf> {
+    let home = std::env::home_dir().context("Could not determine the home directory")?;
+    Ok(home.join(".ward"))
 }
 
 #[cfg(test)]
@@ -111,6 +125,19 @@ impl AuditLog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn audit_log_is_created_with_owner_only_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.log");
+        AuditLog::open(&path).unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
 
     #[test]
     fn audit_log_creates_file_and_writes() {

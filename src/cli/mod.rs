@@ -6,6 +6,7 @@ pub mod doctor;
 pub mod drift;
 pub mod import;
 pub mod init;
+mod output;
 pub mod plan;
 pub mod protection;
 pub mod repos;
@@ -81,7 +82,7 @@ pub struct Cli {
 #[derive(clap::Subcommand)]
 pub enum Command {
     // --- Getting Started ---
-    /// Create ward.toml interactively or from an existing repository
+    /// Create a minimal ward.toml, or build one from an existing repository
     #[command(display_order = 1)]
     Init(init::InitCommand),
 
@@ -94,7 +95,7 @@ pub enum Command {
     Config(config_cmd::ConfigCommand),
 
     // --- Inspect ---
-    /// List and inspect repositories
+    /// List repositories
     #[command(display_order = 10)]
     Repos(repos::ReposCommand),
 

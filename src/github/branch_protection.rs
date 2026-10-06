@@ -4,6 +4,7 @@ use serde_json::json;
 
 use super::Client;
 use super::actions::{ReadOutcome, classify_read};
+use super::encoding::encode_unreserved;
 use super::pagination;
 use super::response;
 
@@ -56,6 +57,12 @@ pub struct ActorSet {
     pub teams: Vec<TeamActor>,
     #[serde(default)]
     pub apps: Vec<AppActor>,
+}
+
+impl ActorSet {
+    pub fn is_empty(&self) -> bool {
+        self.users.is_empty() && self.teams.is_empty() && self.apps.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -145,25 +152,20 @@ pub struct DesiredBranchProtection {
     pub required_reviewers: Option<serde_json::Value>,
 }
 
-fn encode_branch(branch: &str) -> String {
-    let mut encoded = String::with_capacity(branch.len());
-    for byte in branch.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(byte as char)
-            }
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
-}
-
 fn actor_slugs(actors: &[AppActor]) -> Vec<String> {
     actors.iter().map(|actor| actor.slug.clone()).collect()
 }
 
 fn team_slugs(actors: &[TeamActor]) -> Vec<String> {
     actors.iter().map(|actor| actor.slug.clone()).collect()
+}
+
+fn actor_set_body(set: &ActorSet) -> serde_json::Value {
+    json!({
+        "users": user_logins(&set.users),
+        "teams": team_slugs(&set.teams),
+        "apps": actor_slugs(&set.apps),
+    })
 }
 
 fn user_logins(actors: &[UserActor]) -> Vec<String> {
@@ -198,7 +200,7 @@ impl Client {
         repo: &str,
         branch: &str,
     ) -> Result<ReadOutcome<DetailedBranchProtection>> {
-        let branch = encode_branch(branch);
+        let branch = encode_unreserved(branch);
         let path = format!("/repos/{}/{repo}/branches/{branch}/protection", self.org);
         classify_read(self.get(&path).await?, "GET", &path, true)
             .await
@@ -271,10 +273,11 @@ impl Client {
                     .status_checks
                     .iter()
                     .map(|check| {
-                        json!({
-                            "context": check.context,
-                            "app_id": check.app_id,
-                        })
+                        let mut entry = json!({ "context": check.context });
+                        if let Some(app_id) = check.app_id {
+                            entry["app_id"] = json!(app_id);
+                        }
+                        entry
                     })
                     .collect::<Vec<_>>()
             };
@@ -288,21 +291,25 @@ impl Client {
         };
 
         let required_pull_request_reviews = if desired.required_pull_request_reviews {
+            // If the owner cannot be read, keep the organization behaviour that clears lists.
+            let organization_owned = self
+                .get_repo(repo)
+                .await
+                .map_or(true, |repository| repository.is_organization_owned());
             let mut body = json!({
-                "dismissal_restrictions": {
-                    "users": user_logins(&desired.dismissal_restrictions.users),
-                    "teams": team_slugs(&desired.dismissal_restrictions.teams),
-                    "apps": actor_slugs(&desired.dismissal_restrictions.apps),
-                },
                 "dismiss_stale_reviews": desired.dismiss_stale_reviews,
                 "require_code_owner_reviews": desired.require_code_owner_reviews,
                 "required_approving_review_count": desired.required_approving_review_count,
-                "bypass_pull_request_allowances": {
-                    "users": user_logins(&desired.pull_request_bypass_allowances.users),
-                    "teams": team_slugs(&desired.pull_request_bypass_allowances.teams),
-                    "apps": actor_slugs(&desired.pull_request_bypass_allowances.apps),
-                },
             });
+            // On organization repositories an empty object is how GitHub clears these lists.
+            // User-owned repositories reject the objects even when they are empty.
+            if organization_owned || !desired.dismissal_restrictions.is_empty() {
+                body["dismissal_restrictions"] = actor_set_body(&desired.dismissal_restrictions);
+            }
+            if organization_owned || !desired.pull_request_bypass_allowances.is_empty() {
+                body["bypass_pull_request_allowances"] =
+                    actor_set_body(&desired.pull_request_bypass_allowances);
+            }
             if let Some(value) = desired.require_last_push_approval {
                 body["require_last_push_approval"] = json!(value);
             }
@@ -314,17 +321,10 @@ impl Client {
             serde_json::Value::Null
         };
 
-        let restrictions = if desired.push_restrictions.users.is_empty()
-            && desired.push_restrictions.teams.is_empty()
-            && desired.push_restrictions.apps.is_empty()
-        {
+        let restrictions = if desired.push_restrictions.is_empty() {
             serde_json::Value::Null
         } else {
-            json!({
-                "users": user_logins(&desired.push_restrictions.users),
-                "teams": team_slugs(&desired.push_restrictions.teams),
-                "apps": actor_slugs(&desired.push_restrictions.apps),
-            })
+            actor_set_body(&desired.push_restrictions)
         };
 
         let mut body = json!({
@@ -350,50 +350,23 @@ impl Client {
             body["allow_fork_syncing"] = json!(value);
         }
 
-        let branch = encode_branch(branch);
+        let branch = encode_unreserved(branch);
         let path = format!("/repos/{}/{repo}/branches/{branch}/protection", self.org);
-        response::expect_empty(self.put_json(&path, &body).await?, "PUT", &path).await
-    }
-
-    pub async fn update_branch_protection(
-        &self,
-        repo: &str,
-        branch: &str,
-        config: &crate::config::manifest::BranchProtectionConfig,
-    ) -> Result<()> {
-        self.update_branch_protection_detailed(
-            repo,
-            branch,
-            &DesiredBranchProtection {
-                required_pull_request_reviews: config.enabled,
-                required_approving_review_count: config.required_approvals,
-                dismiss_stale_reviews: config.dismiss_stale_reviews,
-                require_code_owner_reviews: config.require_code_owner_reviews,
-                require_last_push_approval: None,
-                required_status_checks: config.require_status_checks,
-                strict_status_checks: config.strict_status_checks,
-                status_check_contexts: Vec::new(),
-                status_checks: Vec::new(),
-                push_restrictions: ActorSet::default(),
-                dismissal_restrictions: ActorSet::default(),
-                pull_request_bypass_allowances: ActorSet::default(),
-                enforce_admins: config.enforce_admins,
-                required_linear_history: config.required_linear_history,
-                allow_force_pushes: config.allow_force_pushes,
-                allow_deletions: config.allow_deletions,
-                block_creations: None,
-                require_conversation_resolution: None,
-                require_signed_commits: None,
-                lock_branch: None,
-                allow_fork_syncing: None,
-                required_reviewers: None,
-            },
-        )
-        .await
+        response::expect_empty(self.put_json(&path, &body).await?, "PUT", &path)
+            .await
+            .map_err(|error| {
+                if format!("{error:#}").contains("Only organization repositories") {
+                    error.context(
+                        "dismissal restrictions, push restrictions and PR bypass allowances require an organization-owned repository",
+                    )
+                } else {
+                    error
+                }
+            })
     }
 
     pub async fn delete_branch_protection(&self, repo: &str, branch: &str) -> Result<()> {
-        let branch = encode_branch(branch);
+        let branch = encode_unreserved(branch);
         let path = format!("/repos/{}/{repo}/branches/{branch}/protection", self.org);
         response::expect_empty(self.delete(&path).await?, "DELETE", &path).await
     }
@@ -404,7 +377,7 @@ impl Client {
         branch: &str,
         enabled: bool,
     ) -> Result<()> {
-        let branch = encode_branch(branch);
+        let branch = encode_unreserved(branch);
         let path = format!(
             "/repos/{}/{repo}/branches/{branch}/protection/required_signatures",
             self.org

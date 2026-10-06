@@ -7,6 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::Result;
+use futures_util::StreamExt;
 
 use crate::config::manifest::{
     CategoryPolicy, CoverageEntry, CoverageOutcome, FileEncoding, FilesCategoryV2, ManagedFileV2,
@@ -15,7 +16,7 @@ use crate::config::manifest::{
 use crate::github::Client;
 use crate::github::commits::{AtomicCommitEntry, AtomicCommitFile, CommitContent, DeleteTreeEntry};
 use crate::github::contents::{
-    GitEntryMode, GitObjectType, GitTreeReadStatus, validate_relative_git_path,
+    GitEntryMode, GitObjectType, GitTreeRead, GitTreeUnavailable, validate_relative_git_path,
 };
 
 pub const KNOWN_CONFIG_INCLUDE_GLOBS: &[&str] = &[
@@ -57,6 +58,15 @@ pub const KNOWN_CONFIG_INCLUDE_GLOBS: &[&str] = &[
 ];
 
 pub const MAX_MANAGED_BLOB_BYTES: u64 = 1024 * 1024;
+
+// The client's own semaphore still bounds in-flight requests.
+const BLOB_FETCH_CONCURRENCY: usize = 8;
+
+struct PendingBlob {
+    scoped_index: usize,
+    issue_index: usize,
+    mode: GitEntryMode,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilesIssueSeverity {
@@ -216,54 +226,54 @@ pub async fn collect_files_category(
         None,
     )];
 
-    let Some(tree) = tree_read.listing else {
-        let (kind, severity, outcome) = match tree_read.status {
-            GitTreeReadStatus::Available => unreachable!("available tree read without listing"),
-            GitTreeReadStatus::EmptyRepository => (
-                FilesIssueKind::EmptyRepository,
-                FilesIssueSeverity::Blocker,
-                CoverageOutcome::Unavailable,
-            ),
-            GitTreeReadStatus::PermissionDenied => (
-                FilesIssueKind::PermissionDenied,
-                FilesIssueSeverity::Blocker,
-                CoverageOutcome::PermissionDenied,
-            ),
-            GitTreeReadStatus::NotFound => (
-                FilesIssueKind::NotFound,
-                FilesIssueSeverity::Blocker,
-                CoverageOutcome::Unavailable,
-            ),
-        };
-        let reason = tree_read.detail.clone();
-        coverage = vec![coverage_entry(
-            repo,
-            branch,
-            outcome,
-            reason.clone(),
-            (tree_read.status == GitTreeReadStatus::PermissionDenied).then_some("contents:read"),
-        )];
+    let tree = match tree_read {
+        GitTreeRead::Available(tree) => tree,
+        GitTreeRead::Unavailable { reason, detail } => {
+            let (kind, severity, outcome) = match reason {
+                GitTreeUnavailable::EmptyRepository => (
+                    FilesIssueKind::EmptyRepository,
+                    FilesIssueSeverity::Blocker,
+                    CoverageOutcome::Unavailable,
+                ),
+                GitTreeUnavailable::PermissionDenied => (
+                    FilesIssueKind::PermissionDenied,
+                    FilesIssueSeverity::Blocker,
+                    CoverageOutcome::PermissionDenied,
+                ),
+                GitTreeUnavailable::NotFound => (
+                    FilesIssueKind::NotFound,
+                    FilesIssueSeverity::Blocker,
+                    CoverageOutcome::Unavailable,
+                ),
+            };
+            coverage = vec![coverage_entry(
+                repo,
+                branch,
+                outcome,
+                Some(detail.clone()),
+                (reason == GitTreeUnavailable::PermissionDenied).then_some("contents:read"),
+            )];
 
-        return Ok(FilesCollection {
-            category: FilesCategoryV2 {
-                policy: category
-                    .map(|category| category.policy.clone())
-                    .unwrap_or_else(CategoryPolicy::observe),
-                include: scope.include,
-                exclude: scope.exclude,
-                entries: Vec::new(),
-            },
-            scoped_files: Vec::new(),
-            issues: vec![FilesIssue {
-                path: None,
-                kind,
-                severity,
-                message: reason
-                    .unwrap_or_else(|| format!("Failed to collect managed files for {repo}")),
-            }],
-            coverage,
-            truncated: false,
-        });
+            return Ok(FilesCollection {
+                category: FilesCategoryV2 {
+                    policy: category
+                        .map(|category| category.policy.clone())
+                        .unwrap_or_else(CategoryPolicy::observe),
+                    include: scope.include,
+                    exclude: scope.exclude,
+                    entries: Vec::new(),
+                },
+                scoped_files: Vec::new(),
+                issues: vec![FilesIssue {
+                    path: None,
+                    kind,
+                    severity,
+                    message: detail,
+                }],
+                coverage,
+                truncated: false,
+            });
+        }
     };
 
     let mut issues = Vec::new();
@@ -287,6 +297,7 @@ pub async fn collect_files_category(
 
     let mut scoped_files = Vec::new();
     let mut managed_entries = Vec::new();
+    let mut pending = Vec::new();
 
     for entry in tree.entries {
         if entry.object_type == GitObjectType::Tree || !scope.is_selected(&entry.path) {
@@ -394,44 +405,67 @@ pub async fn collect_files_category(
             continue;
         }
 
-        let bytes = client.get_blob_bytes(repo, &entry.sha).await?;
-        if bytes.len() as u64 > MAX_MANAGED_BLOB_BYTES {
+        pending.push(PendingBlob {
+            scoped_index: scoped_files.len(),
+            issue_index: issues.len(),
+            mode,
+        });
+        scoped_files.push(scoped);
+    }
+
+    let blobs = futures_util::stream::iter(
+        pending
+            .iter()
+            .map(|blob| client.get_blob_bytes(repo, &scoped_files[blob.scoped_index].sha)),
+    )
+    .buffered(BLOB_FETCH_CONCURRENCY)
+    .collect::<Vec<_>>()
+    .await;
+
+    let mut inserted_issues = 0;
+    for (blob, bytes) in pending.iter().zip(blobs) {
+        let bytes = bytes?;
+        let scoped = &mut scoped_files[blob.scoped_index];
+        let issue = if bytes.len() as u64 > MAX_MANAGED_BLOB_BYTES {
             scoped.kind = ScopedRepoFileKind::Oversized;
-            issues.push(FilesIssue {
-                path: Some(entry.path.clone()),
+            Some(FilesIssue {
+                path: Some(scoped.path.clone()),
                 kind: FilesIssueKind::Oversized,
                 severity: FilesIssueSeverity::Warning,
                 message: format!(
                     "{} expands to {} bytes, above the {} byte managed-file limit",
-                    entry.path,
+                    scoped.path,
                     bytes.len(),
                     MAX_MANAGED_BLOB_BYTES
                 ),
-            });
-            scoped_files.push(scoped);
-            continue;
-        }
-
-        if is_lfs_pointer(&bytes) {
+            })
+        } else if is_lfs_pointer(&bytes) {
             scoped.kind = ScopedRepoFileKind::LfsPointer;
             scoped.bytes = Some(bytes);
-            issues.push(FilesIssue {
-                path: Some(entry.path.clone()),
+            Some(FilesIssue {
+                path: Some(scoped.path.clone()),
                 kind: FilesIssueKind::LfsPointer,
                 severity: FilesIssueSeverity::Warning,
                 message: format!(
                     "{} is a Git LFS pointer; Ward will not attempt to copy the external payload",
-                    entry.path
+                    scoped.path
                 ),
-            });
-            scoped_files.push(scoped);
-            continue;
-        }
+            })
+        } else {
+            managed_entries.push(managed_file_from_bytes(
+                &scoped.path,
+                &bytes,
+                blob.mode,
+                &scoped.sha,
+            ));
+            scoped.bytes = Some(bytes);
+            None
+        };
 
-        let managed = managed_file_from_bytes(&entry.path, &bytes, mode, &entry.sha);
-        scoped.bytes = Some(bytes);
-        managed_entries.push(managed);
-        scoped_files.push(scoped);
+        if let Some(issue) = issue {
+            issues.insert(blob.issue_index + inserted_issues, issue);
+            inserted_issues += 1;
+        }
     }
 
     managed_entries.sort_by(|left, right| left.path.cmp(&right.path));
@@ -508,7 +542,7 @@ pub fn plan_files_category(
         };
 
         if actual_file.kind != ScopedRepoFileKind::Managed {
-            upserts.push(desired_file.clone());
+            issues.push(unsupported_blocker(actual_file, "overwrite"));
             continue;
         }
 
@@ -534,19 +568,16 @@ pub fn plan_files_category(
 
         for file in &actual.scoped_files {
             if desired_paths.contains(&file.path) {
-                if file.kind != ScopedRepoFileKind::Managed {
-                    issues.push(prune_blocker_for_unsupported(file));
-                }
                 continue;
             }
 
             if file.kind != ScopedRepoFileKind::Managed {
-                issues.push(prune_blocker_for_unsupported(file));
+                issues.push(unsupported_blocker(file, "prune"));
                 continue;
             }
 
             let Some(mode) = file.mode else {
-                issues.push(prune_blocker_for_unsupported(file));
+                issues.push(unsupported_blocker(file, "prune"));
                 continue;
             };
 
@@ -818,10 +849,10 @@ fn coverage_entry(
     }
 }
 
-fn prune_blocker_for_unsupported(file: &ScopedRepoFile) -> FilesIssue {
+fn unsupported_blocker(file: &ScopedRepoFile, action: &str) -> FilesIssue {
     let (kind, subject) = match file.kind {
-        ScopedRepoFileKind::Managed => unreachable!("managed file cannot be a prune blocker"),
-        ScopedRepoFileKind::UnsupportedMode => (
+        // A managed file reaches this blocker only when it has no usable Git mode.
+        ScopedRepoFileKind::Managed | ScopedRepoFileKind::UnsupportedMode => (
             FilesIssueKind::UnknownMode,
             format!("unsupported Git mode {}", file.raw_mode),
         ),
@@ -839,7 +870,7 @@ fn prune_blocker_for_unsupported(file: &ScopedRepoFile) -> FilesIssue {
         kind,
         severity: FilesIssueSeverity::Blocker,
         message: format!(
-            "Refusing to prune {} because Ward collected it as {subject} and cannot faithfully round-trip it",
+            "Refusing to {action} {} because Ward collected it as {subject} and cannot faithfully round-trip it",
             file.path
         ),
     }
@@ -990,6 +1021,46 @@ size 42
             plan.issues
                 .iter()
                 .any(|issue| issue.kind == FilesIssueKind::TruncatedTree
+                    && issue.severity == FilesIssueSeverity::Blocker)
+        );
+    }
+
+    #[test]
+    fn prune_blocks_a_managed_entry_without_a_git_mode() {
+        let desired = FilesCategoryV2 {
+            policy: CategoryPolicy {
+                disposition: ManagementDisposition::Managed,
+                prune: true,
+                sensitive: false,
+            },
+            include: vec![".github/**".to_owned()],
+            exclude: Vec::new(),
+            entries: Vec::new(),
+        };
+        let actual = FilesCollection {
+            category: desired.clone(),
+            scoped_files: vec![ScopedRepoFile {
+                path: ".github/old.yml".to_owned(),
+                mode: None,
+                raw_mode: "100644".to_owned(),
+                object_type: GitObjectType::Blob,
+                sha: "abc".to_owned(),
+                size: Some(1),
+                kind: ScopedRepoFileKind::Managed,
+                bytes: None,
+            }],
+            issues: Vec::new(),
+            coverage: Vec::<CoverageEntry>::new(),
+            truncated: false,
+        };
+
+        let plan = plan_files_category(&desired, &actual).unwrap();
+
+        assert!(plan.deletions.is_empty());
+        assert!(
+            plan.issues
+                .iter()
+                .any(|issue| issue.kind == FilesIssueKind::UnknownMode
                     && issue.severity == FilesIssueSeverity::Blocker)
         );
     }

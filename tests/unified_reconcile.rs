@@ -1,3 +1,10 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test helpers outside #[test] functions"
+)]
+
 mod common;
 
 use serde_json::json;
@@ -369,7 +376,9 @@ async fn apply_files_routes_through_dedicated_branch_and_pull_request() {
     )]));
 
     let client = Client::new_for_test("test-org", &server.uri());
-    let audit = ward::engine::audit_log::AuditLog::new().unwrap();
+    let audit_dir = tempfile::tempdir().unwrap();
+    let audit =
+        ward::engine::audit_log::AuditLog::open(audit_dir.path().join("audit.log")).unwrap();
     let repos = vec![test_repo(repo)];
     let report = unified::apply(
         &client,
@@ -502,5 +511,383 @@ async fn high_impact_repository_change_is_gated() {
     assert!(
         repository.actionable >= 1,
         "visibility change becomes actionable with --allow-high-impact"
+    );
+}
+
+fn scoped_manifest() -> Manifest {
+    let mut manifest = base_manifest();
+    manifest.systems.push(ward::config::manifest::SystemConfig {
+        id: "recall".to_owned(),
+        name: "Recall".to_owned(),
+        match_prefix: false,
+        exclude: Vec::new(),
+        repos: vec!["recall".to_owned()],
+        categories: Default::default(),
+    });
+    manifest
+}
+
+async fn mock_repo(server: &MockServer, name: &str, archived: bool) {
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/test-org/{name}")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(common::make_repo_json(name, archived)),
+        )
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn repo_flag_outside_manifest_scope_is_an_error() {
+    let server = MockServer::start().await;
+    mock_repo(&server, "pulse", false).await;
+    let client = Client::new_for_test("test-org", &server.uri());
+
+    let error = unified::resolve_target_repos(&client, &scoped_manifest(), None, Some("pulse"))
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("not in the manifest scope"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn repo_flag_inside_manifest_scope_narrows() {
+    let server = MockServer::start().await;
+    mock_repo(&server, "recall", false).await;
+    let client = Client::new_for_test("test-org", &server.uri());
+
+    let repos = unified::resolve_target_repos(&client, &scoped_manifest(), None, Some("recall"))
+        .await
+        .unwrap();
+    assert_eq!(repos.len(), 1);
+    assert_eq!(repos[0].name, "recall");
+}
+
+#[tokio::test]
+async fn repo_flag_allows_an_archived_repository_for_read_only_commands() {
+    let server = MockServer::start().await;
+    mock_repo(&server, "recall", true).await;
+    let client = Client::new_for_test("test-org", &server.uri());
+
+    let repos = unified::resolve_target_repos(&client, &scoped_manifest(), None, Some("recall"))
+        .await
+        .unwrap();
+    assert_eq!(repos.len(), 1);
+    assert!(repos[0].archived);
+}
+
+#[tokio::test]
+async fn an_explicit_archived_target_is_refused_for_apply_with_a_clear_message() {
+    let server = MockServer::start().await;
+    mock_repo(&server, "recall", true).await;
+    let client = Client::new_for_test("test-org", &server.uri());
+    let repos = unified::resolve_target_repos(&client, &scoped_manifest(), None, Some("recall"))
+        .await
+        .unwrap();
+
+    let error = unified::reject_archived_explicit_target(&repos).unwrap_err();
+    assert!(
+        error.to_string().contains("'recall' is archived"),
+        "{error}"
+    );
+    assert!(error.to_string().contains("does not apply"), "{error}");
+}
+
+#[tokio::test]
+async fn archived_repositories_in_a_scope_are_skipped_not_fatal() {
+    let server = MockServer::start().await;
+    mock_repo(&server, "recall", true).await;
+    let client = Client::new_for_test("test-org", &server.uri());
+    let repos = unified::resolve_target_repos(&client, &scoped_manifest(), None, Some("recall"))
+        .await
+        .unwrap();
+
+    let prepared = unified::prepare_apply(
+        &client,
+        &scoped_manifest(),
+        &repos,
+        &options(vec![Category::Files], false),
+    )
+    .await
+    .unwrap();
+
+    assert!(prepared.report().repos.is_empty());
+    assert!(
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .all(|request| request.method.as_str() == "GET"
+                && request.url.path() == "/repos/test-org/recall"),
+        "an archived repository must not be planned or changed"
+    );
+}
+
+#[tokio::test]
+async fn repo_flag_is_the_explicit_target_when_the_manifest_has_no_systems() {
+    let server = MockServer::start().await;
+    mock_repo(&server, "pulse", false).await;
+    let client = Client::new_for_test("test-org", &server.uri());
+
+    let repos = unified::resolve_target_repos(&client, &base_manifest(), None, Some("pulse"))
+        .await
+        .unwrap();
+    assert_eq!(repos[0].name, "pulse");
+
+    let error = unified::resolve_target_repos(&client, &base_manifest(), None, None)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("No target selected"), "{error}");
+}
+
+#[tokio::test]
+async fn repo_flag_matches_system_and_explicit_names_case_insensitively() {
+    let server = MockServer::start().await;
+    mock_repo(&server, "Recall", false).await;
+    mock_repo(&server, "RECALL-api", false).await;
+    let client = Client::new_for_test("test-org", &server.uri());
+    let mut manifest = scoped_manifest();
+
+    let repos = unified::resolve_target_repos(&client, &manifest, None, Some("Recall"))
+        .await
+        .unwrap();
+    assert_eq!(repos.len(), 1);
+
+    manifest.systems[0].match_prefix = true;
+    let repos = unified::resolve_target_repos(&client, &manifest, None, Some("RECALL-api"))
+        .await
+        .unwrap();
+    assert_eq!(repos.len(), 1);
+}
+
+#[tokio::test]
+async fn unknown_system_is_an_error() {
+    let server = MockServer::start().await;
+    let client = Client::new_for_test("test-org", &server.uri());
+
+    let error = unified::resolve_target_repos(&client, &scoped_manifest(), Some("nope"), None)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("Unknown system"), "{error}");
+}
+
+#[tokio::test]
+async fn repo_flag_respects_exclude_patterns() {
+    let server = MockServer::start().await;
+    mock_repo(&server, "recall-docs", false).await;
+    let client = Client::new_for_test("test-org", &server.uri());
+    let mut manifest = scoped_manifest();
+    manifest.systems[0].match_prefix = true;
+    manifest.systems[0].exclude = vec!["^docs$".to_owned()];
+
+    let error = unified::resolve_target_repos(&client, &manifest, None, Some("recall-docs"))
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("not in the manifest scope"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn explicit_repository_fetch_failure_is_an_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/recall"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    let client = Client::new_for_test("test-org", &server.uri());
+
+    let result = unified::resolve_target_repos(&client, &scoped_manifest(), None, None).await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn prepare_apply_reports_the_plan_without_mutating() {
+    let server = MockServer::start().await;
+    mock_default_tree(
+        &server,
+        "my-repo",
+        json!([{ "path": "README.md", "mode": "100644", "type": "blob", "sha": "blob-readme", "size": 3 }]),
+    )
+    .await;
+
+    let mut manifest = base_manifest();
+    manifest.categories.files = Some(managed_files_category(vec![dependabot_entry(
+        "version: 2\n",
+    )]));
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let repos = vec![test_repo("my-repo")];
+    let prepared = unified::prepare_apply(
+        &client,
+        &manifest,
+        &repos,
+        &options(vec![Category::Files], false),
+    )
+    .await
+    .unwrap();
+
+    let report = prepared.report();
+    assert_eq!(report.actionable, 1);
+    let mutations = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|request| request.method.as_str() != "GET")
+        .count();
+    assert_eq!(mutations, 0, "preparing the apply must not mutate");
+}
+
+#[tokio::test]
+async fn plan_reads_the_repository_endpoint_once_per_repository() {
+    use ward::config::manifest::BranchProtectionCategoryV2;
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/my-repo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 1,
+            "name": "my-repo",
+            "full_name": "test-org/my-repo",
+            "archived": false,
+            "default_branch": "main",
+            "visibility": "private"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+
+    let mut manifest = base_manifest();
+    manifest.categories.repository = Some(RepositoryCategoryV2 {
+        policy: CategoryPolicy::observe(),
+        settings: None,
+        metadata: None,
+        custom_properties: Vec::new(),
+        immutable_releases: None,
+        references: Vec::new(),
+    });
+    manifest.categories.security = Some(SecurityCategoryV2::observe_sensitive());
+    manifest.categories.branch_protection = Some(BranchProtectionCategoryV2 {
+        policy: CategoryPolicy::observe(),
+        default_branch: None,
+        default_branch_detailed: None,
+        protected_branches: Vec::new(),
+    });
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let repos = vec![test_repo("my-repo")];
+    let _ = unified::plan(
+        &client,
+        &manifest,
+        &repos,
+        &options(
+            vec![
+                Category::Repository,
+                Category::Security,
+                Category::BranchProtection,
+            ],
+            false,
+        ),
+    )
+    .await
+    .unwrap();
+
+    let repo_reads = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|request| {
+            request.method.as_str() == "GET" && request.url.path() == "/repos/test-org/my-repo"
+        })
+        .count();
+    assert_eq!(repo_reads, 1);
+}
+
+async fn org_hits(server: &MockServer, suffix: &str) -> usize {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|request| request.url.path() == format!("/orgs/test-org/{suffix}"))
+        .count()
+}
+
+#[tokio::test]
+async fn plan_reads_organization_lookups_once_for_many_repositories() {
+    use ward::config::manifest::{
+        ReferencedResourceConfig, ReferencedResourceType, RepositoryAccessCategoryV2,
+    };
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/orgs/test-org/teams"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": 7, "name": "Core", "slug": "core", "permission": "push" }
+        ])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/orgs/test-org/custom-repository-roles"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({ "message": "Forbidden" })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+
+    let mut manifest = base_manifest();
+    manifest.categories.access = Some(RepositoryAccessCategoryV2 {
+        policy: CategoryPolicy::observe(),
+        references: vec![
+            ReferencedResourceConfig {
+                resource_type: ReferencedResourceType::Team,
+                name: "core".to_owned(),
+            },
+            ReferencedResourceConfig {
+                resource_type: ReferencedResourceType::Role,
+                name: "Maintainer+".to_owned(),
+            },
+        ],
+        ..RepositoryAccessCategoryV2::default()
+    });
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let repos = ["a", "b", "c", "d"].map(test_repo).to_vec();
+    let report = unified::plan(
+        &client,
+        &manifest,
+        &repos,
+        &options(vec![Category::Access], false),
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.repos.len(), 4);
+
+    assert_eq!(org_hits(&server, "teams").await, 1);
+    assert_eq!(org_hits(&server, "custom-repository-roles").await, 1);
+
+    let fresh = client.uncached();
+    let _ = fresh.list_org_teams_checked().await.unwrap();
+    let _ = client.list_org_teams_checked().await.unwrap();
+    assert_eq!(
+        org_hits(&server, "teams").await,
+        2,
+        "an uncached client reads again and the cached client does not"
     );
 }

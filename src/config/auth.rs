@@ -7,13 +7,21 @@ use anyhow::{Context, Result};
 /// 2. `GITHUB_TOKEN` environment variable
 /// 3. `gh auth token` command output
 pub fn resolve_token() -> Result<String> {
-    if let Ok(token) = std::env::var("GH_TOKEN") {
-        tracing::debug!("Using token from GH_TOKEN");
-        return Ok(token);
-    }
+    resolve_token_with(|name| std::env::var(name).ok())
+}
 
-    if let Ok(token) = std::env::var("GITHUB_TOKEN") {
-        tracing::debug!("Using token from GITHUB_TOKEN");
+/// Return a trimmed, non-empty value for the first listed variable that has one.
+fn env_token(lookup: &impl Fn(&str) -> Option<String>) -> Option<(&'static str, String)> {
+    ["GH_TOKEN", "GITHUB_TOKEN"].into_iter().find_map(|name| {
+        let value = lookup(name)?;
+        let token = value.trim();
+        (!token.is_empty()).then(|| (name, token.to_owned()))
+    })
+}
+
+fn resolve_token_with(lookup: impl Fn(&str) -> Option<String>) -> Result<String> {
+    if let Some((name, token)) = env_token(&lookup) {
+        tracing::debug!("Using token from {name}");
         return Ok(token);
     }
 
@@ -40,4 +48,31 @@ pub fn resolve_token() -> Result<String> {
 
     tracing::debug!("Using token from gh auth token");
     Ok(token)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::env_token;
+
+    fn lookup<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name| {
+            pairs
+                .iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| (*value).to_owned())
+        }
+    }
+
+    #[test]
+    fn environment_tokens_are_trimmed() {
+        let token = env_token(&lookup(&[("GH_TOKEN", "  abc\n")]));
+        assert_eq!(token, Some(("GH_TOKEN", "abc".to_owned())));
+    }
+
+    #[test]
+    fn empty_or_blank_tokens_fall_through_to_the_next_source() {
+        let token = env_token(&lookup(&[("GH_TOKEN", ""), ("GITHUB_TOKEN", " tok ")]));
+        assert_eq!(token, Some(("GITHUB_TOKEN", "tok".to_owned())));
+        assert_eq!(env_token(&lookup(&[("GH_TOKEN", "  ")])), None);
+    }
 }

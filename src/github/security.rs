@@ -96,6 +96,9 @@ pub struct SecurityState {
     pub secret_scanning: bool,
     pub secret_scanning_ai_detection: bool,
     pub push_protection: bool,
+    /// Features whose state could not be read, so their `false` is unknown.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unknown: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -113,12 +116,6 @@ struct EnabledState {
 
 fn status_is_enabled(status: Option<&SecurityFeatureStatus>) -> bool {
     status.is_some_and(|value| value.status == "enabled")
-}
-
-fn security_status(status: bool) -> serde_json::Value {
-    json!({
-        "status": if status { "enabled" } else { "disabled" }
-    })
 }
 
 /// Extract secret-scanning fields from a pre-fetched `security_and_analysis` JSON value.
@@ -241,6 +238,14 @@ impl Client {
     pub async fn list_code_security_configurations(
         &self,
     ) -> Result<Vec<CodeSecurityConfiguration>> {
+        self.cached_org(
+            |lookups| &lookups.code_security_configurations,
+            self.fetch_code_security_configurations(),
+        )
+        .await
+    }
+
+    async fn fetch_code_security_configurations(&self) -> Result<Vec<CodeSecurityConfiguration>> {
         pagination::collect_paginated(self, |page| {
             format!(
                 "/orgs/{}/code-security/configurations?per_page={}&page={}",
@@ -248,7 +253,7 @@ impl Client {
             )
         })
         .await
-        .context("Failed to parse code security configurations response")
+        .context("Failed to read code security configurations response")
     }
 
     pub async fn read_repository_code_security_configuration(
@@ -308,8 +313,18 @@ impl Client {
         let mut state = SecurityState::default();
 
         match alerts_result {
-            Ok(response) => state.dependabot_alerts = response.status().as_u16() == 204,
-            Err(error) => tracing::warn!("Failed to check dependabot alerts for {repo}: {error}"),
+            Ok(response) => match response.status().as_u16() {
+                204 => state.dependabot_alerts = true,
+                404 => {}
+                status => {
+                    tracing::warn!("Dependabot alerts state for {repo} unreadable: HTTP {status}");
+                    state.unknown.push("dependabot_alerts".to_owned());
+                }
+            },
+            Err(error) => {
+                tracing::warn!("Failed to check dependabot alerts for {repo}: {error}");
+                state.unknown.push("dependabot_alerts".to_owned());
+            }
         }
 
         match fixes_result {
@@ -341,7 +356,17 @@ impl Client {
             }
             Ok(None) => {}
             Err(error) => {
-                tracing::warn!("Failed to inspect repository security settings for {repo}: {error}")
+                tracing::warn!(
+                    "Failed to inspect repository security settings for {repo}: {error}"
+                );
+                state.unknown.extend(
+                    [
+                        "secret_scanning",
+                        "secret_scanning_ai_detection",
+                        "push_protection",
+                    ]
+                    .map(str::to_owned),
+                );
             }
         }
 
@@ -399,23 +424,6 @@ impl Client {
     pub async fn disable_dependabot_security_updates(&self, repo: &str) -> Result<()> {
         let path = format!("/repos/{}/{repo}/automated-security-fixes", self.org);
         response::expect_empty(self.delete(&path).await?, "DELETE", &path).await
-    }
-
-    pub async fn set_security_features(
-        &self,
-        repo: &str,
-        secret_scanning: bool,
-        ai_detection: bool,
-        push_protection: bool,
-    ) -> Result<()> {
-        let body = json!({
-            "secret_scanning": security_status(secret_scanning),
-            "secret_scanning_ai_detection": security_status(ai_detection),
-            "secret_scanning_push_protection": security_status(push_protection),
-            "advanced_security": security_status(secret_scanning || ai_detection || push_protection),
-        });
-        self.update_repository_security_and_analysis(repo, &body)
-            .await
     }
 }
 

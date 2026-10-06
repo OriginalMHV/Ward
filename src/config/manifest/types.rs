@@ -27,11 +27,13 @@ pub struct Manifest {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct OrgConfig {
     pub name: String,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RepositorySettingsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub has_issues: Option<bool>,
@@ -101,6 +103,7 @@ pub struct RepositorySettingsConfig {
 /// the branch Ward pushes to, the reviewers it requests, and the commit
 /// message prefix it uses.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct FileDeliveryConfig {
     #[serde(default = "default_branch_name")]
     pub branch: String,
@@ -123,6 +126,7 @@ impl Default for FileDeliveryConfig {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct BranchProtectionConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -160,6 +164,7 @@ fn default_one() -> u32 {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RepositoryRuleConfig {
     #[serde(rename = "type")]
     pub rule_type: String,
@@ -169,12 +174,14 @@ pub struct RepositoryRuleConfig {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct TeamAccess {
     pub slug: String,
     pub permission: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SystemConfig {
     pub id: String,
     pub name: String,

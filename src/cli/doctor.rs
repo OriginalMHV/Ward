@@ -4,6 +4,7 @@ use console::style;
 
 use crate::config::auth;
 use crate::config::manifest::Manifest;
+use crate::outcome::Outcome;
 
 #[derive(Args)]
 pub struct DoctorCommand;
@@ -92,6 +93,9 @@ impl DoctorCommand {
         }
 
         println!();
+        if fail > 0 {
+            return Err(Outcome::ChecksFailed(format!("{fail} doctor check(s) failed")).into());
+        }
         Ok(())
     }
 }
@@ -172,7 +176,7 @@ fn check_gh_cli() -> Check {
 }
 
 fn check_audit_log() -> Check {
-    let log = dirs_path("audit.log");
+    let log = audit_log_path();
     if log.exists() {
         match std::fs::metadata(&log) {
             Ok(meta) => {
@@ -194,7 +198,7 @@ fn check_audit_log() -> Check {
             }
             Err(_) => Check {
                 name: "Audit log",
-                status: CheckStatus::Pass,
+                status: CheckStatus::Warn,
                 detail: "exists but unreadable".to_string(),
             },
         }
@@ -242,56 +246,41 @@ fn check_systems(manifest: &Manifest) -> Check {
 }
 
 async fn check_api_connectivity(config_path: Option<&str>) -> Check {
-    let manifest = match Manifest::load(config_path) {
-        Ok(m) => m,
-        Err(_) => {
-            return Check {
-                name: "API connectivity",
-                status: CheckStatus::Fail,
-                detail: "cannot load config".to_string(),
-            };
-        }
+    let Ok(manifest) = Manifest::load(config_path) else {
+        return Check {
+            name: "API connectivity",
+            status: CheckStatus::Fail,
+            detail: "cannot load config".to_string(),
+        };
     };
 
-    let token = match auth::resolve_token() {
-        Ok(t) => t,
-        Err(_) => {
-            return Check {
-                name: "API connectivity",
-                status: CheckStatus::Fail,
-                detail: "no token available".to_string(),
-            };
-        }
+    let Ok(token) = auth::resolve_token() else {
+        return Check {
+            name: "API connectivity",
+            status: CheckStatus::Fail,
+            detail: "no token available".to_string(),
+        };
     };
 
-    let client = match reqwest::Client::builder()
-        .default_headers({
-            let mut headers = reqwest::header::HeaderMap::new();
-            headers.insert(
-                reqwest::header::AUTHORIZATION,
-                reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
-                    .unwrap_or_else(|_| reqwest::header::HeaderValue::from_static("")),
-            );
-            headers.insert(
-                reqwest::header::ACCEPT,
-                reqwest::header::HeaderValue::from_static("application/vnd.github+json"),
-            );
-            headers.insert(
-                reqwest::header::USER_AGENT,
-                reqwest::header::HeaderValue::from_static("ward-cli/doctor"),
-            );
-            headers
-        })
-        .build()
-    {
-        Ok(c) => c,
-        Err(_) => {
-            return Check {
-                name: "API connectivity",
-                status: CheckStatus::Fail,
-                detail: "cannot build HTTP client".to_string(),
-            };
-        }
+    let mut authorization = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
+        .unwrap_or_else(|_| reqwest::header::HeaderValue::from_static(""));
+    authorization.set_sensitive(true);
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(reqwest::header::AUTHORIZATION, authorization);
+    headers.insert(
+        reqwest::header::ACCEPT,
+        reqwest::header::HeaderValue::from_static("application/vnd.github+json"),
+    );
+    headers.insert(
+        reqwest::header::USER_AGENT,
+        reqwest::header::HeaderValue::from_static("ward-cli/doctor"),
+    );
+    let Ok(client) = reqwest::Client::builder().default_headers(headers).build() else {
+        return Check {
+            name: "API connectivity",
+            status: CheckStatus::Fail,
+            detail: "cannot build HTTP client".to_string(),
+        };
     };
 
     let url = format!("https://api.github.com/orgs/{}", manifest.org.name);
@@ -353,9 +342,10 @@ async fn check_api_connectivity(config_path: Option<&str>) -> Check {
     }
 }
 
-fn dirs_path(name: &str) -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    std::path::PathBuf::from(home).join(".ward").join(name)
+fn audit_log_path() -> std::path::PathBuf {
+    crate::engine::audit_log::ward_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from(".ward"))
+        .join("audit.log")
 }
 
 #[cfg(test)]

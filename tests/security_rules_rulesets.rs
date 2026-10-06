@@ -267,3 +267,60 @@ async fn ruleset_apply_propagates_required_role_lookup_failure() {
         )
     );
 }
+
+#[tokio::test]
+async fn forbidden_lookups_the_manifest_does_not_need_are_not_unknown_state() {
+    use ward::config::manifest::CoverageOutcome;
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/example/rulesets"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({"message": "Forbidden"})))
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let desired = RulesetsCategoryV2 {
+        policy: CategoryPolicy {
+            disposition: ManagementDisposition::Managed,
+            prune: false,
+            sensitive: true,
+        },
+        references: Vec::new(),
+        repository_rulesets: Vec::new(),
+    };
+    let collected = collect_rulesets_category(&client, "example", Some(&desired))
+        .await
+        .unwrap();
+
+    assert!(collected.coverage.iter().all(|entry| !matches!(
+        entry.outcome,
+        CoverageOutcome::PermissionDenied | CoverageOutcome::Unavailable
+    )));
+}
+
+#[tokio::test]
+async fn plan_limit_403_on_rulesets_names_the_status_and_github_message() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/example/rulesets"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({
+            "message": "Upgrade to GitHub Pro or make this repository public to enable this feature."
+        })))
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let error = collect_rulesets_category(&client, "example", None)
+        .await
+        .unwrap_err();
+    let message = format!("{error:#}");
+
+    assert!(message.contains("403"), "{message}");
+    assert!(message.contains("Upgrade to GitHub Pro"), "{message}");
+    assert!(!message.contains("Failed to parse"), "{message}");
+}

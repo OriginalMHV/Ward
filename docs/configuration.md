@@ -9,6 +9,8 @@ ward config show
 
 The Ward manifest can be authored directly or generated through repository bootstrap. Every command reads the same category-based desired state.
 
+Ward rejects unknown keys in every table. The error names the key and its line.
+
 ## Identity and optional provenance
 
 ```toml
@@ -313,6 +315,8 @@ name = "DEPLOY_TOKEN"
 source = "env"
 key = "WARD_ACTIONS_SECRET_DEPLOY_TOKEN"
 ```
+
+Secrets are create-if-missing. GitHub never returns secret values, so Ward cannot compare them. Ward creates a secret that does not exist and never overwrites a secret that already exists. To rotate a secret, delete it and run `ward apply`, or set the new value with `gh secret set`. This applies to every secret scope in this document.
 
 `dependabot_secrets` and `codespaces_secrets` use the same shape. Organization variables/secrets, apps, self-hosted runners, and other observed resources use `[[categories.actions.references]]`.
 

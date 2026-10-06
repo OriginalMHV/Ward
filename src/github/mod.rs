@@ -5,6 +5,7 @@ pub mod client;
 pub mod commits;
 pub mod contents;
 pub mod dependency_graph;
+mod encoding;
 pub mod environments;
 pub mod integrations;
 mod metadata;
@@ -18,3 +19,4 @@ pub mod settings;
 pub mod teams;
 
 pub use client::Client;
+pub(crate) use response::is_not_found;

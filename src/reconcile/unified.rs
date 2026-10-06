@@ -7,13 +7,13 @@
 //! reconciles configuration of repositories that already exist and are owned
 //! by the configured organization.
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use serde::Serialize;
 
 use crate::config::Manifest;
 use crate::config::manifest::{
     ActionsCategoryV2, CoverageEntry, CoverageOutcome, ManagementDisposition, ManifestCategories,
-    RepositoryIntegrationsCategoryV2,
+    RepositoryCategoryV2, RepositoryIntegrationsCategoryV2,
 };
 use crate::engine::audit_log::AuditLog;
 use crate::github::Client;
@@ -216,6 +216,18 @@ impl UnifiedReport {
         }
     }
 
+    /// How many categories ended as `failed` and as `blocked`, across all repositories.
+    pub fn category_problem_counts(&self) -> (usize, usize) {
+        let count = |status: &str| {
+            self.repos
+                .iter()
+                .flat_map(|repo| &repo.categories)
+                .filter(|category| category.status == status)
+                .count()
+        };
+        (count("failed"), count("blocked"))
+    }
+
     /// Whether any category is blocked or failed (drives a non-zero exit).
     pub fn has_failures(&self) -> bool {
         self.blocked > 0
@@ -224,6 +236,22 @@ impl UnifiedReport {
                     .iter()
                     .any(|category| category.status == "failed")
             })
+    }
+}
+
+impl UnifiedReport {
+    /// Whether a managed category could not read part of its state because of
+    /// a missing permission or an unavailable endpoint. That state is unknown,
+    /// not clean. Observe categories are allowed to degrade.
+    pub fn has_unknown_managed_state(&self) -> bool {
+        self.repos.iter().any(|repo| {
+            repo.categories.iter().any(|category| {
+                category.disposition == "managed"
+                    && category.coverage_outcomes.iter().any(|entry| {
+                        matches!(entry.outcome.as_str(), "permission_denied" | "unavailable")
+                    })
+            })
+        })
     }
 }
 
@@ -344,6 +372,32 @@ impl RepoPlan {
         })
     }
 
+    /// An unreadable PR list degrades the file-dependent categories to
+    /// unavailable coverage instead of aborting the whole plan.
+    fn record_config_pr_lookup_failure(&mut self, message: &str) {
+        for category in &mut self.categories {
+            if dependency_deferral(category, true).total == 0 {
+                continue;
+            }
+            let name = match category.name {
+                Category::Actions => crate::config::manifest::ManifestCategoryName::Actions,
+                Category::Integrations => {
+                    crate::config::manifest::ManifestCategoryName::Integrations
+                }
+                Category::Rulesets => crate::config::manifest::ManifestCategoryName::Rulesets,
+                _ => crate::config::manifest::ManifestCategoryName::BranchProtection,
+            };
+            category.coverage.push(CoverageEntry {
+                category: name,
+                endpoint: "pulls (open configuration pull request)".to_owned(),
+                outcome: crate::config::manifest::CoverageOutcome::Unavailable,
+                reason: Some(message.to_owned()),
+                required_permission: Some("pull_requests:read".to_owned()),
+            });
+            category.warnings += 1;
+        }
+    }
+
     fn has_file_dependent_changes(&self) -> bool {
         self.categories
             .iter()
@@ -377,30 +431,58 @@ fn aggregate_repo(repo: String, categories: Vec<CategoryReport>) -> RepoReport {
 // Target repository resolution (same-owner, existing repos only)
 // ---------------------------------------------------------------------------
 
-/// Resolve the set of existing, same-owner repositories to reconcile from the
-/// global `--repo` / `--system` selectors, falling back to every configured
-/// system. Never creates repositories.
+/// Resolve the set of existing, same-owner repositories to reconcile.
+/// The manifest's systems define the scope. `--system` and `--repo` only
+/// narrow it, so an unknown system or an out-of-scope repository is an error.
+/// Never creates repositories.
 pub async fn resolve_target_repos(
     client: &Client,
     manifest: &Manifest,
     system: Option<&str>,
     repo: Option<&str>,
 ) -> Result<Vec<Repository>> {
-    if let Some(repo_name) = repo {
-        let repository = client.get_repo(repo_name).await?;
-        return Ok(vec![repository]);
-    }
-
     let system_ids: Vec<String> = if let Some(system_id) = system {
+        if manifest.system(system_id).is_none() {
+            let known: Vec<&str> = manifest.systems.iter().map(|s| s.id.as_str()).collect();
+            bail!(
+                "Unknown system '{system_id}'. Configured systems: {}",
+                if known.is_empty() {
+                    "none".to_owned()
+                } else {
+                    known.join(", ")
+                }
+            );
+        }
         vec![system_id.to_owned()]
     } else {
         manifest.systems.iter().map(|s| s.id.clone()).collect()
     };
 
-    if system_ids.is_empty() {
+    if system_ids.is_empty() && repo.is_none() {
         bail!(
-            "No target selected. Pass --repo <name>, --system <id>, or configure systems in ward.toml"
+            "No target selected. Pass --repo <name>, pass --system <id>, or configure systems in ward.toml"
         );
+    }
+
+    if let Some(repo_name) = repo {
+        // Without systems the manifest has only top-level categories, so there is
+        // no scope to escape and --repo is the explicit target.
+        if !system_ids.is_empty() {
+            let mut in_scope = false;
+            for system_id in &system_ids {
+                if system_includes_repo(manifest, system_id, repo_name)? {
+                    in_scope = true;
+                    break;
+                }
+            }
+            if !in_scope {
+                bail!(
+                    "Repository '{repo_name}' is not in the manifest scope (systems: {}). Add it to a system or check its exclude patterns",
+                    system_ids.join(", ")
+                );
+            }
+        }
+        return Ok(vec![client.get_repo(repo_name).await?]);
     }
 
     let mut repos: Vec<Repository> = Vec::new();
@@ -426,6 +508,41 @@ pub async fn resolve_target_repos(
     }
 
     Ok(repos)
+}
+
+/// Whether a system selects the named repository: listed explicitly, or
+/// matched by prefix and not excluded. Mirrors `Client::list_repos_for_system`.
+fn system_includes_repo(manifest: &Manifest, system_id: &str, repo: &str) -> Result<bool> {
+    if manifest
+        .explicit_repos_for_system(system_id)
+        .iter()
+        .any(|explicit| explicit.eq_ignore_ascii_case(repo))
+    {
+        return Ok(true);
+    }
+    if !manifest.matches_prefix_for_system(system_id) {
+        return Ok(false);
+    }
+    // GitHub repository names are case-insensitive.
+    let repo = repo.to_ascii_lowercase();
+    let prefix = system_id.to_ascii_lowercase();
+    let suffix = match repo.strip_prefix(prefix.as_str()) {
+        Some("") => repo.as_str(),
+        Some(rest) => match rest.strip_prefix('-') {
+            Some(suffix) => suffix,
+            None => return Ok(false),
+        },
+        None => return Ok(false),
+    };
+    let excludes = manifest.exclude_patterns_for_system(system_id);
+    if excludes.is_empty() {
+        return Ok(true);
+    }
+    let pattern = regex::RegexBuilder::new(&excludes.join("|"))
+        .case_insensitive(true)
+        .build()
+        .context("Invalid exclude pattern regex")?;
+    Ok(!pattern.is_match(suffix))
 }
 
 // ---------------------------------------------------------------------------
@@ -460,21 +577,24 @@ pub async fn plan(
     repos: &[Repository],
     options: &UnifiedOptions,
 ) -> Result<UnifiedReport> {
-    let mut repo_reports = Vec::with_capacity(repos.len());
     let branch = sync_branch(manifest);
-    for repository in repos {
-        let plan = plan_repo(client, manifest, repository, options).await;
+    let repo_reports = crate::reconcile::map_buffered(repos, |repository| async {
+        let mut plan = plan_repo(client, manifest, repository, options).await;
         let existing_config_pr =
             if !plan.plans_config_pull_request() && plan.has_file_dependent_changes() {
-                client
-                    .find_open_pull_request(&plan.repo, &branch)
-                    .await?
-                    .is_some()
+                match client.find_open_pull_request(&plan.repo, &branch).await {
+                    Ok(pull_request) => pull_request.is_some(),
+                    Err(error) => {
+                        plan.record_config_pr_lookup_failure(&format!("{error:#}"));
+                        false
+                    }
+                }
             } else {
                 false
             };
-        repo_reports.push(plan.to_report_with_config_pr(existing_config_pr));
-    }
+        plan.to_report_with_config_pr(existing_config_pr)
+    })
+    .await;
     Ok(UnifiedReport::from_repos(repo_reports))
 }
 
@@ -486,15 +606,42 @@ async fn plan_repo(
 ) -> RepoPlan {
     let repo = repository.name.clone();
     let desired_categories = manifest.categories_for_repo(&repo);
-    let mut categories = Vec::new();
+    let selected: Vec<Category> = Category::apply_order()
+        .into_iter()
+        .filter(|category| options.includes(*category))
+        .collect();
 
-    for category in Category::apply_order() {
-        if !options.includes(category) {
-            continue;
-        }
-        let planned = plan_category(client, &desired_categories, &repo, category, options).await;
-        categories.push(planned);
-    }
+    // The repository and security categories both read `GET /repos/{repo}`.
+    // Fetch it once. On failure each category falls back to its own read.
+    let needs_repo_read = (selected.contains(&Category::Repository)
+        && desired_categories.repository.is_some())
+        || (selected.contains(&Category::Security) && desired_categories.security.is_some());
+    let repo_data = if needs_repo_read {
+        client.get_repo_value(&repo).await.ok()
+    } else {
+        None
+    };
+    let shared = SharedRepoData {
+        general: repo_data
+            .as_ref()
+            .and_then(|value| serde_json::from_value(value.clone()).ok()),
+        security: repo_data
+            .as_ref()
+            .and_then(|value| serde_json::from_value(value.clone()).ok()),
+        default_branch: &repository.default_branch,
+    };
+
+    let categories = futures_util::future::join_all(selected.iter().map(|category| {
+        plan_category(
+            client,
+            &desired_categories,
+            &repo,
+            *category,
+            options,
+            &shared,
+        )
+    }))
+    .await;
 
     RepoPlan {
         repo,
@@ -503,19 +650,33 @@ async fn plan_repo(
     }
 }
 
+/// Views of one repository fetch, shared by the categories planned for it.
+struct SharedRepoData<'a> {
+    general: Option<crate::github::settings::RepositoryGeneralSettings>,
+    security: Option<crate::github::security::RepositorySecurityBaseline>,
+    default_branch: &'a str,
+}
+
 async fn plan_category(
     client: &Client,
     categories: &ManifestCategories,
     repo: &str,
     category: Category,
     options: &UnifiedOptions,
+    shared: &SharedRepoData<'_>,
 ) -> CategoryPlan {
     match category {
-        Category::Repository => plan_repository(client, categories, repo, options).await,
+        Category::Repository => {
+            plan_repository(client, categories, repo, options, shared.general.clone()).await
+        }
         Category::Files => plan_files(client, categories, repo).await,
-        Category::Security => plan_security(client, categories, repo).await,
+        Category::Security => {
+            plan_security(client, categories, repo, shared.security.clone()).await
+        }
         Category::Rulesets => plan_rulesets(client, categories, repo).await,
-        Category::BranchProtection => plan_branch_protection(client, categories, repo).await,
+        Category::BranchProtection => {
+            plan_branch_protection(client, categories, repo, shared.default_branch).await
+        }
         Category::Actions => plan_actions(client, categories, repo).await,
         Category::Environments => plan_environments(client, categories, repo).await,
         Category::Access => plan_access(client, categories, repo).await,
@@ -540,7 +701,7 @@ fn absent_category(name: Category) -> CategoryPlan {
 fn collection_failed(
     name: Category,
     disposition: ManagementDisposition,
-    error: anyhow::Error,
+    error: &anyhow::Error,
 ) -> CategoryPlan {
     let message = format!("{error:#}");
     CategoryPlan {
@@ -556,20 +717,57 @@ fn collection_failed(
     }
 }
 
+/// Custom properties and immutable releases are optional reads. A failure on them
+/// is unknown managed state only when the manifest actually manages them.
+fn relax_unrequested_repository_coverage(
+    coverage: &mut [CoverageEntry],
+    desired: &RepositoryCategoryV2,
+) {
+    let wants_properties = !desired.custom_properties.is_empty() || desired.policy.prune;
+    let wants_immutable_releases = desired.immutable_releases.is_some();
+    for entry in coverage {
+        let requested = if entry.endpoint.ends_with("/properties/values") {
+            wants_properties
+        } else if entry.endpoint.ends_with("/immutable-releases") {
+            wants_immutable_releases
+        } else {
+            continue;
+        };
+        if !requested
+            && matches!(
+                entry.outcome,
+                CoverageOutcome::PermissionDenied | CoverageOutcome::Unavailable
+            )
+        {
+            entry.outcome = CoverageOutcome::NotApplicable;
+            entry.reason = Some(format!(
+                "not required by the manifest: {}",
+                entry.reason.take().unwrap_or_default()
+            ));
+        }
+    }
+}
+
 async fn plan_repository(
     client: &Client,
     categories: &ManifestCategories,
     repo: &str,
     options: &UnifiedOptions,
+    prefetched: Option<crate::github::settings::RepositoryGeneralSettings>,
 ) -> CategoryPlan {
     let Some(desired) = build_general_desired(categories) else {
         return absent_category(Category::Repository);
     };
     let disposition = desired.repository.policy.disposition;
-    let current = match general::collect(client, repo).await {
-        Ok(state) => state,
-        Err(error) => return collection_failed(Category::Repository, disposition, error),
+    let collected = match prefetched {
+        Some(rest) => general::collect_with_rest(client, repo, rest).await,
+        None => general::collect(client, repo).await,
     };
+    let mut current = match collected {
+        Ok(state) => state,
+        Err(error) => return collection_failed(Category::Repository, disposition, &error),
+    };
+    relax_unrequested_repository_coverage(&mut current.coverage, &desired.repository);
     let plan_options = general::GeneralPlanOptions {
         allow_high_impact: options.allow_high_impact,
     };
@@ -612,12 +810,12 @@ async fn plan_files(client: &Client, categories: &ManifestCategories, repo: &str
     let disposition = desired.policy.disposition;
     let collection = match files::collect_files_category(client, repo, None, Some(&desired)).await {
         Ok(collection) => collection,
-        Err(error) => return collection_failed(Category::Files, disposition, error),
+        Err(error) => return collection_failed(Category::Files, disposition, &error),
     };
     let coverage = collection.coverage.clone();
     let plan = match files::plan_files_category(&desired, &collection) {
         Ok(plan) => plan,
-        Err(error) => return collection_failed(Category::Files, disposition, error),
+        Err(error) => return collection_failed(Category::Files, disposition, &error),
     };
 
     let actionable = plan.atomic_entries.len();
@@ -657,20 +855,32 @@ async fn plan_security(
     client: &Client,
     categories: &ManifestCategories,
     repo: &str,
+    prefetched: Option<crate::github::security::RepositorySecurityBaseline>,
 ) -> CategoryPlan {
     let Some(desired) = categories.security.clone() else {
         return absent_category(Category::Security);
     };
     let disposition = desired.policy.disposition;
-    let collection =
-        match security_rules::collect_security_category(client, repo, Some(&desired)).await {
-            Ok(collection) => collection,
-            Err(error) => return collection_failed(Category::Security, disposition, error),
-        };
+    let collected = match prefetched {
+        Some(baseline) => {
+            security_rules::collect_security_category_with_baseline(
+                client,
+                repo,
+                baseline,
+                Some(&desired),
+            )
+            .await
+        }
+        None => security_rules::collect_security_category(client, repo, Some(&desired)).await,
+    };
+    let collection = match collected {
+        Ok(collection) => collection,
+        Err(error) => return collection_failed(Category::Security, disposition, &error),
+    };
     let coverage = collection.coverage.clone();
     let plan = match security_rules::plan_security_category(&desired, &collection) {
         Ok(plan) => plan,
-        Err(error) => return collection_failed(Category::Security, disposition, error),
+        Err(error) => return collection_failed(Category::Security, disposition, &error),
     };
 
     let actionable = usize::from(plan.has_changes());
@@ -703,12 +913,12 @@ async fn plan_rulesets(
     let collection =
         match security_rules::collect_rulesets_category(client, repo, Some(&desired)).await {
             Ok(collection) => collection,
-            Err(error) => return collection_failed(Category::Rulesets, disposition, error),
+            Err(error) => return collection_failed(Category::Rulesets, disposition, &error),
         };
     let coverage = collection.coverage.clone();
     let plan = match security_rules::plan_rulesets_category(&desired, &collection) {
         Ok(plan) => plan,
-        Err(error) => return collection_failed(Category::Rulesets, disposition, error),
+        Err(error) => return collection_failed(Category::Rulesets, disposition, &error),
     };
 
     let actionable = plan
@@ -737,25 +947,27 @@ async fn plan_branch_protection(
     client: &Client,
     categories: &ManifestCategories,
     repo: &str,
+    default_branch: &str,
 ) -> CategoryPlan {
     let Some(desired) = categories.branch_protection.clone() else {
         return absent_category(Category::BranchProtection);
     };
     let disposition = desired.policy.disposition;
-    let collection = match security_rules::collect_branch_protection_category(
+    let collection = match security_rules::collect_branch_protection_category_for_branch(
         client,
         repo,
+        default_branch.to_owned(),
         Some(&desired),
     )
     .await
     {
         Ok(collection) => collection,
-        Err(error) => return collection_failed(Category::BranchProtection, disposition, error),
+        Err(error) => return collection_failed(Category::BranchProtection, disposition, &error),
     };
     let coverage = collection.coverage.clone();
     let plan = match security_rules::plan_branch_protection_category(&desired, &collection) {
         Ok(plan) => plan,
-        Err(error) => return collection_failed(Category::BranchProtection, disposition, error),
+        Err(error) => return collection_failed(Category::BranchProtection, disposition, &error),
     };
 
     let actionable = plan
@@ -797,7 +1009,7 @@ async fn plan_actions(
     let collection =
         match actions_environments::collect_actions_category(client, repo, Some(&desired)).await {
             Ok(collection) => collection,
-            Err(error) => return collection_failed(Category::Actions, disposition, error),
+            Err(error) => return collection_failed(Category::Actions, disposition, &error),
         };
     let coverage = collection.coverage.clone();
     let plan = actions_environments::plan_actions_category(&desired, &collection);
@@ -834,7 +1046,7 @@ async fn plan_environments(
             .await
         {
             Ok(collection) => collection,
-            Err(error) => return collection_failed(Category::Environments, disposition, error),
+            Err(error) => return collection_failed(Category::Environments, disposition, &error),
         };
     let coverage = collection.coverage.clone();
     let plan = actions_environments::plan_environments_category(&desired, &collection);
@@ -872,7 +1084,7 @@ async fn plan_access(client: &Client, categories: &ManifestCategories, repo: &st
     let disposition = desired.policy.disposition;
     let collection = match access_integrations::collect_access(client, repo, &desired).await {
         Ok(collection) => collection,
-        Err(error) => return collection_failed(Category::Access, disposition, error),
+        Err(error) => return collection_failed(Category::Access, disposition, &error),
     };
     let coverage = collection.coverage.clone();
     let plan = access_integrations::plan_access(&collection, &desired);
@@ -916,7 +1128,7 @@ async fn plan_integrations(
     let disposition = desired.policy.disposition;
     let collection = match access_integrations::collect_integrations(client, repo, &desired).await {
         Ok(collection) => collection,
-        Err(error) => return collection_failed(Category::Integrations, disposition, error),
+        Err(error) => return collection_failed(Category::Integrations, disposition, &error),
     };
     let coverage = collection.coverage.clone();
     let plan = access_integrations::plan_integrations(&collection, &desired);
@@ -952,25 +1164,60 @@ async fn plan_integrations(
 // Apply
 // ---------------------------------------------------------------------------
 
-/// Plan and apply every selected category for every target repository in the
-/// safe order, verify results, and emit a structured audit trail.
-pub async fn apply(
+/// Read-only plans for every target repository, ready to apply unchanged.
+pub struct PreparedApply {
+    prepared: Vec<(RepoPlan, bool)>,
+}
+
+impl PreparedApply {
+    /// The plan report for what `apply` would do.
+    pub fn report(&self) -> UnifiedReport {
+        UnifiedReport::from_repos(
+            self.prepared
+                .iter()
+                .map(|(plan, existing_config_pr)| {
+                    plan.to_report_with_config_pr(*existing_config_pr)
+                })
+                .collect(),
+        )
+    }
+}
+
+/// Complete every read-only plan and dependency preflight before the first
+/// mutation so a later repository cannot surprise a partially applied run.
+/// An explicitly named archived repository is an error for apply. Archived
+/// repositories found by a system scope are skipped by [`prepare_apply`] instead.
+pub fn reject_archived_explicit_target(repos: &[Repository]) -> Result<()> {
+    match repos.iter().find(|repository| repository.archived) {
+        Some(archived) => bail!(
+            "Repository '{}' is archived. Ward plans and audits archived repositories but does not apply changes to them",
+            archived.name
+        ),
+        None => Ok(()),
+    }
+}
+
+pub async fn prepare_apply(
     client: &Client,
     manifest: &Manifest,
     repos: &[Repository],
     options: &UnifiedOptions,
-    audit: &AuditLog,
-) -> Result<UnifiedReport> {
-    // Complete every read-only plan and dependency preflight before the first
-    // mutation so a later repository cannot surprise a partially applied run.
-    let mut plans = Vec::with_capacity(repos.len());
-    for repository in repos {
-        plans.push(plan_repo(client, manifest, repository, options).await);
+) -> Result<PreparedApply> {
+    let (archived, repos): (Vec<&Repository>, Vec<&Repository>) =
+        repos.iter().partition(|repository| repository.archived);
+    for repository in archived {
+        tracing::warn!(
+            "Skipping archived repository {}. Ward plans and audits archived repositories but does not apply changes to them",
+            repository.name
+        );
+        eprintln!(
+            "  warning: skipping archived repository {}",
+            repository.name
+        );
     }
-
     let branch = sync_branch(manifest);
-    let mut prepared = Vec::with_capacity(plans.len());
-    for plan in plans {
+    let prepared = crate::reconcile::map_buffered(repos, |repository| async {
+        let plan = plan_repo(client, manifest, repository, options).await;
         let existing_config_pr = if plan.has_file_dependent_changes() {
             client
                 .find_open_pull_request(&plan.repo, &branch)
@@ -979,11 +1226,25 @@ pub async fn apply(
         } else {
             false
         };
-        prepared.push((plan, existing_config_pr));
-    }
+        Ok::<_, anyhow::Error>((plan, existing_config_pr))
+    })
+    .await
+    .into_iter()
+    .collect::<Result<Vec<_>>>()?;
+    Ok(PreparedApply { prepared })
+}
 
-    let mut repo_reports = Vec::with_capacity(prepared.len());
-    for (plan, existing_config_pr) in prepared {
+/// Apply plans from [`prepare_apply`] in the safe order, verify results, and
+/// emit a structured audit trail.
+pub async fn apply_prepared(
+    client: &Client,
+    manifest: &Manifest,
+    prepared: PreparedApply,
+    options: &UnifiedOptions,
+    audit: &AuditLog,
+) -> UnifiedReport {
+    let mut repo_reports = Vec::with_capacity(prepared.prepared.len());
+    for (plan, existing_config_pr) in prepared.prepared {
         let report = apply_repo(
             client,
             manifest,
@@ -995,7 +1256,19 @@ pub async fn apply(
         .await;
         repo_reports.push(report);
     }
-    Ok(UnifiedReport::from_repos(repo_reports))
+    UnifiedReport::from_repos(repo_reports)
+}
+
+/// Plan and apply every selected category for every target repository.
+pub async fn apply(
+    client: &Client,
+    manifest: &Manifest,
+    repos: &[Repository],
+    options: &UnifiedOptions,
+    audit: &AuditLog,
+) -> Result<UnifiedReport> {
+    let prepared = prepare_apply(client, manifest, repos, options).await?;
+    Ok(apply_prepared(client, manifest, prepared, options, audit).await)
 }
 
 async fn apply_repo(
@@ -1006,6 +1279,8 @@ async fn apply_repo(
     verify: bool,
     audit: &AuditLog,
 ) -> RepoReport {
+    // Apply and post-apply verification read organization lookups fresh.
+    let client = &client.uncached();
     let repo = plan.repo.clone();
     let default_branch = plan.default_branch.clone();
     let branch = sync_branch(manifest);
@@ -1198,7 +1473,7 @@ async fn apply_repository(
             audit_category(audit, repo, category, "success", 0, None);
             category.to_report("success", 0, Some(verified))
         }
-        Err(error) => failure(audit, repo, category, error),
+        Err(error) => failure(audit, repo, category, &error),
     }
 }
 
@@ -1225,7 +1500,7 @@ async fn apply_files(
         .ensure_dedicated_branch(repo, branch, default_branch)
         .await
     {
-        return failure(audit, repo, category, error);
+        return failure(audit, repo, category, &error);
     }
 
     // Re-collect and re-plan against the dedicated branch so we only commit
@@ -1233,11 +1508,11 @@ async fn apply_files(
     let branch_collection =
         match files::collect_files_category(client, repo, Some(branch), Some(&desired)).await {
             Ok(collection) => collection,
-            Err(error) => return failure(audit, repo, category, error),
+            Err(error) => return failure(audit, repo, category, &error),
         };
     let branch_plan = match files::plan_files_category(&desired, &branch_collection) {
         Ok(plan) => plan,
-        Err(error) => return failure(audit, repo, category, error),
+        Err(error) => return failure(audit, repo, category, &error),
     };
 
     let message = format!("{commit_prefix}sync managed files");
@@ -1246,7 +1521,7 @@ async fn apply_files(
         && let Err(error) =
             files::apply_files_plan(client, repo, branch, &message, &branch_plan).await
     {
-        return failure(audit, repo, category, error);
+        return failure(audit, repo, category, &error);
     }
 
     let pr = match client
@@ -1261,7 +1536,7 @@ async fn apply_files(
         .await
     {
         Ok(pr) => pr,
-        Err(error) => return failure(audit, repo, category, error),
+        Err(error) => return failure(audit, repo, category, &error),
     };
 
     let mut details = category.details.clone();
@@ -1271,7 +1546,7 @@ async fn apply_files(
     let verified = match files::verify_files_category(client, repo, Some(branch), &desired).await {
         Ok(result) => result.matches,
         Err(error) => {
-            let mut report = failure(audit, repo, category, error);
+            let mut report = failure(audit, repo, category, &error);
             report.details = details;
             report.configuration_pull_request_pending = true;
             return report;
@@ -1320,14 +1595,14 @@ async fn apply_security(
     audit: &AuditLog,
 ) -> CategoryReport {
     if let Err(error) = security_rules::apply_security_plan(client, repo, plan).await {
-        return failure(audit, repo, category, error);
+        return failure(audit, repo, category, &error);
     }
     let verified = if !verify {
         None
     } else if let Some(desired) = desired_categories.security.as_ref() {
         match security_rules::verify_security_category(client, repo, desired).await {
             Ok(result) => Some(result.matches),
-            Err(error) => return failure(audit, repo, category, error),
+            Err(error) => return failure(audit, repo, category, &error),
         }
     } else {
         None
@@ -1359,19 +1634,19 @@ async fn apply_actions(
                 return blocked_with_message(audit, repo, category, issue.message.clone());
             }
         }
-        Err(error) => return failure(audit, repo, category, error),
+        Err(error) => return failure(audit, repo, category, &error),
     }
 
     let verified = if let Some(desired) = desired_categories.actions.as_ref() {
         if config_pr_pending {
             match verify_actions_safe_subset(client, repo, desired).await {
                 Ok(matches) => Some(matches),
-                Err(error) => return failure(audit, repo, category, error),
+                Err(error) => return failure(audit, repo, category, &error),
             }
         } else {
             match actions_environments::verify_actions_category(client, repo, desired).await {
                 Ok(result) => Some(result.compliant),
-                Err(error) => return failure(audit, repo, category, error),
+                Err(error) => return failure(audit, repo, category, &error),
             }
         }
     } else {
@@ -1399,12 +1674,12 @@ async fn apply_environments(
                 return blocked_with_message(audit, repo, category, issue.message.clone());
             }
         }
-        Err(error) => return failure(audit, repo, category, error),
+        Err(error) => return failure(audit, repo, category, &error),
     }
     let verified = if let Some(desired) = desired_categories.environments.as_ref() {
         match actions_environments::verify_environments_category(client, repo, desired).await {
             Ok(result) => Some(result.compliant),
-            Err(error) => return failure(audit, repo, category, error),
+            Err(error) => return failure(audit, repo, category, &error),
         }
     } else {
         None
@@ -1422,7 +1697,7 @@ async fn apply_access(
 ) -> CategoryReport {
     let report = match access_integrations::apply_access(client, repo, plan).await {
         Ok(report) => report,
-        Err(error) => return failure(audit, repo, category, error),
+        Err(error) => return failure(audit, repo, category, &error),
     };
     if !report.blocked.is_empty() {
         return blocked_with_message(audit, repo, category, report.blocked.join("; "));
@@ -1430,7 +1705,7 @@ async fn apply_access(
     let verified = if let Some(desired) = desired_categories.access.as_ref() {
         match access_integrations::verify_access(client, repo, desired).await {
             Ok(result) => Some(result.is_ok()),
-            Err(error) => return failure(audit, repo, category, error),
+            Err(error) => return failure(audit, repo, category, &error),
         }
     } else {
         None
@@ -1452,7 +1727,7 @@ async fn apply_integrations(
 
     let report = match access_integrations::apply_integrations(client, repo, &safe_plan).await {
         Ok(report) => report,
-        Err(error) => return failure(audit, repo, category, error),
+        Err(error) => return failure(audit, repo, category, &error),
     };
     if !report.blocked.is_empty() {
         return blocked_with_message(audit, repo, category, report.blocked.join("; "));
@@ -1461,12 +1736,12 @@ async fn apply_integrations(
         if config_pr_pending {
             match verify_integrations_safe_subset(client, repo, desired).await {
                 Ok(matches) => Some(matches),
-                Err(error) => return failure(audit, repo, category, error),
+                Err(error) => return failure(audit, repo, category, &error),
             }
         } else {
             match access_integrations::verify_integrations(client, repo, desired).await {
                 Ok(result) => Some(result.is_ok()),
-                Err(error) => return failure(audit, repo, category, error),
+                Err(error) => return failure(audit, repo, category, &error),
             }
         }
     } else {
@@ -1486,12 +1761,12 @@ async fn apply_rulesets(
     audit: &AuditLog,
 ) -> CategoryReport {
     if let Err(error) = security_rules::apply_rulesets_plan(client, repo, plan).await {
-        return failure(audit, repo, category, error);
+        return failure(audit, repo, category, &error);
     }
     let verified = if let Some(desired) = desired_categories.rulesets.as_ref() {
         match security_rules::verify_rulesets_category(client, repo, desired).await {
             Ok(result) => Some(result.matches),
-            Err(error) => return failure(audit, repo, category, error),
+            Err(error) => return failure(audit, repo, category, &error),
         }
     } else {
         None
@@ -1510,12 +1785,12 @@ async fn apply_branch_protection(
     audit: &AuditLog,
 ) -> CategoryReport {
     if let Err(error) = security_rules::apply_branch_protection_plan(client, repo, plan).await {
-        return failure(audit, repo, category, error);
+        return failure(audit, repo, category, &error);
     }
     let verified = if let Some(desired) = desired_categories.branch_protection.as_ref() {
         match security_rules::verify_branch_protection_category(client, repo, desired).await {
             Ok(result) => Some(result.matches),
-            Err(error) => return failure(audit, repo, category, error),
+            Err(error) => return failure(audit, repo, category, &error),
         }
     } else {
         None
@@ -1764,7 +2039,7 @@ fn failure(
     audit: &AuditLog,
     repo: &str,
     category: &CategoryPlan,
-    error: anyhow::Error,
+    error: &anyhow::Error,
 ) -> CategoryReport {
     let message = format!("{error:#}");
     audit_category(audit, repo, category, "failed", 0, Some(message.clone()));
@@ -2062,20 +2337,48 @@ fn actions_details(plan: &actions_environments::ActionsPlan) -> Vec<String> {
 
 /// Render a concise, human-readable summary of a unified report.
 pub fn render_report(report: &UnifiedReport, title: &str) {
+    let mut stdout = std::io::stdout().lock();
+    // Nothing useful can be done when stdout is closed.
+    if render_report_to(&mut stdout, report, title).is_err() {
+        tracing::debug!("could not write the report to stdout");
+    }
+}
+
+/// How many details are shown under each category before pointing to `--json`.
+const SHOWN_DETAILS: usize = 4;
+/// Longest error text shown under a category.
+const MAX_ERROR_CHARS: usize = 300;
+
+fn one_line_error(error: &str) -> String {
+    let flattened = error.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flattened.chars().count() <= MAX_ERROR_CHARS {
+        return flattened;
+    }
+    let mut truncated: String = flattened.chars().take(MAX_ERROR_CHARS).collect();
+    truncated.push_str("...");
+    truncated
+}
+
+pub fn render_report_to(
+    out: &mut impl std::io::Write,
+    report: &UnifiedReport,
+    title: &str,
+) -> std::io::Result<()> {
     use console::style;
 
-    println!();
-    println!("  {}", style(title).bold().cyan());
+    writeln!(out)?;
+    writeln!(out, "  {}", style(title).bold().cyan())?;
 
     for repo in &report.repos {
-        println!();
-        println!("  {}", style(&repo.repo).bold());
+        writeln!(out)?;
+        writeln!(out, "  {}", style(&repo.repo).bold())?;
         for category in &repo.categories {
             if category.status == "skipped" {
                 continue;
             }
             let status = style_status(&category.status);
-            println!(
+            writeln!(
+                out,
                 "    {:<18} {:<9} {status}  actionable={} blocked={} warnings={} deferred={}",
                 category.category,
                 category.disposition,
@@ -2083,26 +2386,39 @@ pub fn render_report(report: &UnifiedReport, title: &str) {
                 category.blocked,
                 category.warnings,
                 category.deferred,
-            );
-            for detail in category.details.iter().take(4) {
-                println!("        - {detail}");
+            )?;
+            if let Some(error) = category
+                .error
+                .as_deref()
+                .filter(|_| matches!(category.status.as_str(), "failed" | "blocked"))
+            {
+                writeln!(out, "        reason: {}", one_line_error(error))?;
+            }
+            for detail in category.details.iter().take(SHOWN_DETAILS) {
+                writeln!(out, "        - {detail}")?;
+            }
+            let hidden = category.details.len().saturating_sub(SHOWN_DETAILS);
+            if hidden > 0 {
+                writeln!(out, "        - {hidden} more, use --json")?;
             }
         }
     }
 
-    println!();
-    println!(
+    writeln!(out)?;
+    writeln!(
+        out,
         "  Summary: {} actionable, {} blocked, {} deferred, {} warnings across {} repo(s)",
         style(report.actionable).bold(),
         style(report.blocked).bold(),
         style(report.deferred).bold(),
         style(report.warnings).bold(),
         report.repos.len(),
-    );
-    println!(
+    )?;
+    writeln!(
+        out,
         "  Coverage: {}/{} collected, {} degraded",
         report.coverage.collected, report.coverage.total, report.coverage.degraded,
-    );
+    )
 }
 
 fn style_status(status: &str) -> console::StyledObject<&str> {
@@ -2227,7 +2543,7 @@ mod tests {
             collection_failed(
                 Category::Files,
                 ManagementDisposition::Managed,
-                anyhow::anyhow!("boom"),
+                &anyhow::anyhow!("boom"),
             )
             .plan_status(),
             "blocked"
@@ -2249,7 +2565,7 @@ mod tests {
         let category = collection_failed(
             Category::Security,
             ManagementDisposition::Managed,
-            anyhow::anyhow!("HTTP 500"),
+            &anyhow::anyhow!("HTTP 500"),
         );
         let report = category.to_report("blocked", 0, None);
         assert_eq!(report.status, "blocked");
@@ -2268,7 +2584,7 @@ mod tests {
                 collection_failed(
                     Category::Security,
                     ManagementDisposition::Managed,
-                    anyhow::anyhow!("collect failed"),
+                    &anyhow::anyhow!("collect failed"),
                 ),
                 planned_category(Category::Files, ManagementDisposition::Managed, 1, 0),
             ],
@@ -2451,6 +2767,34 @@ mod tests {
     }
 
     #[test]
+    fn unreadable_config_pr_lookup_degrades_dependent_categories_to_coverage() {
+        let mut plan = RepoPlan {
+            repo: "repo".to_owned(),
+            default_branch: "main".to_owned(),
+            categories: vec![CategoryPlan {
+                name: Category::Rulesets,
+                disposition: ManagementDisposition::Managed,
+                is_blocked_collection: false,
+                coverage: Vec::new(),
+                actionable: 3,
+                blocked: 0,
+                warnings: 0,
+                details: Vec::new(),
+                kind: CategoryPlanKind::Rulesets(security_rules::RulesetsPlan {
+                    actions: Vec::new(),
+                    issues: Vec::new(),
+                }),
+            }],
+        };
+
+        plan.record_config_pr_lookup_failure("HTTP 403");
+
+        let report = UnifiedReport::from_repos(vec![plan.to_report()]);
+        assert!(report.has_unknown_managed_state());
+        assert_eq!(report.warnings, 1);
+    }
+
+    #[test]
     fn rulesets_and_branch_protection_defer_behind_config_pr() {
         let rulesets = CategoryPlan {
             name: Category::Rulesets,
@@ -2529,5 +2873,85 @@ mod tests {
         assert_eq!(order[0], Category::Repository);
         assert_eq!(order[1], Category::Files);
         assert_eq!(order[8], Category::BranchProtection);
+    }
+
+    #[test]
+    fn unrequested_optional_repository_reads_do_not_count_as_unknown_state() {
+        let entry = |endpoint: &str| CoverageEntry {
+            category: crate::config::manifest::ManifestCategoryName::Repository,
+            endpoint: endpoint.to_owned(),
+            outcome: CoverageOutcome::PermissionDenied,
+            reason: Some("HTTP 403".to_owned()),
+            required_permission: None,
+        };
+        let mut coverage = vec![
+            entry("GET /repos/{owner}/{repo}/properties/values"),
+            entry("GET /repos/{owner}/{repo}/immutable-releases"),
+            entry("GET /repos/{owner}/{repo}/topics"),
+        ];
+        let desired = RepositoryCategoryV2 {
+            policy: crate::config::manifest::CategoryPolicy::managed(),
+            settings: None,
+            metadata: None,
+            custom_properties: Vec::new(),
+            immutable_releases: None,
+            references: Vec::new(),
+        };
+
+        relax_unrequested_repository_coverage(&mut coverage, &desired);
+
+        assert_eq!(coverage[0].outcome, CoverageOutcome::NotApplicable);
+        assert_eq!(coverage[1].outcome, CoverageOutcome::NotApplicable);
+        assert_eq!(coverage[2].outcome, CoverageOutcome::PermissionDenied);
+    }
+
+    fn render(report: &UnifiedReport) -> String {
+        let mut out = Vec::new();
+        render_report_to(&mut out, report, "Test").unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    fn report_with(category: CategoryReport) -> UnifiedReport {
+        let mut repo = RepoPlan {
+            repo: "repo-a".to_owned(),
+            default_branch: "main".to_owned(),
+            categories: Vec::new(),
+        }
+        .to_report();
+        repo.categories.push(category);
+        UnifiedReport::from_repos(vec![repo])
+    }
+
+    #[test]
+    fn text_report_shows_the_reason_under_a_failed_category() {
+        let category = collection_failed(
+            Category::BranchProtection,
+            ManagementDisposition::Managed,
+            &anyhow::anyhow!("PUT failed\nwith HTTP 422: {}", "x".repeat(500)),
+        )
+        .to_report("failed", 0, None);
+
+        let text = render(&report_with(category));
+
+        let reason = text
+            .lines()
+            .find(|line| line.trim_start().starts_with("reason:"))
+            .expect("a reason line");
+        assert!(reason.contains("PUT failed with HTTP 422"));
+        assert!(reason.ends_with("..."), "{reason}");
+        assert!(reason.len() < 340, "{}", reason.len());
+    }
+
+    #[test]
+    fn text_report_counts_hidden_details() {
+        let mut category = planned_category(Category::Files, ManagementDisposition::Managed, 6, 0)
+            .to_report("planned", 6, None);
+        category.details = (0..6).map(|n| format!("change {n}")).collect();
+
+        let text = render(&report_with(category));
+
+        assert!(text.contains("change 3"));
+        assert!(!text.contains("change 4"));
+        assert!(text.contains("2 more, use --json"), "{text}");
     }
 }

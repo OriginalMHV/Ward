@@ -7,6 +7,7 @@ use crate::config::Manifest;
 use crate::config::manifest::{ManagementDisposition, RepositoryAccessCategoryV2, TeamAccess};
 use crate::github::Client;
 use crate::github::teams::Team;
+use crate::reconcile::unified;
 
 #[derive(Args)]
 pub struct TeamsCommand {
@@ -56,24 +57,10 @@ async fn resolve_repos(
     system: Option<&str>,
     repo: Option<&str>,
 ) -> Result<Vec<String>> {
-    if let Some(repo_name) = repo {
-        return Ok(vec![repo_name.to_owned()]);
+    if system.is_none() && repo.is_none() {
+        anyhow::bail!("Either --system or --repo is required for teams commands");
     }
-
-    let sys = system.ok_or_else(|| {
-        anyhow::anyhow!("Either --system or --repo is required for teams commands")
-    })?;
-
-    let excludes = manifest.exclude_patterns_for_system(sys);
-    let explicit = manifest.explicit_repos_for_system(sys);
-    let repos = client
-        .list_repos_for_system(
-            sys,
-            manifest.matches_prefix_for_system(sys),
-            &excludes,
-            &explicit,
-        )
-        .await?;
+    let repos = unified::resolve_target_repos(client, manifest, system, repo).await?;
     Ok(repos.into_iter().map(|r| r.name).collect())
 }
 
@@ -161,8 +148,13 @@ async fn list(
     );
     println!("  {}", style("\u{2500}".repeat(70)).dim());
 
-    for repo_name in &repos {
-        let teams = client.list_repo_teams(repo_name).await?;
+    let listings = crate::reconcile::map_buffered(&repos, |repo_name| async move {
+        client.list_repo_teams(repo_name).await
+    })
+    .await;
+
+    for (repo_name, teams) in repos.iter().zip(listings) {
+        let teams = teams?;
 
         let summary = if teams.is_empty() {
             style("(none)").dim().to_string()
@@ -383,7 +375,7 @@ async fn apply(
         }
     }
 
-    Ok(())
+    crate::outcome::fail_when_any_failed(&failed)
 }
 
 async fn audit(
@@ -411,9 +403,14 @@ async fn audit(
     let mut total_ok = 0;
     let mut total_issues = 0;
 
-    for repo_name in &repos {
+    let listings = crate::reconcile::map_buffered(&repos, |repo_name| async move {
+        client.list_repo_teams(repo_name).await
+    })
+    .await;
+
+    for (repo_name, teams) in repos.iter().zip(listings) {
         let desired = teams_for_repo(manifest, repo_name).unwrap_or(&[]);
-        let teams = client.list_repo_teams(repo_name).await?;
+        let teams = teams?;
 
         let all_desired_present = desired.iter().all(|d| {
             teams

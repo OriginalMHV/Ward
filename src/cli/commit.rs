@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Args;
 
 use crate::config::Manifest;
+use crate::engine::audit_log::AuditLog;
 use crate::github::Client;
 use crate::reconcile::unified::{Category, UnifiedOptions};
 
@@ -31,6 +32,21 @@ impl CommitCommand {
         manifest: &Manifest,
         system: Option<&str>,
         repo: Option<&str>,
+        json: bool,
+    ) -> Result<()> {
+        self.run_with_audit(client, manifest, system, repo, json, AuditLog::new)
+            .await
+    }
+
+    /// As [`Self::run`], with the audit log opened by `open_audit` when an apply starts.
+    pub async fn run_with_audit(
+        &self,
+        client: &Client,
+        manifest: &Manifest,
+        system: Option<&str>,
+        repo: Option<&str>,
+        json: bool,
+        open_audit: impl FnOnce() -> Result<AuditLog>,
     ) -> Result<()> {
         let options = UnifiedOptions {
             categories: vec![Category::Files],
@@ -45,7 +61,7 @@ impl CommitCommand {
                 crate::cli::plan::CategoryRun {
                     system,
                     repo,
-                    json: false,
+                    json,
                     command: "commit plan",
                     title: "Ward Commit Plan",
                 },
@@ -57,10 +73,11 @@ impl CommitCommand {
                 manifest,
                 *yes,
                 options,
+                open_audit,
                 crate::cli::plan::CategoryRun {
                     system,
                     repo,
-                    json: false,
+                    json,
                     command: "commit apply",
                     title: "Ward Commit Apply",
                 },

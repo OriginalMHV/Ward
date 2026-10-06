@@ -3,8 +3,9 @@ use clap::Args;
 use console::style;
 
 use crate::config::Manifest;
+use crate::engine::audit_log::AuditLog;
 use crate::github::Client;
-use crate::reconcile::unified::{Category, UnifiedOptions};
+use crate::reconcile::unified::{self, Category, UnifiedOptions};
 
 #[derive(Args)]
 pub struct RulesetsCommand {
@@ -35,6 +36,21 @@ impl RulesetsCommand {
         manifest: &Manifest,
         system: Option<&str>,
         repo: Option<&str>,
+        json: bool,
+    ) -> Result<()> {
+        self.run_with_audit(client, manifest, system, repo, json, AuditLog::new)
+            .await
+    }
+
+    /// As [`Self::run`], with the audit log opened by `open_audit` when an apply starts.
+    pub async fn run_with_audit(
+        &self,
+        client: &Client,
+        manifest: &Manifest,
+        system: Option<&str>,
+        repo: Option<&str>,
+        json: bool,
+        open_audit: impl FnOnce() -> Result<AuditLog>,
     ) -> Result<()> {
         let options = UnifiedOptions {
             categories: vec![Category::Rulesets],
@@ -49,7 +65,7 @@ impl RulesetsCommand {
                 crate::cli::plan::CategoryRun {
                     system,
                     repo,
-                    json: false,
+                    json,
                     command: "rulesets plan",
                     title: "Ward Rulesets Plan",
                 },
@@ -61,10 +77,11 @@ impl RulesetsCommand {
                 manifest,
                 *yes,
                 options,
+                open_audit,
                 crate::cli::plan::CategoryRun {
                     system,
                     repo,
-                    json: false,
+                    json,
                     command: "rulesets apply",
                     title: "Ward Rulesets Apply",
                 },
@@ -82,24 +99,10 @@ async fn resolve_repos(
     system: Option<&str>,
     repo: Option<&str>,
 ) -> Result<Vec<String>> {
-    if let Some(repo_name) = repo {
-        return Ok(vec![repo_name.to_owned()]);
+    if system.is_none() && repo.is_none() {
+        anyhow::bail!("Either --system or --repo is required for rulesets commands");
     }
-
-    let sys = system.ok_or_else(|| {
-        anyhow::anyhow!("Either --system or --repo is required for rulesets commands")
-    })?;
-
-    let excludes = manifest.exclude_patterns_for_system(sys);
-    let explicit = manifest.explicit_repos_for_system(sys);
-    let repos = client
-        .list_repos_for_system(
-            sys,
-            manifest.matches_prefix_for_system(sys),
-            &excludes,
-            &explicit,
-        )
-        .await?;
+    let repos = unified::resolve_target_repos(client, manifest, system, repo).await?;
     Ok(repos.into_iter().map(|r| r.name).collect())
 }
 
@@ -126,8 +129,13 @@ async fn audit(
     );
     println!("  {}", style("\u{2500}".repeat(70)).dim());
 
-    for repo_name in &repos {
-        let rulesets = client.list_rulesets(repo_name).await?;
+    let listings = crate::reconcile::map_buffered(&repos, |repo_name| async move {
+        client.list_rulesets(repo_name).await
+    })
+    .await;
+
+    for (repo_name, rulesets) in repos.iter().zip(listings) {
+        let rulesets = rulesets?;
 
         let summary = if rulesets.is_empty() {
             style("(none)").dim().to_string()

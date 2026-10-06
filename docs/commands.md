@@ -12,17 +12,29 @@ These flags are available on all commands:
 |------|------|---------|-------------|
 | `--org <ORG>` | string | from `ward.toml` | GitHub organization (overrides config) |
 | `--system <ID>` | string | -- | Filter to a specific system |
-| `--repo <REPO>` | string | -- | Target a single repository |
-| `--json` | bool | `false` | Output as JSON |
+| `--repo <REPO>` | string | -- | Narrow the run to one repository inside the manifest scope. The repository must be selected by a system. When the manifest has no `[[systems]]`, `--repo` is the explicit target. Names match case-insensitively. Archived repositories are allowed for read-only commands. `apply` skips them with a warning inside a scope and refuses an explicit `--repo` archived target |
+| `--json` | bool | `false` | Output the unified report as JSON. Honored by `plan`, `apply`, `drift check`, and the focused `plan` and `apply` subcommands. Audit and list commands ignore it (`audit` uses `--format`) |
 | `--parallelism <N>` | integer | `5` | Max concurrent API calls |
 | `--config <PATH>` | string | `./ward.toml` | Path to config file |
 | `-v` / `-vv` / `-vvv` | count | `0` | Increase log verbosity |
+
+## Exit codes
+
+Every command uses the same exit codes.
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success. The state is clean, or the command finished without a problem. |
+| `1` | Ward ran and found a problem: drift found, a failed check (`ward doctor`), or a failed or blocked apply category. |
+| `2` | Ward could not run: authentication, network, configuration parse error, or invalid arguments. |
+
+`ward doctor` exits `0` when it reports only warnings. `ward settings apply` and `ward teams apply` exit `1` when any repository fails.
 
 ---
 
 ## `ward repos`
 
-List and inspect repositories.
+List repositories.
 
 ### `ward repos list`
 
@@ -30,22 +42,14 @@ List all repositories matched by a system, with metadata.
 
 ```bash
 ward repos list --system backend
-ward repos list --system backend --json
 ward repos list --org my-org
 ```
 
 Output columns: Repository, Language, Visibility, Default Branch.
 
-### `ward repos inspect`
+### Removed: `ward repos inspect`
 
-Deep inspection of a single repository, including security feature status.
-
-```bash
-ward repos inspect my-service
-ward repos inspect my-service --json
-```
-
-Shows: full repo metadata, Dependabot Alerts, Dependabot Security Updates, Secret Scanning, AI Detection, Push Protection.
+`ward repos inspect` was removed. It exits with code 2. Use `ward audit --repo NAME` instead.
 
 ---
 
@@ -86,7 +90,6 @@ Report current security state for all repos in a system.
 ```bash
 ward security audit --system backend
 ward security audit --repo my-service
-ward security audit --system backend --json
 ```
 
 Output columns: Dependabot Alerts, Dependabot Security Updates, Secret Scanning, AI Detection, Push Protection.
@@ -223,9 +226,7 @@ ward drift check --repo my-service
 ward drift check --system backend --json
 ```
 
-Exit codes:
-- `0` -- all repos in sync with `ward.toml`
-- `1` -- drift detected
+Exit code `0` means all repos are in sync with `ward.toml`. Exit code `1` means drift: actionable, blocked, or deferred changes, or state in a managed category that Ward could not read. Exit code `2` means Ward could not run the check. See [Exit codes](#exit-codes).
 
 Checks every configured category by default. Use repeatable `--category <CATEGORY>` filters to narrow the drift gate.
 
@@ -375,57 +376,19 @@ Open the config file in your editor (`$EDITOR`, `$VISUAL`, or `vi`).
 ward config edit
 ```
 
-### `ward config set`
+### Removed config subcommands
 
-Set a configuration value using dot notation.
+`ward config set`, `ward config add-system` and `ward config remove-system` were removed. They exit with code 2 and name the replacement. Edit `ward.toml` directly, or run `ward config edit` to open it in `$EDITOR` and validate it on save.
 
-```bash
-ward config set org.name "my-org"
-ward config set categories.security.secret_scanning_push_protection true
-ward config set categories.branch_protection.default_branch.required_approvals 2
-ward config set categories.branch_protection.default_branch.dismiss_stale_reviews true
-ward config set file_delivery.branch "chore/ward-update"
-ward config set file_delivery.commit_message_prefix "ci: "
-```
-
-Valid key paths are limited to commonly adjusted canonical manifest fields:
-
-| Prefix | Keys |
-|--------|------|
-| `org.` | `name` |
-| `categories.security.` | `secret_scanning`, `secret_scanning_push_protection`, `secret_scanning_ai_detection`, `dependabot_alerts`, `dependabot_security_updates` |
-| `categories.branch_protection.default_branch.` | `enabled`, `required_approvals`, `dismiss_stale_reviews` |
-| `file_delivery.` | `branch`, `commit_message_prefix` |
-
-The selected category must already be present in the Ward manifest. Use `ward init` to create the initial categories, then edit more advanced category state directly.
-
-### `ward config add-system`
-
-Interactive wizard to add a new system.
-
-```bash
-ward config add-system
-```
-
-Prompts for: system ID, display name, exclude patterns, explicit repo names.
-
-### `ward config remove-system`
-
-Remove a system by ID.
-
-```bash
-ward config remove-system backend
-ward config remove-system backend --yes
-```
+---
 
 ## `ward init`
 
-Create `ward.toml` through the setup wizard, as a minimal scaffold, or by bootstrapping from an existing repository.
+Create `ward.toml` as a minimal scaffold, or bootstrap it from an existing repository. For real onboarding, use `ward import OWNER/REPO`.
 
 ```bash
-# Manual setup
+# Minimal scaffold
 ward init
-ward init --non-interactive
 
 # Repository bootstrap
 ward init --from acme/reference-service
@@ -441,7 +404,7 @@ ward init --from acme/reference-service --force
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--from <SOURCE>` | -- | Snapshot `OWNER/REPO` or a GitHub URL |
-| `--non-interactive` | `false` | Write a default `ward.toml` without prompts |
+| `--non-interactive` | `false` | Accepted for compatibility. It changes nothing, because init never prompts |
 | `--output <PATH>` | `ward.toml` | Output path for `--from` |
 | `--stdout` | `false` | Print the generated config instead of writing it |
 | `--force` | `false` | Replace an existing output file |
@@ -453,14 +416,7 @@ ward init --from acme/reference-service --force
 
 Manual setup and `--from` are equal entry points to the same Ward lifecycle. Use manual setup for deliberate policy authoring; use `--from` as a read-only shortcut when an existing repository is the best baseline. The generated manifest is a static snapshot. Without `--target`, it initially targets only the source repository.
 
-Without `--from`, the wizard walks through:
-
-1. **Authentication** -- checks for a valid GitHub token
-2. **Organization** -- verifies the org and counts repos
-3. **Security settings** -- prompts for each security feature
-4. **Branch protection** -- enable and configure protection rules
-5. **Systems discovery** -- scans repos and auto-detects name prefixes (requires at least 2 repos per prefix)
-6. **File delivery** -- branch name, reviewers, commit prefix
+Without `--from`, init writes the minimal scaffold and does not contact GitHub. It never overwrites an existing `ward.toml`.
 
 ---
 
@@ -546,7 +502,7 @@ Ward Doctor
   Everything looks good.
 ```
 
-Exit codes: `0` all passed, `1` any errors, `2` warnings only.
+Exit code `1` means at least one check failed. Warnings alone exit `0`. See [Exit codes](#exit-codes).
 
 ## `ward plan`
 

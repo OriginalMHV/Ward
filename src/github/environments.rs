@@ -8,21 +8,15 @@
 //! since GitHub's reference docs only describe the field as "array of object".
 
 use anyhow::{Context, Result};
-use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
 
 use super::Client;
 use super::actions::{
     ReadOutcome, WriteOutcome, classify_read, write_delete, write_empty, write_json,
 };
+use super::encoding::encode_path_segment;
+use super::pagination;
 use super::response;
-
-/// Percent-encode a single path segment (e.g. an environment name), which may
-/// legally contain characters such as `/`, spaces, or other symbols that must
-/// not be interpreted as path separators or otherwise misparsed by the API.
-pub(crate) fn encode_path_segment(segment: &str) -> String {
-    utf8_percent_encode(segment, NON_ALPHANUMERIC).to_string()
-}
 
 /// A reviewer entry on a `required_reviewers` protection rule.
 #[derive(Debug, Clone, Deserialize)]
@@ -193,31 +187,7 @@ pub struct EnvironmentUpdate {
 impl Client {
     // ---- Environments ----
 
-    /// `GET /repos/{owner}/{repo}/environments`, paginated (wrapped response,
-    /// not a raw array, so this cannot use the generic `collect_paginated` helper).
-    pub async fn list_environments(&self, repo: &str) -> Result<Vec<Environment>> {
-        let mut items = Vec::new();
-        let mut page = 1u32;
-        loop {
-            let path = format!(
-                "/repos/{}/{repo}/environments?per_page=30&page={page}",
-                self.org()
-            );
-            let body: EnvironmentsResponse =
-                response::expect_json(self.get(&path).await?, "GET", &path)
-                    .await
-                    .context("Failed to parse environments response")?;
-            let count = body.environments.len();
-            items.extend(body.environments);
-            if count < 30 {
-                break;
-            }
-            page += 1;
-        }
-        Ok(items)
-    }
-
-    /// As [`Client::list_environments`], classified: a 403/404/422 on the
+    /// Paginated read, classified as a [`ReadOutcome`]: a 403/404/422 on the
     /// first page is reported as a [`ReadOutcome`] instead of failing.
     pub async fn list_environments_checked(
         &self,
@@ -265,20 +235,6 @@ impl Client {
         Ok(ReadOutcome::Available(items))
     }
 
-    /// `GET /repos/{owner}/{repo}/environments/{environment_name}`.
-    /// Returns `Ok(None)` on 404 (no such environment).
-    pub async fn get_environment(
-        &self,
-        repo: &str,
-        environment_name: &str,
-    ) -> Result<Option<Environment>> {
-        let env = encode_path_segment(environment_name);
-        let path = format!("/repos/{}/{repo}/environments/{env}", self.org());
-        response::optional_json(self.get(&path).await?, "GET", &path)
-            .await
-            .context("Failed to parse environment response")
-    }
-
     /// `PUT /repos/{owner}/{repo}/environments/{environment_name}`. Creates the
     /// environment if it does not already exist. May respond `422` if the
     /// requested configuration is invalid (e.g. reviewers exceed the allowed
@@ -307,35 +263,7 @@ impl Client {
 
     // ---- Deployment branch/tag policies ----
 
-    /// `GET /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies`, paginated.
-    pub async fn list_deployment_branch_policies(
-        &self,
-        repo: &str,
-        environment_name: &str,
-    ) -> Result<Vec<DeploymentBranchPolicy>> {
-        let env = encode_path_segment(environment_name);
-        let mut items = Vec::new();
-        let mut page = 1u32;
-        loop {
-            let path = format!(
-                "/repos/{}/{repo}/environments/{env}/deployment-branch-policies?per_page=30&page={page}",
-                self.org()
-            );
-            let body: DeploymentBranchPoliciesResponse =
-                response::expect_json(self.get(&path).await?, "GET", &path)
-                    .await
-                    .context("Failed to parse deployment branch policies response")?;
-            let count = body.branch_policies.len();
-            items.extend(body.branch_policies);
-            if count < 30 {
-                break;
-            }
-            page += 1;
-        }
-        Ok(items)
-    }
-
-    /// As [`Client::list_deployment_branch_policies`], classified.
+    /// Paginated read, classified as a [`ReadOutcome`].
     pub async fn list_deployment_branch_policies_checked(
         &self,
         repo: &str,
@@ -440,25 +368,24 @@ impl Client {
         environment_name: &str,
     ) -> Result<Vec<DeploymentProtectionRule>> {
         let env = encode_path_segment(environment_name);
-        let mut items = Vec::new();
-        let mut page = 1u32;
-        loop {
-            let path = format!(
-                "/repos/{}/{repo}/environments/{env}/deployment_protection_rules?per_page=30&page={page}",
-                self.org()
-            );
-            let body: DeploymentProtectionRulesResponse =
-                response::expect_json(self.get(&path).await?, "GET", &path)
-                    .await
-                    .context("Failed to parse deployment protection rules response")?;
-            let count = body.custom_deployment_protection_rules.len();
-            items.extend(body.custom_deployment_protection_rules);
-            if count < 30 {
-                break;
-            }
-            page += 1;
-        }
-        Ok(items)
+        pagination::collect_paginated_wrapped(
+            self,
+            30,
+            "Failed to parse deployment protection rules response",
+            |page| {
+                format!(
+                    "/repos/{}/{repo}/environments/{env}/deployment_protection_rules?per_page={}&page={}",
+                    self.org(),
+                    page.per_page,
+                    page.number
+                )
+            },
+            |body: DeploymentProtectionRulesResponse| pagination::WrappedPage {
+                items: body.custom_deployment_protection_rules,
+                total_count: None,
+            },
+        )
+        .await
     }
 
     /// As [`Client::list_deployment_protection_rules`], classified.
@@ -520,29 +447,24 @@ impl Client {
         environment_name: &str,
     ) -> Result<Vec<AvailableDeploymentProtectionRuleApp>> {
         let env = encode_path_segment(environment_name);
-        let mut items = Vec::new();
-        let mut page = 1u32;
-        loop {
-            let path = format!(
-                "/repos/{}/{repo}/environments/{env}/deployment_protection_rules/apps?per_page=30&page={page}",
-                self.org()
-            );
-            let body: AvailableDeploymentProtectionRuleAppsResponse =
-                response::expect_json(self.get(&path).await?, "GET", &path)
-                    .await
-                    .context(
-                        "Failed to parse available deployment protection rule apps response",
-                    )?;
-            let count = body
-                .available_custom_deployment_protection_rule_integrations
-                .len();
-            items.extend(body.available_custom_deployment_protection_rule_integrations);
-            if count < 30 {
-                break;
-            }
-            page += 1;
-        }
-        Ok(items)
+        pagination::collect_paginated_wrapped(
+            self,
+            30,
+            "Failed to parse available deployment protection rule apps response",
+            |page| {
+                format!(
+                    "/repos/{}/{repo}/environments/{env}/deployment_protection_rules/apps?per_page={}&page={}",
+                    self.org(),
+                    page.per_page,
+                    page.number
+                )
+            },
+            |body: AvailableDeploymentProtectionRuleAppsResponse| pagination::WrappedPage {
+                items: body.available_custom_deployment_protection_rule_integrations,
+                total_count: None,
+            },
+        )
+        .await
     }
 
     /// `POST /repos/{owner}/{repo}/environments/{environment_name}/deployment_protection_rules`.

@@ -1,3 +1,7 @@
+#![forbid(unsafe_code)]
+
+use std::process::ExitCode;
+
 use anyhow::Result;
 use clap::Parser;
 use clap_complete::generate;
@@ -8,7 +12,21 @@ use ward::config::Manifest;
 use ward::github::Client;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> ExitCode {
+    match run().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("Error: {error:?}");
+            ward::outcome::exit_code(&error)
+        }
+    }
+}
+
+#[allow(
+    clippy::unreachable,
+    reason = "commands handled before the client exists; the PR 3 dispatch refactor removes these arms"
+)]
+async fn run() -> Result<()> {
     let cli = Cli::parse();
 
     // Handle completions early, before initializing tracing
@@ -39,6 +57,12 @@ async fn main() -> Result<()> {
         return cmd.run(cli.config.as_deref()).await;
     }
 
+    if let Command::Repos(cmd) = &cli.command
+        && let Some(hint) = cmd.removed_hint()
+    {
+        anyhow::bail!("{hint}");
+    }
+
     let manifest = Manifest::load(cli.config.as_deref())?;
     let org = cli.org.as_deref().unwrap_or(&manifest.org.name);
 
@@ -48,7 +72,7 @@ async fn main() -> Result<()> {
         );
     }
 
-    let client = Client::new(org, cli.parallelism).await?;
+    let client = Client::new(org, cli.parallelism)?;
 
     match cli.command {
         Command::Repos(cmd) => cmd.run(&client, &manifest, cli.system.as_deref()).await,
@@ -58,6 +82,7 @@ async fn main() -> Result<()> {
                 &manifest,
                 cli.system.as_deref(),
                 cli.repo.as_deref(),
+                cli.json,
             )
             .await
         }
@@ -76,6 +101,7 @@ async fn main() -> Result<()> {
                 &manifest,
                 cli.system.as_deref(),
                 cli.repo.as_deref(),
+                cli.json,
             )
             .await
         }
@@ -85,6 +111,7 @@ async fn main() -> Result<()> {
                 &manifest,
                 cli.system.as_deref(),
                 cli.repo.as_deref(),
+                cli.json,
             )
             .await
         }
@@ -104,6 +131,7 @@ async fn main() -> Result<()> {
                 &manifest,
                 cli.system.as_deref(),
                 cli.repo.as_deref(),
+                cli.json,
             )
             .await
         }

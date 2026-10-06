@@ -1,3 +1,10 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test helpers outside #[test] functions"
+)]
+
 mod common;
 
 use clap::Parser;
@@ -12,86 +19,8 @@ use ward::config::manifest::{
     CategoryPolicy, FileEncoding, FilesCategoryV2, ManagedFileV2, ManifestCategories, SystemConfig,
 };
 use ward::github::Client;
-use ward::github::commits::{
-    AtomicCommitEntry, AtomicCommitFile, CommitContent, CommitFile, DeleteTreeEntry,
-};
+use ward::github::commits::{AtomicCommitEntry, AtomicCommitFile, CommitContent, DeleteTreeEntry};
 use ward::github::contents::{GitEntryMode, GitObjectType};
-
-#[tokio::test]
-async fn test_create_commit() {
-    let server = MockServer::start().await;
-
-    // 1. GET ref
-    Mock::given(method("GET"))
-        .and(path("/repos/test-org/my-repo/git/ref/heads/main"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "ref": "refs/heads/main",
-            "object": { "sha": "abc123", "type": "commit" }
-        })))
-        .mount(&server)
-        .await;
-
-    // 2. GET commit (to get tree SHA)
-    Mock::given(method("GET"))
-        .and(path("/repos/test-org/my-repo/git/commits/abc123"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "sha": "abc123",
-            "tree": { "sha": "tree-sha-000" },
-            "message": "initial commit"
-        })))
-        .mount(&server)
-        .await;
-
-    // 3. POST blob
-    Mock::given(method("POST"))
-        .and(path("/repos/test-org/my-repo/git/blobs"))
-        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
-            "sha": "blob-sha-001"
-        })))
-        .mount(&server)
-        .await;
-
-    // 4. POST tree
-    Mock::given(method("POST"))
-        .and(path("/repos/test-org/my-repo/git/trees"))
-        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
-            "sha": "new-tree-sha"
-        })))
-        .mount(&server)
-        .await;
-
-    // 5. POST commit
-    Mock::given(method("POST"))
-        .and(path("/repos/test-org/my-repo/git/commits"))
-        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
-            "sha": "new-commit-sha"
-        })))
-        .mount(&server)
-        .await;
-
-    // 6. PATCH ref
-    Mock::given(method("PATCH"))
-        .and(path("/repos/test-org/my-repo/git/refs/heads/main"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "ref": "refs/heads/main",
-            "object": { "sha": "new-commit-sha" }
-        })))
-        .mount(&server)
-        .await;
-
-    let client = Client::new_for_test("test-org", &server.uri());
-    let files = vec![CommitFile {
-        path: "README.md".to_owned(),
-        content: "# Hello\nWorld".to_owned(),
-    }];
-
-    let sha = client
-        .create_commit("my-repo", "main", "test commit", &files)
-        .await
-        .unwrap();
-
-    assert_eq!(sha, "new-commit-sha");
-}
 
 #[tokio::test]
 async fn test_create_atomic_commit_supports_binary_bytes_and_delete_entries() {
@@ -192,86 +121,7 @@ async fn test_create_atomic_commit_supports_binary_bytes_and_delete_entries() {
 }
 
 #[tokio::test]
-async fn test_create_branch() {
-    let server = MockServer::start().await;
-
-    // GET ref for source branch
-    Mock::given(method("GET"))
-        .and(path("/repos/test-org/my-repo/git/ref/heads/main"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "ref": "refs/heads/main",
-            "object": { "sha": "source-sha-123", "type": "commit" }
-        })))
-        .mount(&server)
-        .await;
-
-    // POST refs for new branch
-    Mock::given(method("POST"))
-        .and(path("/repos/test-org/my-repo/git/refs"))
-        .and(body_partial_json(json!({
-            "ref": "refs/heads/feature",
-            "sha": "source-sha-123"
-        })))
-        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
-            "ref": "refs/heads/feature",
-            "object": { "sha": "source-sha-123" }
-        })))
-        .mount(&server)
-        .await;
-
-    let client = Client::new_for_test("test-org", &server.uri());
-    client
-        .create_branch("my-repo", "feature", "main")
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
-async fn test_create_branch_encodes_unicode_ref_and_accepts_existing_branch_only_if_lookup_succeeds()
- {
-    let server = MockServer::start().await;
-
-    Mock::given(method("GET"))
-        .and(path("/repos/test-org/my-repo/git/ref/heads/main"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "ref": "refs/heads/main",
-            "object": { "sha": "source-sha-123", "type": "commit" }
-        })))
-        .mount(&server)
-        .await;
-
-    Mock::given(method("POST"))
-        .and(path("/repos/test-org/my-repo/git/refs"))
-        .and(body_partial_json(json!({
-            "ref": "refs/heads/feature/☃ branch",
-            "sha": "source-sha-123"
-        })))
-        .respond_with(ResponseTemplate::new(422).set_body_json(json!({
-            "message": "Reference already exists"
-        })))
-        .mount(&server)
-        .await;
-
-    Mock::given(method("GET"))
-        .and(path(
-            "/repos/test-org/my-repo/git/ref/heads/feature/%E2%98%83%20branch",
-        ))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "ref": "refs/heads/feature/☃ branch",
-            "object": { "sha": "source-sha-123", "type": "commit" }
-        })))
-        .mount(&server)
-        .await;
-
-    let client = Client::new_for_test("test-org", &server.uri());
-    client
-        .create_branch("my-repo", "feature/☃ branch", "main")
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
-async fn test_create_branch_surfaces_non_existing_422_validation_error() {
+async fn ensure_dedicated_branch_surfaces_non_existing_422_validation_error() {
     let server = MockServer::start().await;
 
     Mock::given(method("GET"))
@@ -301,7 +151,7 @@ async fn test_create_branch_surfaces_non_existing_422_validation_error() {
 
     let client = Client::new_for_test("test-org", &server.uri());
     let error = client
-        .create_branch("my-repo", "feature", "main")
+        .ensure_dedicated_branch("my-repo", "feature", "main")
         .await
         .unwrap_err();
 
@@ -361,6 +211,49 @@ async fn test_create_pull_request_new() {
     assert_eq!(pr.number, 42);
     assert_eq!(pr.state, "open");
     assert_eq!(pr.head.branch, "feature");
+}
+
+#[tokio::test]
+async fn test_create_pull_request_survives_reviewer_request_failure() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/my-repo/pulls"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/repos/test-org/my-repo/pulls"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "number": 42,
+            "html_url": "https://github.com/test-org/my-repo/pull/42",
+            "state": "open",
+            "title": "chore: ward setup",
+            "head": { "ref": "feature" }
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/repos/test-org/my-repo/pulls/42/requested_reviewers"))
+        .respond_with(ResponseTemplate::new(422).set_body_json(json!({ "message": "nope" })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let pr = client
+        .create_pull_request(
+            "my-repo",
+            "chore: ward setup",
+            "Automated by ward",
+            "feature",
+            "main",
+            &["octocat".to_owned()],
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(pr.number, 42);
 }
 
 #[tokio::test]
@@ -436,8 +329,7 @@ async fn test_get_file_exists() {
     assert_eq!(content.path, ".github/copilot-instructions.md");
     assert_eq!(content.sha, "file-sha-abc");
 
-    let decoded = Client::decode_content(&content).unwrap();
-    assert_eq!(decoded, "# Instructions\nUse ward.");
+    assert_eq!(content.content.as_deref(), Some(content_b64.as_str()));
 }
 
 #[tokio::test]
@@ -494,7 +386,7 @@ async fn test_get_file_not_found() {
 }
 
 #[tokio::test]
-async fn test_list_git_tree_recursive_and_get_blob_bytes() {
+async fn test_read_git_tree_recursive_and_get_blob_bytes() {
     let server = MockServer::start().await;
 
     Mock::given(method("GET"))
@@ -571,10 +463,12 @@ async fn test_list_git_tree_recursive_and_get_blob_bytes() {
 
     let client = Client::new_for_test("test-org", &server.uri());
     let tree = client
-        .list_git_tree_recursive("my-repo", Some("main"))
+        .read_git_tree_recursive("my-repo", Some("main"))
         .await
-        .unwrap()
-        .expect("tree should exist");
+        .unwrap();
+    let ward::github::contents::GitTreeRead::Available(tree) = tree else {
+        panic!("tree should exist");
+    };
 
     assert_eq!(tree.sha, "tree-sha-000");
     assert!(!tree.truncated);
@@ -883,17 +777,39 @@ async fn commit_apply_reports_collection_failures_for_every_repository() {
         parse_commit_command(&["ward", "commit", "apply", "--yes", "--system", "sys"]);
 
     let client = Client::new_for_test("test-org", &server.uri());
+    let audit_dir = tempfile::tempdir().unwrap();
+    let audit_path = audit_dir.path().join("audit.log");
     let result = command
-        .run(&client, &manifest, system.as_deref(), repo.as_deref())
+        .run_with_audit(
+            &client,
+            &manifest,
+            system.as_deref(),
+            repo.as_deref(),
+            false,
+            || ward::engine::audit_log::AuditLog::open(&audit_path),
+        )
         .await;
+    let audit = std::fs::read_to_string(&audit_path).unwrap();
+    assert!(
+        audit.contains("repo-a") && audit.contains("repo-b"),
+        "the injected audit log must receive the entries, got: {audit}"
+    );
 
     assert!(
         result.is_err(),
         "apply must return a non-zero error when repositories fail"
     );
-    let message = format!("{}", result.unwrap_err());
+    let error = result.unwrap_err();
     assert!(
-        message.contains("2 blocked category result"),
+        matches!(
+            error.downcast_ref::<ward::outcome::Outcome>(),
+            Some(ward::outcome::Outcome::ApplyFailed(_))
+        ),
+        "a failed apply must be an Outcome so it exits with code 1"
+    );
+    let message = format!("{error}");
+    assert!(
+        message.contains("2 categories blocked"),
         "error should aggregate every failure, got: {message}"
     );
 }

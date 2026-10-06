@@ -23,17 +23,13 @@ Ward resolves authentication from `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`
 
 ### Author `ward.toml` directly
 
-Use the guided setup:
+Create a minimal scaffold:
 
 ```bash
 ward init
 ```
 
-Or create a minimal scaffold without prompts:
-
-```bash
-ward init --non-interactive
-```
+For real onboarding, use `ward import OWNER/REPO` instead.
 
 Review and extend the result using the [configuration reference](configuration.md). A manual Ward manifest can use every category and does not require source provenance or coverage records.
 

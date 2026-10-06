@@ -2,13 +2,12 @@
 
 use anyhow::{Context, Result};
 use reqwest::StatusCode;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::Client;
 use super::actions::{ReadOutcome, WriteOutcome, classify_read, write_delete, write_empty};
-use super::environments::encode_path_segment;
+use super::encoding::encode_path_segment;
 use super::pagination;
 use super::response;
 
@@ -88,7 +87,11 @@ impl CollaboratorApiResponse {
     fn into_collaborator(self, outside: bool) -> RepositoryCollaborator {
         RepositoryCollaborator {
             login: self.login,
-            permission: effective_permission(self.permission, self.role_name, self.permissions),
+            permission: effective_permission(
+                self.permission,
+                self.role_name,
+                self.permissions.as_ref(),
+            ),
             outside,
         }
     }
@@ -111,7 +114,11 @@ impl RepositoryInvitationApiResponse {
         PendingCollaboratorInvitation {
             id: self.id,
             login: self.invitee.login,
-            permission: effective_permission(self.permission, self.role_name, self.permissions),
+            permission: effective_permission(
+                self.permission,
+                self.role_name,
+                self.permissions.as_ref(),
+            ),
         }
     }
 }
@@ -163,24 +170,13 @@ struct SelectedRepositoriesPage {
 }
 
 impl Client {
-    pub async fn list_repo_collaborators(
-        &self,
-        repo: &str,
-        affiliation: CollaboratorAffiliation,
-    ) -> Result<Vec<RepositoryCollaborator>> {
-        self.list_repo_collaborators_checked(repo, affiliation)
-            .await?
-            .available()
-            .ok_or_else(|| anyhow::anyhow!("collaborator listing unavailable"))
-    }
-
     pub async fn list_repo_collaborators_checked(
         &self,
         repo: &str,
         affiliation: CollaboratorAffiliation,
     ) -> Result<ReadOutcome<Vec<RepositoryCollaborator>>> {
         let outside = affiliation == CollaboratorAffiliation::Outside;
-        collect_paginated_checked(self, |page| {
+        pagination::collect_paginated_checked(self, |page| {
             format!(
                 "/repos/{}/{repo}/collaborators?affiliation={}&per_page={}&page={}",
                 self.org,
@@ -208,7 +204,7 @@ impl Client {
         &self,
         repo: &str,
     ) -> Result<ReadOutcome<Vec<PendingCollaboratorInvitation>>> {
-        collect_paginated_checked(self, |page| {
+        pagination::collect_paginated_checked(self, |page| {
             format!(
                 "/repos/{}/{repo}/invitations?per_page={}&page={}",
                 self.org, page.per_page, page.number
@@ -327,6 +323,16 @@ impl Client {
     }
 
     pub async fn list_custom_repository_roles_checked(
+        &self,
+    ) -> Result<ReadOutcome<Vec<CustomRepositoryRole>>> {
+        self.cached_org(
+            |lookups| &lookups.custom_roles_checked,
+            self.fetch_custom_repository_roles_checked(),
+        )
+        .await
+    }
+
+    async fn fetch_custom_repository_roles_checked(
         &self,
     ) -> Result<ReadOutcome<Vec<CustomRepositoryRole>>> {
         let mut page = pagination::Page::default();
@@ -609,43 +615,6 @@ impl SelectedRepositoryKind {
     }
 }
 
-async fn collect_paginated_checked<T, F>(
-    client: &Client,
-    mut build_path: F,
-) -> Result<ReadOutcome<Vec<T>>>
-where
-    T: DeserializeOwned,
-    F: FnMut(pagination::Page) -> String,
-{
-    let mut page = pagination::Page::default();
-    let mut items = Vec::new();
-
-    loop {
-        let path = build_path(page);
-        let page_items: Vec<T> = match classify_read(client.get(&path).await?, "GET", &path, false)
-            .await?
-        {
-            ReadOutcome::Available(values) => values,
-            ReadOutcome::NotApplicable(reason) => return Ok(ReadOutcome::NotApplicable(reason)),
-            ReadOutcome::PermissionDenied(reason) => {
-                return Ok(ReadOutcome::PermissionDenied(reason));
-            }
-            ReadOutcome::Unavailable(reason) => return Ok(ReadOutcome::Unavailable(reason)),
-        };
-        let count = page_items.len();
-        items.extend(page_items);
-        if count < page.per_page as usize {
-            break;
-        }
-        page = pagination::Page {
-            number: page.number + 1,
-            ..page
-        };
-    }
-
-    Ok(ReadOutcome::Available(items))
-}
-
 async fn classify_optional_metadata_checked(
     response: reqwest::Response,
     method: &str,
@@ -670,11 +639,11 @@ async fn classify_optional_metadata_checked(
 fn effective_permission(
     permission: Option<String>,
     role_name: Option<String>,
-    permissions: Option<Value>,
+    permissions: Option<&Value>,
 ) -> String {
     role_name
         .or(permission)
-        .or_else(|| permissions.as_ref().and_then(permission_from_value))
+        .or_else(|| permissions.and_then(permission_from_value))
         .unwrap_or_else(|| "pull".to_owned())
 }
 
@@ -747,8 +716,10 @@ mod tests {
 
         let client = Client::new_for_test("test-org", &server.uri());
         let collaborators = client
-            .list_repo_collaborators("my-repo", CollaboratorAffiliation::Direct)
+            .list_repo_collaborators_checked("my-repo", CollaboratorAffiliation::Direct)
             .await
+            .unwrap()
+            .available()
             .unwrap();
 
         assert_eq!(collaborators.len(), 101);

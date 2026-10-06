@@ -23,6 +23,24 @@ pub struct Repository {
     /// Repository topics (tags) from GitHub.
     #[serde(default)]
     pub topics: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<RepositoryOwner>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepositoryOwner {
+    pub login: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+}
+
+impl Repository {
+    /// True unless GitHub reports a non-organization owner, so unknown owners keep org behaviour.
+    pub fn is_organization_owned(&self) -> bool {
+        self.owner
+            .as_ref()
+            .is_none_or(|owner| owner.kind == "Organization")
+    }
 }
 
 /// Response wrapper for the GitHub search repositories API.
@@ -123,23 +141,34 @@ impl Client {
             })
             .collect();
 
-        // Add explicit repos (fetch individually, skip if already matched by search)
-        for repo_name in explicit_repos {
-            if matched.iter().any(|r| r.name == *repo_name) {
-                continue;
-            }
-            match self.get_repo(repo_name).await {
-                Ok(repo) if !repo.archived => {
-                    matched.push(repo);
-                }
-                Ok(_) => {} // archived, skip
-                Err(e) => {
-                    tracing::warn!("Failed to fetch explicit repo {repo_name}: {e}");
-                }
+        // Add explicit repos (fetch concurrently, skip if already matched by search)
+        let pending: Vec<&String> = explicit_repos
+            .iter()
+            .filter(|repo_name| !matched.iter().any(|r| r.name == **repo_name))
+            .collect();
+        let fetched =
+            futures_util::future::try_join_all(pending.into_iter().map(|repo_name| async move {
+                self.get_repo(repo_name)
+                    .await
+                    .with_context(|| format!("Failed to fetch explicit repository {repo_name}"))
+            }))
+            .await?;
+        for repo in fetched {
+            if !repo.archived && !matched.iter().any(|r| r.name == repo.name) {
+                matched.push(repo);
             }
         }
 
         Ok(matched)
+    }
+
+    /// Get a single repository as raw JSON, for callers that deserialize it
+    /// into several views and want one request instead of one per view.
+    pub async fn get_repo_value(&self, repo_name: &str) -> Result<serde_json::Value> {
+        let path = format!("/repos/{}/{repo_name}", self.org);
+        response::expect_json(self.get(&path).await?, "GET", &path)
+            .await
+            .context("Failed to parse repo response")
     }
 
     /// Get a single repository.

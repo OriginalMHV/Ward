@@ -2,7 +2,9 @@ use anyhow::Result;
 use clap::Args;
 use console::style;
 
+use super::output::{ok_icon, print_table};
 use crate::config::Manifest;
+use crate::engine::audit_log::AuditLog;
 use crate::github::Client;
 use crate::reconcile::unified::{self, Category, UnifiedOptions};
 
@@ -39,6 +41,21 @@ impl SecurityCommand {
         manifest: &Manifest,
         system: Option<&str>,
         repo: Option<&str>,
+        json: bool,
+    ) -> Result<()> {
+        self.run_with_audit(client, manifest, system, repo, json, AuditLog::new)
+            .await
+    }
+
+    /// As [`Self::run`], with the audit log opened by `open_audit` when an apply starts.
+    pub async fn run_with_audit(
+        &self,
+        client: &Client,
+        manifest: &Manifest,
+        system: Option<&str>,
+        repo: Option<&str>,
+        json: bool,
+        open_audit: impl FnOnce() -> Result<AuditLog>,
     ) -> Result<()> {
         match &self.action {
             SecurityAction::Plan => crate::cli::plan::run_canonical_plan(
@@ -48,7 +65,7 @@ impl SecurityCommand {
                 crate::cli::plan::CategoryRun {
                     system,
                     repo,
-                    json: false,
+                    json,
                     command: "security plan",
                     title: "Ward Security Plan",
                 },
@@ -60,10 +77,11 @@ impl SecurityCommand {
                 manifest,
                 *yes,
                 options(!skip_verify),
+                open_audit,
                 crate::cli::plan::CategoryRun {
                     system,
                     repo,
-                    json: false,
+                    json,
                     command: "security apply",
                     title: "Ward Security Apply",
                 },
@@ -99,8 +117,6 @@ async fn audit(
     );
 
     use tabled::builder::Builder;
-    use tabled::settings::object::{Columns, Rows};
-    use tabled::settings::{Alignment, Modify, Style};
 
     let mut builder = Builder::default();
     builder.push_record(["Repository", "Dep.A", "Dep.SU", "Secret", "AI", "Push"]);
@@ -108,8 +124,18 @@ async fn audit(
     let mut total_ok = 0;
     let mut total_issues = 0;
 
-    for repository in &repositories {
-        let state = client.get_security_state(&repository.name).await?;
+    let states = crate::reconcile::map_buffered(&repositories, |repository| async {
+        client
+            .get_security_state_with_repo_data(
+                &repository.name,
+                repository.security_and_analysis.as_ref(),
+            )
+            .await
+    })
+    .await;
+
+    for (repository, state) in repositories.iter().zip(states) {
+        let state = state?;
         let features = [
             state.dependabot_alerts,
             state.dependabot_security_updates,
@@ -124,16 +150,7 @@ async fn audit(
             total_issues += 1;
         }
 
-        let icons: Vec<String> = features
-            .iter()
-            .map(|&enabled| {
-                if enabled {
-                    format!("{}", style("[ok]").green())
-                } else {
-                    format!("{}", style("[!!]").red())
-                }
-            })
-            .collect();
+        let icons: Vec<String> = features.iter().map(|&enabled| ok_icon(enabled)).collect();
 
         builder.push_record([
             repository.name.clone(),
@@ -145,21 +162,8 @@ async fn audit(
         ]);
     }
 
-    let table = builder
-        .build()
-        .with(Style::blank())
-        .with(
-            Modify::new(Rows::first()).with(tabled::settings::Format::content(|value| {
-                format!("{}", style(value).bold().underlined())
-            })),
-        )
-        .with(Modify::new(Columns::new(..)).with(Alignment::left()))
-        .to_string();
-
     println!();
-    for line in table.lines() {
-        println!("  {line}");
-    }
+    print_table(builder);
 
     println!();
     println!(
@@ -190,5 +194,12 @@ mod tests {
     #[test]
     fn skip_verify_is_preserved_by_focused_security_apply() {
         assert!(!options(false).verify);
+    }
+
+    #[test]
+    fn global_json_flag_is_accepted_after_the_focused_subcommand() {
+        use clap::Parser;
+        let cli = crate::cli::Cli::parse_from(["ward", "security", "plan", "--json"]);
+        assert!(cli.json);
     }
 }

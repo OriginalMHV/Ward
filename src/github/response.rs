@@ -100,6 +100,15 @@ impl GitHubApiError {
     }
 }
 
+/// True when any error in the chain is a GitHub 404.
+pub(crate) fn is_not_found(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<GitHubApiError>()
+            .is_some_and(|api| api.kind() == GitHubApiErrorKind::NotFound)
+    })
+}
+
 impl fmt::Display for GitHubApiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} {}", self.method, self.path)?;
@@ -239,27 +248,99 @@ pub(crate) async fn expect_empty(response: Response, method: &str, path: &str) -
     }
 }
 
+/// Waits that apply to a retry decision.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RetryTiming<'a> {
+    /// Exponential backoff for transient 5xx failures. The last entry is the cap.
+    pub backoff_schedule: &'a [Duration],
+    /// Base wait for a secondary rate limit without `retry-after`. Doubles per retry.
+    pub secondary_wait: Duration,
+    /// Longest rate limit wait that Ward accepts. A longer wait is not retried.
+    pub max_rate_limit_wait: Duration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RetryKind {
+    Transient,
+    PrimaryRateLimit,
+    SecondaryRateLimit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RetryPlan {
+    pub delay: Duration,
+    pub kind: RetryKind,
+}
+
+/// Decide whether and when to retry a response.
+///
+/// `rate_limit_body` is true when a 403 body says the request hit a rate limit.
+/// A 403 is a rate limit only when the headers or the body say so, never because of
+/// `x-ratelimit-remaining: 0` alone, since a plain permission error can carry it.
 pub(crate) fn retry_delay(
     status: StatusCode,
     headers: &header::HeaderMap,
+    rate_limit_body: bool,
     retry_number: usize,
-    fallback_schedule: &[Duration],
+    timing: &RetryTiming<'_>,
     now: DateTime<Utc>,
-) -> Option<Duration> {
+) -> Option<RetryPlan> {
     match status {
-        StatusCode::TOO_MANY_REQUESTS
-        | StatusCode::BAD_GATEWAY
-        | StatusCode::SERVICE_UNAVAILABLE
-        | StatusCode::GATEWAY_TIMEOUT => parse_retry_after(headers, now)
-            .or_else(|| parse_rate_limit_reset(headers, now))
-            .or_else(|| fallback_retry_delay(retry_number, fallback_schedule)),
-        StatusCode::FORBIDDEN if has_retry_after(headers) || is_rate_limit_exhausted(headers) => {
-            parse_retry_after(headers, now)
-                .or_else(|| parse_rate_limit_reset(headers, now))
-                .or_else(|| fallback_retry_delay(retry_number, fallback_schedule))
+        StatusCode::TOO_MANY_REQUESTS | StatusCode::FORBIDDEN => {
+            rate_limit_plan(status, headers, rate_limit_body, retry_number, timing, now)
+        }
+        StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT => {
+            fallback_retry_delay(retry_number, timing.backoff_schedule).map(|delay| RetryPlan {
+                delay,
+                kind: RetryKind::Transient,
+            })
         }
         _ => None,
     }
+}
+
+fn rate_limit_plan(
+    status: StatusCode,
+    headers: &header::HeaderMap,
+    rate_limit_body: bool,
+    retry_number: usize,
+    timing: &RetryTiming<'_>,
+    now: DateTime<Utc>,
+) -> Option<RetryPlan> {
+    let backoff = || {
+        let factor = 1u32 << retry_number.saturating_sub(1).min(16);
+        timing.secondary_wait.saturating_mul(factor)
+    };
+    let (delay, kind) = if let Some(delay) = parse_retry_after(headers, now) {
+        (delay, RetryKind::SecondaryRateLimit)
+    } else if is_rate_limit_exhausted(headers)
+        && (status == StatusCode::TOO_MANY_REQUESTS || rate_limit_body)
+    {
+        let delay = parse_rate_limit_reset(headers, now).unwrap_or_else(backoff);
+        (delay, RetryKind::PrimaryRateLimit)
+    } else if status == StatusCode::TOO_MANY_REQUESTS || rate_limit_body {
+        (backoff(), RetryKind::SecondaryRateLimit)
+    } else {
+        return None;
+    };
+
+    (delay <= timing.max_rate_limit_wait).then_some(RetryPlan { delay, kind })
+}
+
+pub(crate) fn mentions_rate_limit(body: &[u8]) -> bool {
+    let body = String::from_utf8_lossy(body).to_ascii_lowercase();
+    body.contains("rate limit") || body.contains("abuse detection")
+}
+
+pub(crate) fn is_rate_limit_status(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::TOO_MANY_REQUESTS | StatusCode::FORBIDDEN
+    )
+}
+
+pub(crate) fn needs_body_check(headers: &header::HeaderMap) -> bool {
+    !has_retry_after(headers)
 }
 
 fn kind_from_disposition(disposition: ResponseDisposition) -> GitHubApiErrorKind {
@@ -339,10 +420,16 @@ struct GitHubErrorPayload {
 
 impl GitHubErrorPayload {
     fn safe_details(&self) -> Vec<String> {
-        self.errors
+        let mut details: Vec<String> = self
+            .errors
             .iter()
+            .take(MAX_DETAILS)
             .map(GitHubErrorDetail::safe_summary)
-            .collect()
+            .collect();
+        if self.errors.len() > MAX_DETAILS {
+            details.push(format!("{} more", self.errors.len() - MAX_DETAILS));
+        }
+        details
     }
 }
 
@@ -356,9 +443,39 @@ enum GitHubErrorDetail {
         field: Option<String>,
         #[serde(default)]
         code: Option<String>,
+        #[serde(default)]
+        message: Option<String>,
     },
     Text(String),
-    Other(serde_json::Value),
+    Other(
+        #[allow(
+            dead_code,
+            reason = "deserialized to accept any shape, never displayed"
+        )]
+        serde_json::Value,
+    ),
+}
+
+/// Longest validation detail shown in an error. GitHub validation messages are
+/// short and are not secrets.
+const MAX_DETAIL_CHARS: usize = 300;
+
+const MAX_DETAILS: usize = 5;
+
+fn truncate_detail(value: &str) -> String {
+    // One line per detail, so GitHub text cannot inject extra lines into Ward's output.
+    let flattened: String = value
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let value = flattened.split_whitespace().collect::<Vec<_>>().join(" ");
+    let value = value.as_str();
+    if value.chars().count() <= MAX_DETAIL_CHARS {
+        return value.to_owned();
+    }
+    let mut truncated: String = value.chars().take(MAX_DETAIL_CHARS).collect();
+    truncated.push_str("...");
+    truncated
 }
 
 impl GitHubErrorDetail {
@@ -368,6 +485,7 @@ impl GitHubErrorDetail {
                 resource,
                 field,
                 code,
+                message,
             } => {
                 let mut summary = String::new();
 
@@ -388,6 +506,12 @@ impl GitHubErrorDetail {
                     summary.push_str(code);
                     summary.push(')');
                 }
+                if let Some(message) = message.as_deref().filter(|m| !m.trim().is_empty()) {
+                    if !summary.is_empty() {
+                        summary.push_str(": ");
+                    }
+                    summary.push_str(&truncate_detail(message));
+                }
 
                 if summary.is_empty() {
                     "additional error details omitted".to_owned()
@@ -395,14 +519,8 @@ impl GitHubErrorDetail {
                     summary
                 }
             }
-            Self::Text(value) => {
-                let _ = value;
-                "additional error details omitted".to_owned()
-            }
-            Self::Other(value) => {
-                let _ = value;
-                "additional error details omitted".to_owned()
-            }
+            Self::Text(value) if !value.trim().is_empty() => truncate_detail(value),
+            Self::Text(_) | Self::Other(_) => "additional error details omitted".to_owned(),
         }
     }
 }
@@ -420,10 +538,13 @@ mod tests {
 
     use crate::github::Client;
 
-    use super::{ClassifiedResponse, GitHubApiError, classify_empty, classify_json, retry_delay};
+    use super::{
+        ClassifiedResponse, GitHubApiError, GitHubErrorPayload, MAX_DETAILS, RetryKind, RetryPlan,
+        RetryTiming, classify_empty, classify_json, mentions_rate_limit, retry_delay,
+    };
 
     #[tokio::test]
-    async fn classify_json_preserves_structured_context_without_leaking_raw_body() {
+    async fn classify_json_keeps_validation_details_without_leaking_the_raw_body() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/repos/test-org/private-repo"))
@@ -461,7 +582,7 @@ mod tests {
         assert!(display.contains("Validation Failed"));
         assert!(display.contains("Repository.name (invalid)"));
         assert!(display.contains("response body omitted"));
-        assert!(!display.contains("top-secret-value"));
+        assert!(display.contains("Repository.name (invalid): top-secret-value"));
         assert!(!display.contains("do-not-log"));
     }
 
@@ -530,126 +651,221 @@ mod tests {
         assert!(error.to_string().contains("response body omitted"));
     }
 
-    #[test]
-    fn retry_delay_respects_retry_after_for_rate_limited_forbidden() {
-        let mut headers = header::HeaderMap::new();
-        headers.insert(header::RETRY_AFTER, header::HeaderValue::from_static("7"));
+    const SCHEDULE: [Duration; 3] = [
+        Duration::from_secs(1),
+        Duration::from_secs(2),
+        Duration::from_secs(4),
+    ];
+    const TIMING: RetryTiming<'static> = RetryTiming {
+        backoff_schedule: &SCHEDULE,
+        secondary_wait: Duration::from_secs(60),
+        max_rate_limit_wait: Duration::from_secs(300),
+    };
 
-        let delay = retry_delay(
-            StatusCode::FORBIDDEN,
-            &headers,
-            1,
-            &[
-                Duration::from_secs(1),
-                Duration::from_secs(2),
-                Duration::from_secs(4),
-            ],
-            Utc.with_ymd_and_hms(2026, 7, 14, 10, 0, 0).unwrap(),
-        );
-
-        assert_eq!(delay, Some(Duration::from_secs(7)));
+    fn plan(
+        status: StatusCode,
+        headers: &header::HeaderMap,
+        secondary_body: bool,
+        retry_number: usize,
+        now: chrono::DateTime<Utc>,
+    ) -> Option<RetryPlan> {
+        retry_delay(status, headers, secondary_body, retry_number, &TIMING, now)
     }
 
-    #[test]
-    fn retry_delay_uses_rate_limit_reset_when_remaining_is_zero() {
+    fn exhausted_headers(reset: &'static str) -> header::HeaderMap {
         let mut headers = header::HeaderMap::new();
         headers.insert(
             "x-ratelimit-remaining",
             header::HeaderValue::from_static("0"),
         );
-        headers.insert(
-            "x-ratelimit-reset",
-            header::HeaderValue::from_static("1784023205"),
-        );
+        headers.insert("x-ratelimit-reset", header::HeaderValue::from_static(reset));
+        headers
+    }
 
-        let delay = retry_delay(
-            StatusCode::FORBIDDEN,
-            &headers,
-            1,
-            &[
-                Duration::from_secs(1),
-                Duration::from_secs(2),
-                Duration::from_secs(4),
-            ],
-            Utc.timestamp_opt(1784023200, 0).single().unwrap(),
-        );
+    #[test]
+    fn retry_delay_respects_retry_after_for_rate_limited_forbidden() {
+        let mut headers = header::HeaderMap::new();
+        headers.insert(header::RETRY_AFTER, header::HeaderValue::from_static("7"));
 
-        assert_eq!(delay, Some(Duration::from_secs(5)));
+        let result = plan(StatusCode::FORBIDDEN, &headers, false, 1, Utc::now());
+
+        assert_eq!(
+            result,
+            Some(RetryPlan {
+                delay: Duration::from_secs(7),
+                kind: RetryKind::SecondaryRateLimit
+            })
+        );
+    }
+
+    #[test]
+    fn retry_delay_uses_rate_limit_reset_when_remaining_is_zero() {
+        let headers = exhausted_headers("1784023205");
+        let now = Utc.timestamp_opt(1784023200, 0).single().unwrap();
+
+        let result = plan(StatusCode::FORBIDDEN, &headers, true, 1, now);
+
+        assert_eq!(
+            result,
+            Some(RetryPlan {
+                delay: Duration::from_secs(5),
+                kind: RetryKind::PrimaryRateLimit
+            })
+        );
+        assert_eq!(
+            plan(StatusCode::FORBIDDEN, &headers, false, 1, now),
+            None,
+            "a 403 without a rate limit message is a permission error"
+        );
+        assert_eq!(
+            plan(StatusCode::TOO_MANY_REQUESTS, &headers, false, 1, now),
+            result
+        );
+    }
+
+    #[test]
+    fn retry_delay_ignores_rate_limit_reset_for_server_errors() {
+        let headers = exhausted_headers("1784026800");
+        let now = Utc.timestamp_opt(1784023200, 0).single().unwrap();
+
+        for status in [
+            StatusCode::BAD_GATEWAY,
+            StatusCode::SERVICE_UNAVAILABLE,
+            StatusCode::GATEWAY_TIMEOUT,
+        ] {
+            assert_eq!(
+                plan(status, &headers, false, 1, now),
+                Some(RetryPlan {
+                    delay: Duration::from_secs(1),
+                    kind: RetryKind::Transient
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn retry_delay_does_not_wait_for_primary_reset_beyond_cap() {
+        let headers = exhausted_headers("1784026800");
+        let now = Utc.timestamp_opt(1784023200, 0).single().unwrap();
+
+        assert_eq!(plan(StatusCode::FORBIDDEN, &headers, true, 1, now), None);
+    }
+
+    #[test]
+    fn retry_delay_waits_one_minute_for_secondary_limit_without_retry_after() {
+        let headers = header::HeaderMap::new();
+
+        assert_eq!(
+            plan(StatusCode::FORBIDDEN, &headers, true, 1, Utc::now()),
+            Some(RetryPlan {
+                delay: Duration::from_secs(60),
+                kind: RetryKind::SecondaryRateLimit
+            })
+        );
+        assert_eq!(
+            plan(
+                StatusCode::TOO_MANY_REQUESTS,
+                &headers,
+                false,
+                2,
+                Utc::now()
+            )
+            .map(|plan| plan.delay),
+            Some(Duration::from_secs(120))
+        );
+        assert_eq!(
+            plan(StatusCode::FORBIDDEN, &headers, true, 4, Utc::now()),
+            None
+        );
+    }
+
+    #[test]
+    fn secondary_rate_limit_body_detection_is_case_insensitive() {
+        assert!(mentions_rate_limit(
+            br#"{"message":"You have exceeded a Secondary Rate Limit."}"#
+        ));
+        assert!(mentions_rate_limit(
+            br#"{"message":"API rate limit exceeded for user ID 1."}"#
+        ));
+        assert!(!mentions_rate_limit(
+            br#"{"message":"Resource not accessible by integration"}"#
+        ));
     }
 
     #[test]
     fn retry_delay_falls_back_to_bounded_backoff() {
         let headers = header::HeaderMap::new();
-        let schedule = [
-            Duration::from_secs(1),
-            Duration::from_secs(2),
-            Duration::from_secs(4),
-        ];
 
-        assert_eq!(
-            retry_delay(
-                StatusCode::SERVICE_UNAVAILABLE,
-                &headers,
-                1,
-                &schedule,
-                Utc::now()
-            ),
-            Some(Duration::from_secs(1))
-        );
-        assert_eq!(
-            retry_delay(
-                StatusCode::SERVICE_UNAVAILABLE,
-                &headers,
-                2,
-                &schedule,
-                Utc::now()
-            ),
-            Some(Duration::from_secs(2))
-        );
-        assert_eq!(
-            retry_delay(
-                StatusCode::SERVICE_UNAVAILABLE,
-                &headers,
-                3,
-                &schedule,
-                Utc::now()
-            ),
-            Some(Duration::from_secs(4))
-        );
-        assert_eq!(
-            retry_delay(
-                StatusCode::SERVICE_UNAVAILABLE,
-                &headers,
-                4,
-                &schedule,
-                Utc::now()
-            ),
-            Some(Duration::from_secs(4))
-        );
+        for (retry, expected) in [(1, 1), (2, 2), (3, 4), (4, 4)] {
+            assert_eq!(
+                plan(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    &headers,
+                    false,
+                    retry,
+                    Utc::now()
+                )
+                .map(|plan| plan.delay),
+                Some(Duration::from_secs(expected))
+            );
+        }
     }
 
     #[test]
     fn retry_delay_does_not_retry_validation_or_ordinary_forbidden() {
         let headers = header::HeaderMap::new();
-        let schedule = [
-            Duration::from_secs(1),
-            Duration::from_secs(2),
-            Duration::from_secs(4),
-        ];
 
         assert_eq!(
-            retry_delay(
+            plan(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 &headers,
+                false,
                 1,
-                &schedule,
                 Utc::now()
             ),
             None
         );
         assert_eq!(
-            retry_delay(StatusCode::FORBIDDEN, &headers, 1, &schedule, Utc::now()),
+            plan(StatusCode::FORBIDDEN, &headers, false, 1, Utc::now()),
             None
         );
+    }
+
+    #[test]
+    fn validation_details_include_string_entries_and_truncate_long_ones() {
+        let payload: super::GitHubErrorPayload = serde_json::from_value(json!({
+            "message": "Validation Failed",
+            "errors": [
+                "Only organization repositories can have users and team restrictions",
+                "x".repeat(1000)
+            ]
+        }))
+        .unwrap();
+
+        let details = payload.safe_details();
+
+        assert_eq!(
+            details[0],
+            "Only organization repositories can have users and team restrictions"
+        );
+        assert!(details[1].len() < 400 && details[1].ends_with("..."));
+    }
+
+    #[test]
+    fn validation_details_are_single_line_and_capped() {
+        let payload: GitHubErrorPayload = serde_json::from_value(json!({
+            "message": "Validation Failed",
+            "errors": [
+                "first line\nsecond line\r\n\u{1b}[31minjected",
+                "b", "c", "d", "e", "f", "g"
+            ]
+        }))
+        .unwrap();
+
+        let details = payload.safe_details();
+
+        assert_eq!(details[0], "first line second line [31minjected");
+        assert_eq!(details.len(), MAX_DETAILS + 1);
+        assert_eq!(details[MAX_DETAILS], "2 more");
     }
 }

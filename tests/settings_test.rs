@@ -141,10 +141,13 @@ async fn reads_general_repository_and_graphql_settings() {
         .get_repository_general_settings("my-repo")
         .await
         .unwrap();
-    let graphql = client
-        .get_repository_graphql_settings("my-repo")
+    let ClassifiedApiResponse::Success(graphql) = client
+        .get_repository_graphql_settings_classified("my-repo")
         .await
-        .unwrap();
+        .unwrap()
+    else {
+        panic!("expected GraphQL settings");
+    };
 
     assert_eq!(rest.node_id, "R_kgDOTest");
     assert_eq!(rest.pull_request_creation_policy.as_deref(), Some("all"));

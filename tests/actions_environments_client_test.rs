@@ -279,21 +279,21 @@ async fn environment_endpoints_percent_encode_names_with_special_characters() {
     // "staging/eu west" must be percent-encoded segment-wise in the path.
     Mock::given(method("GET"))
         .and(path(
-            "/repos/test-org/my-repo/environments/staging%2Feu%20west",
+            "/repos/test-org/my-repo/environments/staging%2Feu%20west/deployment-branch-policies",
         ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "name": "staging/eu west",
-            "protection_rules": []
+            "total_count": 0,
+            "branch_policies": []
         })))
         .mount(&server)
         .await;
 
-    let environment = client(&server)
-        .get_environment("my-repo", "staging/eu west")
+    let outcome = client(&server)
+        .list_deployment_branch_policies_checked("my-repo", "staging/eu west")
         .await
         .unwrap();
 
-    assert_eq!(environment.unwrap().name, "staging/eu west");
+    assert!(outcome.available().unwrap().is_empty());
 }
 
 // ---------------------------------------------------------------------------

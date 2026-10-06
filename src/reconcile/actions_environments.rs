@@ -16,6 +16,8 @@ use std::fmt;
 
 use anyhow::{Context, Result};
 
+use super::relax_unrequested;
+
 use crate::config::manifest::{
     ActionsCategoryV2, ActionsSettingsConfig, ActorReference, CategoryPolicy, CoverageEntry,
     CoverageOutcome, EnvironmentConfigV2, EnvironmentDeploymentPolicyConfig,
@@ -104,14 +106,25 @@ pub struct ResolvedSecret {
     pub value: SecretValue,
 }
 
+/// Looks up an environment variable by name. Production code passes [`process_env`].
+pub type EnvLookup<'a> = &'a dyn Fn(&str) -> Option<String>;
+
+/// Read a variable from the process environment. Non-Unicode values count as unset.
+pub fn process_env(key: &str) -> Option<String> {
+    std::env::var(key).ok()
+}
+
 /// Resolve a [`ExternalValueReference`] to a plaintext value. Returns `Err`
 /// with a safe (non-sensitive) reason string on failure; the reason never
 /// contains any resolved value.
-fn resolve_external_value(reference: &ExternalValueReference) -> Result<SecretValue, String> {
+fn resolve_external_value_with(
+    reference: &ExternalValueReference,
+    lookup: EnvLookup<'_>,
+) -> Result<SecretValue, String> {
     match reference {
-        ExternalValueReference::Env { key } => std::env::var(key)
+        ExternalValueReference::Env { key } => lookup(key)
             .map(SecretValue)
-            .map_err(|_| format!("environment variable `{key}` is not set")),
+            .ok_or_else(|| format!("environment variable `{key}` is not set")),
         ExternalValueReference::Manual { hint } => Err(match hint {
             Some(hint) => format!("value must be provided manually ({hint})"),
             None => "value must be provided manually".to_owned(),
@@ -123,10 +136,11 @@ fn resolve_secrets(
     placeholders: &[SecretPlaceholderConfig],
     scope_prefix: &str,
     issues: &mut Vec<ReconcileIssue>,
+    lookup: EnvLookup<'_>,
 ) -> Vec<ResolvedSecret> {
     let mut resolved = Vec::new();
     for placeholder in placeholders {
-        match resolve_external_value(&placeholder.value_from) {
+        match resolve_external_value_with(&placeholder.value_from, lookup) {
             Ok(value) => resolved.push(ResolvedSecret {
                 name: placeholder.name.clone(),
                 value,
@@ -148,11 +162,8 @@ fn seal_or_block(public_key: &str, name: &str, value: &SecretValue) -> Result<St
         .map_err(|_| format!("Failed to encrypt secret `{name}` with the target public key"))
 }
 
-fn wants_change<T: PartialEq>(desired: &Option<T>, current: &Option<T>) -> bool {
-    match desired {
-        Some(value) => current.as_ref() != Some(value),
-        None => false,
-    }
+fn wants_change<T: PartialEq>(desired: Option<&T>, current: Option<&T>) -> bool {
+    desired.is_some_and(|value| current != Some(value))
 }
 
 fn write_outcome_issue(
@@ -234,25 +245,22 @@ fn resolve_selected_repository_association(
     repositories: actions::ReadOutcome<Option<Vec<NamedRepository>>>,
     coverage: &mut Vec<CoverageEntry>,
 ) -> ResolvedOrgReference {
-    let metadata = match record_read_outcome(
+    let Some(metadata) = record_read_outcome(
         coverage,
         ManifestCategoryName::Actions,
         metadata_endpoint,
         metadata,
-    ) {
-        Some(value) => value,
-        None => {
-            return ResolvedOrgReference {
-                resource: resource.clone(),
-                present: None,
-                associated: None,
-                supported: true,
-                detail: Some(format!(
-                    "Could not resolve organization {:?} `{}`: the lookup was unavailable (see coverage); this must not be treated as absent.",
-                    resource.resource_type, resource.name
-                )),
-            };
-        }
+    ) else {
+        return ResolvedOrgReference {
+            resource: resource.clone(),
+            present: None,
+            associated: None,
+            supported: true,
+            detail: Some(format!(
+                "Could not resolve organization {:?} `{}`: the lookup was unavailable (see coverage); this must not be treated as absent.",
+                resource.resource_type, resource.name
+            )),
+        };
     };
 
     let Some(metadata) = metadata else {
@@ -281,25 +289,22 @@ fn resolve_selected_repository_association(
         };
     }
 
-    let repositories = match record_read_outcome(
+    let Some(repositories) = record_read_outcome(
         coverage,
         ManifestCategoryName::Actions,
         repositories_endpoint,
         repositories,
-    ) {
-        Some(value) => value,
-        None => {
-            return ResolvedOrgReference {
-                resource: resource.clone(),
-                present: Some(true),
-                associated: None,
-                supported: true,
-                detail: Some(format!(
-                    "Organization {:?} `{}` has `selected` visibility, but the selected-repository list could not be resolved (this endpoint requires org-admin scope); association state is unknown and must not be assumed.",
-                    resource.resource_type, resource.name
-                )),
-            };
-        }
+    ) else {
+        return ResolvedOrgReference {
+            resource: resource.clone(),
+            present: Some(true),
+            associated: None,
+            supported: true,
+            detail: Some(format!(
+                "Organization {:?} `{}` has `selected` visibility, but the selected-repository list could not be resolved (this endpoint requires org-admin scope); association state is unknown and must not be assumed.",
+                resource.resource_type, resource.name
+            )),
+        };
     };
 
     ResolvedOrgReference {
@@ -452,6 +457,32 @@ pub async fn collect_actions_category(
     let mut settings = ActionsSettingsConfig::default();
     let mut coverage = Vec::new();
     let mut issues = Vec::new();
+
+    // A source import (`desired` is `None`) reads everything. A plan reads
+    // optional endpoints too, but only counts a failure when the manifest manages them.
+    let requests = |resource: Option<ReferencedResourceType>, has_entries: bool| {
+        desired.is_none_or(|desired| {
+            desired.policy.prune
+                || has_entries
+                || resource.is_some_and(|resource| {
+                    desired
+                        .references
+                        .iter()
+                        .any(|reference| reference.resource_type == resource)
+                })
+        })
+    };
+    let wants_org_secrets = requests(Some(ReferencedResourceType::OrganizationSecret), false);
+    let wants_org_variables = requests(Some(ReferencedResourceType::OrganizationVariable), false);
+    let wants_runners = requests(Some(ReferencedResourceType::Runner), false);
+    let wants_dependabot_secrets = requests(
+        None,
+        desired.is_some_and(|d| !d.dependabot_secrets.is_empty()),
+    );
+    let wants_codespaces_secrets = requests(
+        None,
+        desired.is_some_and(|d| !d.codespaces_secrets.is_empty()),
+    );
 
     if let Some(permissions) = record_read_outcome(
         &mut coverage,
@@ -703,10 +734,13 @@ pub async fn collect_actions_category(
         &mut coverage,
         ManifestCategoryName::Actions,
         "actions/organization-secrets",
-        client
-            .list_visible_organization_secrets_checked(repo)
-            .await
-            .context("Failed to collect visible organization secret references")?,
+        relax_unrequested(
+            client
+                .list_visible_organization_secrets_checked(repo)
+                .await
+                .context("Failed to collect visible organization secret references")?,
+            wants_org_secrets,
+        ),
     ) {
         category
             .references
@@ -724,10 +758,13 @@ pub async fn collect_actions_category(
         &mut coverage,
         ManifestCategoryName::Actions,
         "actions/organization-variables",
-        client
-            .list_visible_organization_variables_checked(repo)
-            .await
-            .context("Failed to collect visible organization variable references")?,
+        relax_unrequested(
+            client
+                .list_visible_organization_variables_checked(repo)
+                .await
+                .context("Failed to collect visible organization variable references")?,
+            wants_org_variables,
+        ),
     ) {
         category
             .references
@@ -750,10 +787,13 @@ pub async fn collect_actions_category(
         &mut coverage,
         ManifestCategoryName::Actions,
         "actions/runners",
-        client
-            .list_repository_runners_checked(repo)
-            .await
-            .context("Failed to collect self-hosted runner references")?,
+        relax_unrequested(
+            client
+                .list_repository_runners_checked(repo)
+                .await
+                .context("Failed to collect self-hosted runner references")?,
+            wants_runners,
+        ),
     ) {
         category
             .references
@@ -801,10 +841,13 @@ pub async fn collect_actions_category(
         &mut coverage,
         ManifestCategoryName::Actions,
         "dependabot/secrets",
-        client
-            .list_dependabot_secrets_checked(repo)
-            .await
-            .context("Failed to collect Dependabot secret metadata")?,
+        relax_unrequested(
+            client
+                .list_dependabot_secrets_checked(repo)
+                .await
+                .context("Failed to collect Dependabot secret metadata")?,
+            wants_dependabot_secrets,
+        ),
     ) {
         category.dependabot_secrets = dependabot_secrets
             .iter()
@@ -834,10 +877,13 @@ pub async fn collect_actions_category(
         &mut coverage,
         ManifestCategoryName::Actions,
         "codespaces/secrets",
-        client
-            .list_codespaces_secrets_checked(repo)
-            .await
-            .context("Failed to collect Codespaces secret metadata")?,
+        relax_unrequested(
+            client
+                .list_codespaces_secrets_checked(repo)
+                .await
+                .context("Failed to collect Codespaces secret metadata")?,
+            wants_codespaces_secrets,
+        ),
     ) {
         category.codespaces_secrets = codespaces_secrets
             .iter()
@@ -1024,6 +1070,15 @@ pub fn plan_actions_category(
     desired: &ActionsCategoryV2,
     actual: &ActionsCollection,
 ) -> ActionsPlan {
+    plan_actions_category_with_env(desired, actual, &process_env)
+}
+
+/// As [`plan_actions_category`], resolving secret values through `env`.
+pub fn plan_actions_category_with_env(
+    desired: &ActionsCategoryV2,
+    actual: &ActionsCollection,
+    env: EnvLookup<'_>,
+) -> ActionsPlan {
     let mut issues = actual.issues.clone();
 
     if desired.policy.disposition != ManagementDisposition::Managed {
@@ -1044,11 +1099,14 @@ pub fn plan_actions_category(
 
     if let Some(wanted) = &desired.settings {
         // Repository Actions permissions (enabled/allowed_actions/sha pinning).
-        if wants_change(&wanted.enabled, &current.enabled)
-            || wants_change(&wanted.allowed_actions, &current.allowed_actions)
+        if wants_change(wanted.enabled.as_ref(), current.enabled.as_ref())
             || wants_change(
-                &wanted.requires_pinned_actions,
-                &current.requires_pinned_actions,
+                wanted.allowed_actions.as_ref(),
+                current.allowed_actions.as_ref(),
+            )
+            || wants_change(
+                wanted.requires_pinned_actions.as_ref(),
+                current.requires_pinned_actions.as_ref(),
             )
         {
             match wanted.enabled {
@@ -1076,11 +1134,11 @@ pub fn plan_actions_category(
             .or(current.allowed_actions.as_deref());
         if effective_allowed_actions == Some("selected")
             && (wants_change(
-                &wanted.allow_github_owned_actions,
-                &current.allow_github_owned_actions,
+                wanted.allow_github_owned_actions.as_ref(),
+                current.allow_github_owned_actions.as_ref(),
             ) || wants_change(
-                &wanted.allow_verified_creator_actions,
-                &current.allow_verified_creator_actions,
+                wanted.allow_verified_creator_actions.as_ref(),
+                current.allow_verified_creator_actions.as_ref(),
             ) || (!wanted.selected_actions.is_empty()
                 && wanted.selected_actions != current.selected_actions))
         {
@@ -1101,11 +1159,11 @@ pub fn plan_actions_category(
 
         // Workflow (default GITHUB_TOKEN) permissions.
         if wants_change(
-            &wanted.default_workflow_permissions,
-            &current.default_workflow_permissions,
+            wanted.default_workflow_permissions.as_ref(),
+            current.default_workflow_permissions.as_ref(),
         ) || wants_change(
-            &wanted.can_approve_pull_request_reviews,
-            &current.can_approve_pull_request_reviews,
+            wanted.can_approve_pull_request_reviews.as_ref(),
+            current.can_approve_pull_request_reviews.as_ref(),
         ) {
             let default_permissions = wanted
                 .default_workflow_permissions
@@ -1147,8 +1205,8 @@ pub fn plan_actions_category(
         }
 
         if wants_change(
-            &wanted.cache_retention_limit_days,
-            &current.cache_retention_limit_days,
+            wanted.cache_retention_limit_days.as_ref(),
+            current.cache_retention_limit_days.as_ref(),
         ) && let Some(max_cache_retention_days) = wanted.cache_retention_limit_days
         {
             settings_changes.push(ActionsSettingChange::CacheRetentionLimit {
@@ -1157,23 +1215,20 @@ pub fn plan_actions_category(
         }
 
         if wants_change(
-            &wanted.cache_storage_limit_gb,
-            &current.cache_storage_limit_gb,
+            wanted.cache_storage_limit_gb.as_ref(),
+            current.cache_storage_limit_gb.as_ref(),
         ) && let Some(max_cache_size_gb) = wanted.cache_storage_limit_gb
         {
             settings_changes.push(ActionsSettingChange::CacheStorageLimit { max_cache_size_gb });
         }
 
         if wants_change(
-            &wanted.fork_pull_request_contributor_approval,
-            &current.fork_pull_request_contributor_approval,
-        ) {
-            settings_changes.push(ActionsSettingChange::ForkPrContributorApproval {
-                approval_policy: wanted
-                    .fork_pull_request_contributor_approval
-                    .clone()
-                    .unwrap(),
-            });
+            wanted.fork_pull_request_contributor_approval.as_ref(),
+            current.fork_pull_request_contributor_approval.as_ref(),
+        ) && let Some(approval_policy) = wanted.fork_pull_request_contributor_approval.clone()
+        {
+            settings_changes
+                .push(ActionsSettingChange::ForkPrContributorApproval { approval_policy });
         }
 
         // Private/internal-repo-only fork PR workflow policy. Both manifest
@@ -1335,7 +1390,7 @@ pub fn plan_actions_category(
         .filter(|secret| !current_secret_names.contains(secret.name.as_str()))
         .cloned()
         .collect();
-    let mut secret_upserts = resolve_secrets(&missing_secrets, "actions", &mut issues);
+    let mut secret_upserts = resolve_secrets(&missing_secrets, "actions", &mut issues, env);
     secret_upserts.retain(|secret| !secret.name.is_empty());
     let mut secret_deletions = Vec::new();
     if desired.policy.prune {
@@ -1930,7 +1985,7 @@ pub async fn collect_environments_category(
         .map(|desired| desired.policy.clone())
         .unwrap_or_else(CategoryPolicy::observe_sensitive);
 
-    let observed = match record_read_outcome(
+    let Some(observed) = record_read_outcome(
         &mut coverage,
         ManifestCategoryName::Environments,
         "environments",
@@ -1938,21 +1993,18 @@ pub async fn collect_environments_category(
             .list_environments_checked(repo)
             .await
             .context("Failed to list repository environments")?,
-    ) {
-        Some(observed) => observed,
-        None => {
-            return Ok(EnvironmentsCollection {
-                category: EnvironmentsCategoryV2 {
-                    policy,
-                    ..EnvironmentsCategoryV2::default()
-                },
-                observed_names: Vec::new(),
-                deployment_policy_ids: BTreeMap::new(),
-                deployment_policies_observed: std::collections::BTreeSet::new(),
-                coverage,
-                issues,
-            });
-        }
+    ) else {
+        return Ok(EnvironmentsCollection {
+            category: EnvironmentsCategoryV2 {
+                policy,
+                ..EnvironmentsCategoryV2::default()
+            },
+            observed_names: Vec::new(),
+            deployment_policy_ids: BTreeMap::new(),
+            deployment_policies_observed: std::collections::BTreeSet::new(),
+            coverage,
+            issues,
+        });
     };
 
     let wanted_names: Option<std::collections::BTreeSet<&str>> = desired.map(|desired| {
@@ -2201,6 +2253,15 @@ fn actor_key(actor: &ActorReference) -> String {
 pub fn plan_environments_category(
     desired: &EnvironmentsCategoryV2,
     actual: &EnvironmentsCollection,
+) -> EnvironmentsPlan {
+    plan_environments_category_with_env(desired, actual, &process_env)
+}
+
+/// As [`plan_environments_category`], resolving secret values through `env`.
+pub fn plan_environments_category_with_env(
+    desired: &EnvironmentsCategoryV2,
+    actual: &EnvironmentsCollection,
+    env: EnvLookup<'_>,
 ) -> EnvironmentsPlan {
     let mut issues = actual.issues.clone();
 
@@ -2453,7 +2514,7 @@ pub fn plan_environments_category(
             .filter(|secret| !current_secret_names.contains(secret.name.as_str()))
             .cloned()
             .collect();
-        plan.secret_upserts = resolve_secrets(&missing_secrets, &scope_prefix, &mut issues);
+        plan.secret_upserts = resolve_secrets(&missing_secrets, &scope_prefix, &mut issues, env);
         if desired.policy.prune {
             let desired_secret_names: std::collections::BTreeSet<&str> = wanted
                 .secrets
