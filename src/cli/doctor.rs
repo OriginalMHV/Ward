@@ -135,6 +135,10 @@ fn check_token() -> Check {
     match auth::resolve_token() {
         Ok(token) => {
             let prefix = &token[..std::cmp::min(8, token.len())];
+            #[allow(
+                clippy::disallowed_methods,
+                reason = "doctor reports which environment variable supplied the token"
+            )]
             let source = if std::env::var("GH_TOKEN").is_ok() {
                 "GH_TOKEN"
             } else if std::env::var("GITHUB_TOKEN").is_ok() {

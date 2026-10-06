@@ -242,6 +242,10 @@ fn run_edit(config_override: Option<&str>) -> Result<()> {
         );
     }
 
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the editor choice comes from the user's environment"
+    )]
     let editor = std::env::var("EDITOR")
         .or_else(|_| std::env::var("VISUAL"))
         .unwrap_or_else(|_| "vi".to_owned());

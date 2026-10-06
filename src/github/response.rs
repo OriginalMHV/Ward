@@ -833,7 +833,7 @@ mod tests {
 
     #[test]
     fn validation_details_include_string_entries_and_truncate_long_ones() {
-        let payload: super::GitHubErrorPayload = serde_json::from_value(json!({
+        let payload: GitHubErrorPayload = serde_json::from_value(json!({
             "message": "Validation Failed",
             "errors": [
                 "Only organization repositories can have users and team restrictions",

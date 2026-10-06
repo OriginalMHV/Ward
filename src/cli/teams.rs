@@ -544,7 +544,7 @@ mod tests {
                 { slug = "devops", permission = "admin" },
             ]
         "#;
-        let m: crate::config::Manifest = toml::from_str(toml_str).unwrap();
+        let m: Manifest = toml::from_str(toml_str).unwrap();
         let teams = teams_for_repo(&m, "be-service").unwrap();
         assert_eq!(teams.len(), 2);
         assert_eq!(teams[0].slug, "developers");
@@ -605,7 +605,7 @@ mod tests {
             id = "be"
             name = "Backend"
         "#;
-        let m: crate::config::Manifest = toml::from_str(toml_str).unwrap();
+        let m: Manifest = toml::from_str(toml_str).unwrap();
         assert!(teams_for_repo(&m, "be-service").is_none());
     }
 
