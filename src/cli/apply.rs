@@ -155,7 +155,9 @@ fn ensure_can_confirm(yes: bool, interactive: bool) -> Result<()> {
 
 fn validate_confirmation_mode(json: bool, yes: bool) -> Result<()> {
     if json && !yes {
-        bail!("`ward apply --json` requires `--yes`; JSON output must not bypass confirmation");
+        bail!(
+            "`ward apply --format json` requires `--yes`; JSON output must not bypass confirmation"
+        );
     }
     Ok(())
 }
@@ -207,7 +209,11 @@ mod tests {
     #[test]
     fn json_apply_requires_explicit_confirmation() {
         let error = validate_confirmation_mode(true, false).unwrap_err();
-        assert!(error.to_string().contains("requires `--yes`"));
+        assert!(
+            error
+                .to_string()
+                .contains("`ward apply --format json` requires `--yes`")
+        );
     }
 
     #[test]

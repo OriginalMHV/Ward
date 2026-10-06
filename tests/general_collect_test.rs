@@ -114,6 +114,8 @@ async fn collects_general_repository_state_with_partial_optional_failures() {
     assert!(collected.extensions.use_squash_pr_title_as_default == Some(false));
     assert!(!collected.extensions.graphql_settings_collected);
     assert!(!collected.extensions.labels_collected);
+    // A successful read records a Collected entry, and that must still count as collected.
+    assert!(collected.extensions.custom_properties_collected);
     assert!(!collected.extensions.immutable_releases_collected);
     assert!(collected.coverage.iter().any(|entry| {
         entry.endpoint == "POST /graphql repository settings"

@@ -2388,7 +2388,7 @@ pub fn render_report_to(
             }
             let hidden = category.details.len().saturating_sub(SHOWN_DETAILS);
             if hidden > 0 {
-                writeln!(out, "        - {hidden} more, use --json")?;
+                writeln!(out, "        - {hidden} more, use --format json")?;
             }
         }
     }
@@ -2966,6 +2966,6 @@ mod tests {
 
         assert!(text.contains("change 3"));
         assert!(!text.contains("change 4"));
-        assert!(text.contains("2 more, use --json"), "{text}");
+        assert!(text.contains("2 more, use --format json"), "{text}");
     }
 }
