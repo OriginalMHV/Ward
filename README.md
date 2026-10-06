@@ -1,24 +1,16 @@
-<div align="center">
-
-<img src="docs/assets/ward-hero.svg" alt="Ward: declarative GitHub repository management. Plan, apply, verify." width="100%">
-
-<br>
-
-[![CI](https://github.com/OriginalMHV/Ward/actions/workflows/ci.yml/badge.svg)](https://github.com/OriginalMHV/Ward/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/ward-cli.svg)](https://crates.io/crates/ward-cli)
-[![MSRV](https://img.shields.io/badge/MSRV-1.88-0F2A44.svg)](https://www.rust-lang.org)
-[![License: MIT](https://img.shields.io/badge/license-MIT-14B8A6.svg)](LICENSE)
-
-</div>
-
-> This README describes Ward 0.5.0. For the released 0.4.2, see the [v0.4.2 README](https://github.com/OriginalMHV/Ward/blob/v0.4.2/README.md).
-
 <p align="center">
-  <img src="docs/assets/ward-stats.svg" alt="9 categories. No state file. Plan, apply, verify. 4.6 times faster plan." width="100%">
+  <img src="docs/assets/ward-hero.svg" alt="ward. Declarative GitHub repository management. plan, apply, verify" width="100%">
 </p>
 
 <p align="center">
-  <img src="docs/assets/demo.gif" alt="Terminal recording: ward import, plan, apply and drift against a demo repository" width="900">
+  <a href="https://github.com/OriginalMHV/Ward/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/OriginalMHV/Ward/ci.yml?branch=main&style=flat&labelColor=1E3A8A&color=2563EB&label=CI" alt="CI status"></a>
+  <a href="https://crates.io/crates/ward-cli"><img src="https://img.shields.io/crates/v/ward-cli?style=flat&labelColor=1E3A8A&color=2563EB&label=crates.io" alt="Latest version on crates.io"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/MSRV-1.88-2563EB?style=flat&labelColor=1E3A8A" alt="Minimum supported Rust version 1.88"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2563EB?style=flat&labelColor=1E3A8A" alt="MIT license"></a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="Terminal recording: ward import, plan, apply and drift against a demo repository" width="100%">
 </p>
 
 ## Why Ward
@@ -177,18 +169,33 @@ JSON goes to stdout and progress goes to stderr. See [CI integration](docs/ci-in
 
 ## Ward compared with other tools
 
-| | Ward | [Terraform GitHub provider](https://github.com/integrations/terraform-provider-github) | [Probot Settings](https://github.com/repository-settings/app) | [safe-settings](https://github.com/github/safe-settings) |
-|---|---|---|---|---|
-| Runs as | CLI, locally or in CI | Terraform provider | GitHub App, hosted or self-hosted | Server (Docker, Kubernetes), Lambda or GitHub Action |
-| State file | None. Reads live GitHub state each run. | Yes, Terraform state | None | None |
-| Preview before change | `ward plan` | `terraform plan` | Not documented in its README | Yes, dry run on pull requests (nop mode) |
-| Drift detection | `ward drift`, exit codes for CI | `terraform plan` shows it | Not documented in its README | Yes, scheduled and on webhook events |
-| Import an existing repository | `ward import` | Per-resource `terraform import` | Not documented in its README | Yes, a settings generator script |
-| Scope | Repository, files, security, rulesets, branch protection, Actions, environments, access, integrations | Broad. Repositories, teams, org settings, rulesets, Actions, webhooks and more | Repository settings from `.github/settings.yml` | Org, suborg and repository settings in an admin repository |
-| Many repositories | One manifest with systems | Yes, with modules and loops | Per repository, or one install for an org | Yes, at org, suborg and repository levels |
-| Learning curve | One TOML file and five commands | Terraform language, providers and state | Low. One YAML file. | Medium. Needs a deployed service. |
+<p align="center">
+  <img src="docs/assets/comparison.svg" alt="Comparison of Ward, the Terraform GitHub provider and safe-settings. Rows: Preview before change; Drift check with CI exit codes; No state file to store or lock; Manages repo config files (.github/) through a pull request; Enforces automatically on GitHub events; Import an existing repository; Resource breadth (rulesets, environments, access, Actions, webhooks); Organization-level settings. Ward supports preview, drift checks, no state file, config files through a pull request, import and resource breadth. It is partial on organization-level settings and has no automatic enforcement on GitHub events." width="100%">
+</p>
 
-The Terraform provider has broader resource coverage and an explicit state file. If you already run Terraform, it fits that workflow. The two apps run continuously and react to events. Ward is a CLI that you run on demand or in CI, and it needs no deployed service. A cell marked "Not documented" means the project README does not say. It does not mean the feature is missing.
+Compared on 2026-10-06 using each project's public README and documentation: Ward 0.5.0 docs, [terraform-provider-github](https://github.com/integrations/terraform-provider-github) (README, registry and resource docs), [safe-settings](https://github.com/github/safe-settings) README, Terraform CLI and state docs. [Probot Settings](https://github.com/repository-settings/app) is left out because its README does not document these features. Partial means the project does part of the row or documents only part of it.
+
+<details>
+<summary>Comparison as text</summary>
+
+| Feature | Ward | Terraform GitHub provider | safe-settings |
+|---|---|---|---|
+| Preview before change | Yes | Yes | Yes |
+| Drift check with CI exit codes | Yes | Yes | Partial |
+| No state file to store or lock | Yes | No | Yes |
+| Manages repo config files (.github/) through a pull request | Yes | Partial | No |
+| Enforces automatically on GitHub events | No | No | Yes |
+| Import an existing repository | Yes | Partial | Yes |
+| Resource breadth (rulesets, environments, access, Actions, webhooks) | Yes | Yes | Partial |
+| Organization-level settings | Partial | Yes | Partial |
+
+Compared on 2026-10-06 using each project's public README and documentation: Ward 0.5.0 docs, terraform-provider-github (README, registry and resource docs), safe-settings README, Terraform CLI and state docs. Probot Settings is left out because its README does not document these features. Partial means the project does part of the row or documents only part of it.
+
+How we compared: Ward cells come from [commands](docs/commands.md), [architecture](docs/architecture.md), [GitHub coverage](docs/github-coverage.md) and [CI integration](docs/ci-integration.md). Competitor cells come from the [Terraform provider](https://github.com/integrations/terraform-provider-github), the [Terraform state docs](https://developer.hashicorp.com/terraform/language/state) and the [safe-settings README](https://github.com/github/safe-settings).
+
+</details>
+
+The Terraform provider has broader organization-level coverage. If you already run Terraform, it fits that workflow. safe-settings runs continuously and reacts to GitHub events. Ward is a CLI that you run on demand or in CI, and it needs no deployed service.
 
 ## Safety
 
