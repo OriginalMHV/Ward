@@ -30,7 +30,11 @@ pub enum Category {
     Security,
     #[value(alias = "ruleset")]
     Rulesets,
-    #[value(name = "branch-protection", alias = "protection")]
+    #[value(
+        name = "branch-protection",
+        alias = "branch_protection",
+        alias = "protection"
+    )]
     BranchProtection,
     Actions,
     #[value(alias = "environment")]

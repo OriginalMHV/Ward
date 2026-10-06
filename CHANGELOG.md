@@ -44,7 +44,7 @@ Changed or lost capabilities:
 - Flags must follow the subcommand. `--org`, `--system`, `--repo` and `--json` are no longer global. Only `--config`, `--parallelism` and `-v` are global.
 - `ward apply` without `--yes` fails with exit code 2 when stdin is not a terminal.
 - `ward drift` exits with code 1 when `ward teams audit` or `ward settings audit` finds drift. The old `audit` commands exited with code 0.
-- `--category` is validated at parse time and accepts comma-separated values. The old names stay as aliases (`repo`, `general`, `file`, `ruleset`, `protection`, `teams`, `environment`, `integration`).
+- `--category` is validated at parse time and accepts comma-separated values. The old names stay as aliases (`repo`, `general`, `file`, `ruleset`, `protection`, `teams`, `environment`, `integration`). `branch_protection` with an underscore also works.
 
 ### Added (CLI)
 

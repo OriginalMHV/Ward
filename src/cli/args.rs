@@ -155,6 +155,7 @@ mod tests {
             ("file", Category::Files),
             ("ruleset", Category::Rulesets),
             ("protection", Category::BranchProtection),
+            ("branch_protection", Category::BranchProtection),
             ("teams", Category::Access),
             ("environment", Category::Environments),
             ("integration", Category::Integrations),

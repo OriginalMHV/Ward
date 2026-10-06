@@ -331,7 +331,7 @@ The Ward manifest planner covers these categories in safe apply order:
 `repository`, `files`, `security`, `actions`, `environments`, `access`,
 `integrations`, `rulesets`, and `branch-protection`.
 
-Category names are case-insensitive. These aliases are also accepted: `repo` and `general` for `repository`, `file` for `files`, `ruleset` for `rulesets`, `protection` for `branch-protection`, `teams` for `access`, `environment` for `environments`, and `integration` for `integrations`.
+Category names are case-insensitive. These aliases are also accepted: `repo` and `general` for `repository`, `file` for `files`, `ruleset` for `rulesets`, `protection` and `branch_protection` for `branch-protection`, `teams` for `access`, `environment` for `environments`, and `integration` for `integrations`.
 
 Output distinguishes actionable, blocked, warning, and deferred changes. `--format json`
 emits the stable unified report shape.
