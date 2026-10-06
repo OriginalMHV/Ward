@@ -6,6 +6,10 @@ use anyhow::{Context, Result};
 /// 1. `GH_TOKEN` environment variable
 /// 2. `GITHUB_TOKEN` environment variable
 /// 3. `gh auth token` command output
+#[allow(
+    clippy::disallowed_methods,
+    reason = "token resolution entry point; resolve_token_with takes the injected lookup"
+)]
 pub fn resolve_token() -> Result<String> {
     resolve_token_with(|name| std::env::var(name).ok())
 }

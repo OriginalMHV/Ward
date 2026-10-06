@@ -1,3 +1,11 @@
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
+
+disallowed-methods = [
+    { path = "std::env::set_var", reason = "process-global mutation races with parallel tests; inject the value instead" },
+    { path = "std::env::remove_var", reason = "process-global mutation races with parallel tests; inject the value instead" },
+    { path = "std::thread::sleep", reason = "blocks the async runtime; use tokio::time::sleep or an injected policy" },
+    { path = "std::env::var", reason = "use the injected lookup (EnvLookup / resolve_token_with) so tests need no process env" },
+    { path = "std::env::var_os", reason = "use the injected lookup (EnvLookup / resolve_token_with) so tests need no process env" },
+]

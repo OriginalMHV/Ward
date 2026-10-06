@@ -110,6 +110,10 @@ pub struct ResolvedSecret {
 pub type EnvLookup<'a> = &'a dyn Fn(&str) -> Option<String>;
 
 /// Read a variable from the process environment. Non-Unicode values count as unset.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the single production env lookup; everything else takes an injected lookup"
+)]
 pub fn process_env(key: &str) -> Option<String> {
     std::env::var(key).ok()
 }
