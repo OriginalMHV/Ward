@@ -13,14 +13,14 @@ Set PlaybackSpeed 1
 Set Theme { "name": "Ward Light", "black": "#0F2A44", "red": "#B42318", "green": "#0F766E", "yellow": "#B54708", "blue": "#1D4ED8", "magenta": "#7E22CE", "cyan": "#14B8A6", "white": "#CBD5E1", "brightBlack": "#64748B", "brightRed": "#DC2626", "brightGreen": "#14B8A6", "brightYellow": "#D97706", "brightBlue": "#2563EB", "brightMagenta": "#9333EA", "brightCyan": "#0D9488", "brightWhite": "#F7F5F0", "background": "#F7F5F0", "foreground": "#0F2A44", "selection": "#CCEFEA", "cursor": "#14B8A6" }
 
 Hide
-Type `export PS1='$ ' && cd $(mktemp -d) && clear`
+Type `export PS1='$ ' HOME=$(mktemp -d) && cd $HOME && clear`
 Enter
 Show
 
 # 1. Import the current state of a repository as the baseline.
 Type "ward import OriginalMHV/ward-demo --output ward.toml"
 Enter
-Sleep 5s
+Sleep 10s
 
 # 2. Look at the repository settings.
 Type `grep -n -E 'delete_branch_on_merge|^topics' ward.toml`
@@ -54,7 +54,7 @@ Enter
 # 6. Drift check passes.
 Type `ward drift && echo "exit code: $?"`
 Enter
-Sleep 5s
+Sleep 10s
 
 Hide
 Type "cd ~ && clear"
