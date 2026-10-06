@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" width="1200" height="360" role="img" aria-label="Ward. Declarative GitHub repository management. Plan, apply, verify.">
+  <style>
+    .f { font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; }
+    .pill text { animation: lit 6s ease-in-out infinite; }
+    .pill rect { animation: litbg 6s ease-in-out infinite; }
+    .p2 text, .p2 rect { animation-delay: 1.5s; }
+    .p3 text, .p3 rect { animation-delay: 3s; }
+    @keyframes litbg {
+      0%, 40%, 100% { fill: #E6F7F5; stroke: #14B8A6; }
+      10%, 25% { fill: #14B8A6; stroke: #14B8A6; }
+    }
+    @keyframes lit {
+      0%, 40%, 100% { fill: #0F766E; }
+      10%, 25% { fill: #FFFFFF; }
+    }
+  </style>
+  <defs>
+    <clipPath id="tile"><rect x="32" y="32" width="448" height="448" rx="104"/></clipPath>
+  </defs>
+  <rect width="1200" height="360" fill="#F7F5F0"/>
+  <rect x="0" y="356" width="1200" height="4" fill="#14B8A6"/>
+  <g transform="translate(55 45) scale(0.6) translate(-32 -32)">
+    <rect x="32" y="32" width="448" height="448" rx="104" fill="#0F2A44"/>
+    <g clip-path="url(#tile)">
+      <g>
+        <animateTransform attributeName="transform" type="rotate" dur="6s" repeatCount="indefinite" calcMode="spline" keyTimes="0;0.25;0.5;0.75;1" keySplines="0.45 0 0.55 1;0.45 0 0.55 1;0.45 0 0.55 1;0.45 0 0.55 1" values="0 248 179;6 248 179;0 248 179;-6 248 179;0 248 179"/>
+        <polygon points="248,170 248,188 480,244 480,140" fill="#14B8A6"/>
+      </g>
+    </g>
+    <polygon points="196,218 240,218 282,480 154,480" fill="#FFFFFF"/>
+    <rect x="180" y="200" width="76" height="13" rx="2" fill="#FFFFFF"/>
+    <rect x="194" y="160" width="48" height="34" rx="3" fill="#FFFFFF"/>
+    <polygon points="184,152 218,122 252,152" fill="#FFFFFF"/>
+  </g>
+  <text class="f" x="395" y="160" font-size="124" font-weight="700" fill="#0F2A44" letter-spacing="-3">ward</text>
+  <text class="f" x="399" y="212" font-size="25" font-weight="600" fill="#475569">Declarative GitHub repository management. Plan, apply, verify.</text>
+  <g class="f" font-size="19" font-weight="600" text-anchor="middle">
+    <g class="pill"><rect x="399" y="248" width="116" height="40" rx="20" fill="#E6F7F5" stroke="#14B8A6" stroke-width="2"/><text x="457" y="274" fill="#0F766E">plan</text></g>
+    <text x="545" y="274" fill="#94A3B8" font-size="22">→</text>
+    <g class="pill p2"><rect x="575" y="248" width="116" height="40" rx="20" fill="#E6F7F5" stroke="#14B8A6" stroke-width="2"/><text x="633" y="274" fill="#0F766E">apply</text></g>
+    <text x="721" y="274" fill="#94A3B8" font-size="22">→</text>
+    <g class="pill p3"><rect x="751" y="248" width="116" height="40" rx="20" fill="#E6F7F5" stroke="#14B8A6" stroke-width="2"/><text x="809" y="274" fill="#0F766E">verify</text></g>
+  </g>
+</svg>
