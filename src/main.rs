@@ -42,12 +42,12 @@ async fn run() -> Result<()> {
 
     // Init handles its own client creation (manifest may not exist yet)
     if let Command::Init(cmd) = cli.command {
-        return cmd.run().await;
+        return cmd.run(cli.parallelism).await;
     }
 
     // Import handles its own client creation (it creates the manifest)
     if let Command::Import(cmd) = cli.command {
-        return cmd.run().await;
+        return cmd.run(cli.parallelism).await;
     }
 
     if let Command::Config(cmd) = cli.command {

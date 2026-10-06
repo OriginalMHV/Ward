@@ -38,7 +38,7 @@ Manually authored and imported manifests use the same categories. Focused comman
 
 ## Import pipeline
 
-`ward import` and `ward init --from` share one importer.
+`ward import` is the only importer. The deprecated `ward init --from` delegates to it.
 
 The source repository metadata is the required baseline. All other collectors run independently:
 

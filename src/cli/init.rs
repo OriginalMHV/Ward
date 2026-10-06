@@ -40,50 +40,51 @@ const OUTPUT_PATH: &str = "ward.toml";
 
 #[derive(Args)]
 pub struct InitCommand {
-    /// Build ward.toml from an existing repository (OWNER/REPO or GitHub URL)
-    #[arg(long, conflicts_with = "non_interactive")]
-    from: Option<String>,
-
-    /// Accepted for compatibility. Init always writes the minimal scaffold.
+    /// Accepted for compatibility. Init never prompts.
     #[arg(long)]
     non_interactive: bool,
 
-    /// Output path for --from
-    #[arg(long, default_value = OUTPUT_PATH, requires = "from")]
+    /// Deprecated alias of `ward import`
+    #[arg(long, hide = true, conflicts_with = "non_interactive")]
+    from: Option<String>,
+
+    #[arg(long, default_value = OUTPUT_PATH, requires = "from", hide = true)]
     output: PathBuf,
 
-    /// Print the generated configuration for --from
-    #[arg(long, requires = "from")]
+    #[arg(long, requires = "from", hide = true)]
     stdout: bool,
 
-    /// Replace an existing output file for --from
-    #[arg(long, requires = "from")]
+    #[arg(long, requires = "from", hide = true)]
     force: bool,
 
-    /// Max concurrent API calls for --from
-    #[arg(long, default_value_t = 5, requires = "from")]
-    parallelism: usize,
-
-    /// Existing target repository for --from. Repeat for multiple targets.
-    #[arg(long, value_name = "OWNER/REPO", requires = "from")]
+    #[arg(long, value_name = "OWNER/REPO", requires = "from", hide = true)]
     target: Vec<String>,
 
-    /// Include configuration files matching this glob. Repeatable.
-    #[arg(long, value_name = "GLOB", requires = "from")]
+    #[arg(long, value_name = "GLOB", requires = "from", hide = true)]
     include: Vec<String>,
 
-    /// Exclude configuration files matching this glob. Repeatable.
-    #[arg(long, value_name = "GLOB", requires = "from")]
+    #[arg(long, value_name = "GLOB", requires = "from", hide = true)]
     exclude: Vec<String>,
 
-    /// Fail if any readable source setting is unavailable.
-    #[arg(long, requires = "from")]
+    #[arg(long, requires = "from", hide = true)]
     strict: bool,
 }
 
 impl InitCommand {
-    pub async fn run(&self) -> Result<()> {
+    /// The `--from` source of the deprecated delegate, if given.
+    pub fn deprecated_source(&self) -> Option<&str> {
+        self.from.as_deref()
+    }
+
+    /// The warning for `init --from`, without a trailing newline.
+    pub fn deprecation_warning() -> &'static str {
+        "warning: 'ward init --from' is deprecated and will be removed in 0.6.0; use 'ward import <SOURCE>'"
+    }
+
+    /// `parallelism` is the global `--parallelism` value.
+    pub async fn run(&self, parallelism: usize) -> Result<()> {
         if let Some(source) = &self.from {
+            eprintln!("{}", Self::deprecation_warning());
             return import_repository(ImportOptions {
                 source,
                 targets: &self.target,
@@ -93,7 +94,7 @@ impl InitCommand {
                 output: &self.output,
                 stdout: self.stdout,
                 force: self.force,
-                parallelism: self.parallelism,
+                parallelism,
             })
             .await;
         }
@@ -140,6 +141,67 @@ mod tests {
     use super::*;
     use crate::config::Manifest;
     use crate::config::manifest::ManagementDisposition;
+
+    #[test]
+    fn from_is_a_hidden_deprecated_delegate_with_import_options() {
+        use clap::Parser;
+
+        let cli = crate::cli::Cli::parse_from([
+            "ward",
+            "init",
+            "--from",
+            "acme/service",
+            "--target",
+            "other",
+            "--stdout",
+            "--strict",
+        ]);
+        let crate::cli::Command::Init(command) = cli.command else {
+            panic!("expected init command");
+        };
+        assert_eq!(command.deprecated_source(), Some("acme/service"));
+        assert!(command.stdout && command.strict);
+        assert_eq!(command.target, ["other"]);
+        assert!(InitCommand::deprecation_warning().contains("ward import <SOURCE>"));
+    }
+
+    #[test]
+    fn init_has_no_local_parallelism_flag() {
+        use clap::Parser;
+
+        let result = crate::cli::Cli::try_parse_from([
+            "ward",
+            "init",
+            "--from",
+            "a/b",
+            "--parallelism",
+            "3",
+        ]);
+        let cli = result.unwrap();
+        assert_eq!(cli.parallelism, 3);
+    }
+
+    #[test]
+    fn import_uses_the_global_parallelism_flag() {
+        use clap::Parser;
+
+        let cli = crate::cli::Cli::parse_from(["ward", "import", "a/b", "--parallelism", "7"]);
+        assert_eq!(cli.parallelism, 7);
+    }
+
+    #[test]
+    fn init_options_are_hidden_from_help() {
+        use clap::CommandFactory;
+
+        let mut cli = crate::cli::Cli::command();
+        let help = cli
+            .find_subcommand_mut("init")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+        assert!(help.contains("--non-interactive"), "{help}");
+        assert!(!help.contains("--from"), "{help}");
+    }
 
     #[test]
     fn non_interactive_flag_is_still_accepted() {

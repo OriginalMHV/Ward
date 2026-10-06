@@ -70,9 +70,6 @@ ward init
 ### Bootstrap from an existing repository
 
 ```bash
-ward init --from acme/reference-service
-
-# Equivalent standalone command
 ward import acme/reference-service
 ```
 

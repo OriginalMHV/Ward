@@ -184,45 +184,23 @@ ward config edit
 
 ## `ward init`
 
-Create `ward.toml` as a minimal scaffold, or bootstrap it from an existing repository. For real onboarding, use `ward import OWNER/REPO`.
+Create a minimal `ward.toml` scaffold. It does not contact GitHub and never overwrites an existing `ward.toml`. To build a manifest from an existing repository, use [`ward import`](#ward-import).
 
 ```bash
-# Minimal scaffold
 ward init
-
-# Repository bootstrap
-ward init --from acme/reference-service
-ward init --from https://github.com/acme/reference-service
-ward init --from acme/reference-service --target api-service --target worker-service
-ward init --from acme/reference-service --include '.github/**' --exclude '.github/workflows/old-*'
-ward init --from acme/reference-service --strict
-ward init --from acme/reference-service --stdout
-ward init --from acme/reference-service --output configs/ward.toml
-ward init --from acme/reference-service --force
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--from <SOURCE>` | -- | Snapshot `OWNER/REPO` or a GitHub URL |
 | `--non-interactive` | `false` | Accepted for compatibility. It changes nothing, because init never prompts |
-| `--output <PATH>` | `ward.toml` | Output path for `--from` |
-| `--stdout` | `false` | Print the generated config instead of writing it |
-| `--force` | `false` | Replace an existing output file |
-| `--parallelism <N>` | `5` | Max concurrent import API calls |
-| `--target <OWNER/REPO>` | source repository | Existing same-owner target; repeatable |
-| `--include <GLOB>` | built-in config registry | Include matching configuration files; repeatable |
-| `--exclude <GLOB>` | none | Exclude matching configuration files; repeatable |
-| `--strict` | `false` | Fail on permission-denied or unavailable source state |
 
-Manual setup and `--from` are equal entry points to the same Ward lifecycle. Use manual setup for deliberate policy authoring; use `--from` as a read-only shortcut when an existing repository is the best baseline. The generated manifest is a static snapshot. Without `--target`, it initially targets only the source repository.
-
-Without `--from`, init writes the minimal scaffold and does not contact GitHub. It never overwrites an existing `ward.toml`.
+`ward init --from OWNER/REPO` is a hidden deprecated alias of `ward import OWNER/REPO`. It accepts the same options, prints `warning: 'ward init --from' is deprecated and will be removed in 0.6.0; use 'ward import <SOURCE>'` to stderr, and is removed in 0.6.0.
 
 ---
 
 ## `ward import`
 
-Snapshot all reusable repository state available through documented public GitHub APIs. This is the standalone equivalent of `ward init --from`.
+Snapshot all reusable repository state available through documented public GitHub APIs. It replaces the deprecated `ward init --from`.
 
 ```bash
 ward import acme/reference-service
@@ -243,11 +221,12 @@ ward import acme/reference-service --force
 | `--output <PATH>` | path | `ward.toml` | Output path |
 | `--stdout` | bool | `false` | Print to stdout instead of writing ward.toml |
 | `--force` | bool | `false` | Replace an existing output file |
-| `--parallelism <N>` | integer | `5` | Max concurrent API calls |
 | `--target <OWNER/REPO>` | string | source repository | Existing same-owner target; repeatable |
 | `--include <GLOB>` | string | built-in config registry | Include matching configuration files; repeatable |
 | `--exclude <GLOB>` | string | none | Exclude matching configuration files; repeatable |
 | `--strict` | bool | `false` | Fail on permission-denied or unavailable source state |
+
+Import uses the global `--parallelism` flag (default `5`).
 
 How it works:
 
