@@ -80,6 +80,8 @@ async fn collect_access_degrades_on_partial_403_and_uses_documented_app_lookup()
     let collection = collect_access(&client, "my-repo", &desired).await.unwrap();
     assert_eq!(collection.state.teams.len(), 1);
     assert!(!collection.state.collaborators_complete);
+    assert_eq!(collection.category.collaborators, None);
+    assert_eq!(collection.category.teams.as_ref().map(Vec::len), Some(1));
     assert!(
         collection
             .coverage
@@ -277,4 +279,62 @@ async fn collect_integrations_imports_credentialed_webhook_placeholder_and_autol
     ));
     assert_eq!(current.category.autolinks[0].is_alphanumeric, Some(false));
     assert!(!current.state.pages_complete);
+}
+
+async fn mount_empty_access_reads(server: &MockServer, teams_status: u16) {
+    let teams_body = if teams_status == 200 {
+        json!([])
+    } else {
+        json!({"message": "forbidden"})
+    };
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/my-repo/teams"))
+        .respond_with(ResponseTemplate::new(teams_status).set_body_json(teams_body))
+        .mount(server)
+        .await;
+    for route in ["collaborators", "invitations"] {
+        Mock::given(method("GET"))
+            .and(path(format!("/repos/test-org/my-repo/{route}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .mount(server)
+            .await;
+    }
+    Mock::given(method("GET"))
+        .and(path("/user/installations"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"installations": []})))
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn collect_access_omits_teams_when_the_read_is_denied() {
+    let server = MockServer::start().await;
+    mount_empty_access_reads(&server, 403).await;
+    let client = Client::new_for_test("test-org", &server.uri());
+
+    let collection = collect_access(&client, "my-repo", &RepositoryAccessCategoryV2::default())
+        .await
+        .unwrap();
+
+    assert!(!collection.state.teams_complete);
+    assert_eq!(collection.category.teams, None);
+    assert_eq!(collection.category.collaborators, Some(Vec::new()));
+    let written = toml::to_string(&collection.category).unwrap();
+    assert!(!written.contains("teams"), "{written}");
+    assert!(written.contains("collaborators = []"), "{written}");
+}
+
+#[tokio::test]
+async fn collect_access_keeps_an_explicit_empty_teams_list_after_a_successful_read() {
+    let server = MockServer::start().await;
+    mount_empty_access_reads(&server, 200).await;
+    let client = Client::new_for_test("test-org", &server.uri());
+
+    let collection = collect_access(&client, "my-repo", &RepositoryAccessCategoryV2::default())
+        .await
+        .unwrap();
+
+    assert_eq!(collection.category.teams, Some(Vec::new()));
+    let written = toml::to_string(&collection.category).unwrap();
+    assert!(written.contains("teams = []"), "{written}");
 }

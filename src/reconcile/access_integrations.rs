@@ -361,13 +361,13 @@ pub async fn collect_access(
     .await?;
     let category = RepositoryAccessCategoryV2 {
         policy: desired.policy.clone(),
-        teams: Some(teams.clone()),
-        collaborators: Some(
+        teams: teams_complete.then(|| teams.clone()),
+        collaborators: collaborators_complete.then(|| {
             collaborators
                 .iter()
                 .map(|entry| entry.config.clone())
-                .collect(),
-        ),
+                .collect()
+        }),
         references: derived_refs,
     };
 

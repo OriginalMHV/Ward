@@ -420,7 +420,7 @@ slug = "developers"
 permission = "push"
 ```
 
-Write `collaborators = []` (or `teams = []`) to say that the repository must have none. Place that line before any `[[...]]` table of the category. `ward import` writes both lists explicitly, so an imported baseline keeps its exact meaning.
+Write `collaborators = []` (or `teams = []`) to say that the repository must have none. Place that line before any `[[...]]` table of the category. `ward import` writes both lists explicitly, so an imported baseline keeps its exact meaning. If GitHub denies a read, import leaves that list out, so the key means not managed.
 
 Custom repository roles and app installations remain stable references. Pending invitations retain enough target state to cancel the correct invitation when pruning is explicitly enabled.
 
