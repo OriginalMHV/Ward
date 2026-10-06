@@ -43,6 +43,7 @@ Changed or lost capabilities:
 - The text output changes. The aliases print the standard plan and apply report instead of their own tables. `ward audit` prints one section per category. Its security table gains the `Dep.SU` and `AI` columns, and `CopRv` moves to the rulesets section. The rulesets, branch protection and access audit views are sections of `ward audit`.
 - Flags must follow the subcommand. `--org`, `--system`, `--repo` and `--json` are no longer global. Only `--config`, `--parallelism` and `-v` are global.
 - `ward apply` without `--yes` fails with exit code 2 when stdin is not a terminal.
+- `ward doctor` no longer prints any part of the GitHub token. It reports only the token source, in text and in JSON.
 - `ward drift` exits with code 1 when `ward teams audit` or `ward settings audit` finds drift. The old `audit` commands exited with code 0.
 - `--category` is validated at parse time and accepts comma-separated values. The old names stay as aliases (`repo`, `general`, `file`, `ruleset`, `protection`, `teams`, `environment`, `integration`). `branch_protection` with an underscore also works.
 

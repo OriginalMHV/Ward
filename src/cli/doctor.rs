@@ -178,9 +178,12 @@ fn check_config(path: Option<&str>) -> Check {
 }
 
 fn check_token() -> Check {
-    match auth::resolve_token() {
-        Ok(token) => {
-            let prefix = &token[..std::cmp::min(8, token.len())];
+    check_token_with(auth::resolve_token())
+}
+
+fn check_token_with(resolved: Result<String>) -> Check {
+    match resolved {
+        Ok(_) => {
             #[allow(
                 clippy::disallowed_methods,
                 reason = "doctor reports which environment variable supplied the token"
@@ -195,7 +198,7 @@ fn check_token() -> Check {
             Check {
                 name: "GitHub token",
                 status: CheckStatus::Pass,
-                detail: format!("{prefix}... via {source}"),
+                detail: format!("found via {source}"),
             }
         }
         Err(e) => Check {
@@ -401,6 +404,15 @@ fn audit_log_path() -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn token_check_reports_the_source_and_never_the_token() {
+        let token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+        let check = check_token_with(Ok(token.to_owned()));
+        assert!(matches!(check.status, CheckStatus::Pass));
+        assert!(!check.detail.contains("ghp"), "{}", check.detail);
+        assert!(check.detail.contains("via"), "{}", check.detail);
+    }
 
     #[test]
     fn test_check_config_missing_file() {
