@@ -420,10 +420,16 @@ struct GitHubErrorPayload {
 
 impl GitHubErrorPayload {
     fn safe_details(&self) -> Vec<String> {
-        self.errors
+        let mut details: Vec<String> = self
+            .errors
             .iter()
+            .take(MAX_DETAILS)
             .map(GitHubErrorDetail::safe_summary)
-            .collect()
+            .collect();
+        if self.errors.len() > MAX_DETAILS {
+            details.push(format!("{} more", self.errors.len() - MAX_DETAILS));
+        }
+        details
     }
 }
 
@@ -454,8 +460,16 @@ enum GitHubErrorDetail {
 /// short and are not secrets.
 const MAX_DETAIL_CHARS: usize = 300;
 
+const MAX_DETAILS: usize = 5;
+
 fn truncate_detail(value: &str) -> String {
-    let value = value.trim();
+    // One line per detail, so GitHub text cannot inject extra lines into Ward's output.
+    let flattened: String = value
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let value = flattened.split_whitespace().collect::<Vec<_>>().join(" ");
+    let value = value.as_str();
     if value.chars().count() <= MAX_DETAIL_CHARS {
         return value.to_owned();
     }
@@ -525,8 +539,8 @@ mod tests {
     use crate::github::Client;
 
     use super::{
-        ClassifiedResponse, GitHubApiError, RetryKind, RetryPlan, RetryTiming, classify_empty,
-        classify_json, mentions_rate_limit, retry_delay,
+        ClassifiedResponse, GitHubApiError, GitHubErrorPayload, MAX_DETAILS, RetryKind, RetryPlan,
+        RetryTiming, classify_empty, classify_json, mentions_rate_limit, retry_delay,
     };
 
     #[tokio::test]
@@ -835,5 +849,23 @@ mod tests {
             "Only organization repositories can have users and team restrictions"
         );
         assert!(details[1].len() < 400 && details[1].ends_with("..."));
+    }
+
+    #[test]
+    fn validation_details_are_single_line_and_capped() {
+        let payload: GitHubErrorPayload = serde_json::from_value(json!({
+            "message": "Validation Failed",
+            "errors": [
+                "first line\nsecond line\r\n\u{1b}[31minjected",
+                "b", "c", "d", "e", "f", "g"
+            ]
+        }))
+        .unwrap();
+
+        let details = payload.safe_details();
+
+        assert_eq!(details[0], "first line second line [31minjected");
+        assert_eq!(details.len(), MAX_DETAILS + 1);
+        assert_eq!(details[MAX_DETAILS], "2 more");
     }
 }
