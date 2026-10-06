@@ -323,27 +323,40 @@ ward teams audit --system backend
 
 ## `ward audit`
 
-Full compliance audit with alert counts, security posture, and dependency graph / SBOM availability.
+Read-only compliance audit. The report has one section per category. By default it covers all four sections for every repository in the configured systems, like `ward plan`. Use `--system` or `--repo` to narrow the scope.
 
 ```bash
+ward audit
 ward audit --system backend
 ward audit --repo my-service
+ward audit --category security,access
 ward audit --system backend --format json
-ward audit --system backend --format table
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
+| `--category <CATEGORY>` | list | all four | Report only these sections: `security`, `rulesets`, `branch-protection`, `access`. Repeat the flag or separate values with commas. Aliases: `ruleset`, `protection`, `teams` |
 | `--format` | string | `"table"` | Output format: `table` or `json` |
 
-Use the global `--system <ID>` or `--repo <NAME>` scope flags to choose the repositories to audit.
+Progress lines go to stderr. The report goes to stdout, so `--format json` can be piped.
 
-Per-repo data includes repository identity, security feature state, key GitHub configuration files, Copilot review state, alert counts by severity, and a `dependency_graph` section with:
+| Section | Text columns | JSON key |
+|---------|--------------|----------|
+| `security` | Dependabot alerts (`Dep.A`), Dependabot security updates (`Dep.SU`), secret scanning (`SecSc`), AI detection (`AI`), push protection (`Push`), Dependabot config (`DBot`), CodeQL (`CQL`), SBOM, open alert count | `security`, `dependency_graph` |
+| `rulesets` | Ruleset name and enforcement per repository, and Copilot code review (`CopRv`) | `rulesets`, `settings` |
+| `branch-protection` | Branch, required reviews, approvals, stale review dismissal, enforce admins, linear history, force pushes | `branch_protection` |
+| `access` | Team slug and permission per repository | `access.teams` |
+
+Copilot code review is detected by the rule type `copilot_code_review` in the rules that apply to the default branch. If GitHub does not return those rules, Ward falls back to a ruleset named `Copilot Code Review`.
+
+Per-repo data also includes repository identity, key GitHub configuration files, alert counts by severity, and a `dependency_graph` section with:
 
 - status: `available`, `empty`, `unavailable`, or `unknown`
 - reason: human-readable explanation of the SBOM export result
 - package and dependency counts when SBOM export succeeds
 - SBOM generation timestamp when GitHub returns it
+
+Sections that you do not select are omitted from the JSON. Data that GitHub refuses to return (for example a 403) is listed under `unavailable` and does not stop the audit.
 
 ---
 
