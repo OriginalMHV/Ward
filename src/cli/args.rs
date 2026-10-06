@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use clap::{Args, ValueEnum};
 
 use crate::reconcile::unified::Category;
@@ -54,13 +56,22 @@ pub struct OutputArgs {
     json: bool,
 }
 
+static JSON_WARNED: AtomicBool = AtomicBool::new(false);
+
+/// True only on the first call for `flag`, so a notice prints once per process.
+fn first_use(flag: &AtomicBool) -> bool {
+    !flag.swap(true, Ordering::Relaxed)
+}
+
 impl OutputArgs {
     /// The format to use. The deprecated `--json` flag selects JSON and prints a notice to stderr.
     pub fn resolve(&self) -> Format {
         if self.json {
-            eprintln!(
-                "warning: '--json' is deprecated and will be removed in 0.6.0; use '--format json'"
-            );
+            if first_use(&JSON_WARNED) {
+                eprintln!(
+                    "warning: '--json' is deprecated and will be removed in 0.6.0; use '--format json'"
+                );
+            }
             return Format::Json;
         }
         self.format
@@ -126,6 +137,14 @@ mod tests {
     fn deprecated_json_flag_selects_json() {
         let probe = OutputProbe::try_parse_from(["probe", "--json"]).unwrap();
         assert_eq!(probe.output.resolve(), Format::Json);
+    }
+
+    #[test]
+    fn deprecation_notice_is_allowed_only_once() {
+        let flag = AtomicBool::new(false);
+        assert!(first_use(&flag));
+        assert!(!first_use(&flag));
+        assert!(!first_use(&flag));
     }
 
     #[test]
