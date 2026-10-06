@@ -65,3 +65,13 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 ## Questions?
 
 Open an issue. There are no dumb questions.
+
+## Releasing
+
+Maintainers release with one command from a clean, up-to-date `main`:
+
+```bash
+scripts/release.sh 0.5.0
+```
+
+The script opens a release PR that bumps the version and dates the CHANGELOG, waits for CI, and merges it. It then pushes a signed tag, which makes cargo-dist build the GitHub release and update the Homebrew tap. Last, it publishes the crate to crates.io. It asks before each step that cannot be undone. Run it again with the same version to continue after a failure.
