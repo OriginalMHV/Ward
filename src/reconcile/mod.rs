@@ -1,3 +1,5 @@
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+
 pub mod access_integrations;
 pub mod actions_environments;
 pub mod files;

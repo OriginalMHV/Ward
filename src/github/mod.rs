@@ -1,3 +1,5 @@
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+
 pub mod access;
 pub mod actions;
 pub mod branch_protection;

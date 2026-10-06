@@ -314,7 +314,7 @@ impl Client {
         autolink: &AutolinkConfigV2,
     ) -> Result<()> {
         let path = format!("/repos/{}/{repo}/autolinks", self.org);
-        let mut body = serde_json::Map::new();
+        let mut body = Map::new();
         body.insert(
             "key_prefix".to_owned(),
             Value::String(autolink.key_prefix.clone()),

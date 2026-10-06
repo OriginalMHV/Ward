@@ -2114,7 +2114,7 @@ fn deploy_key_block_reason(desired: &DeployKeyConfigV2) -> Option<String> {
         Some(ExternalValueReference::Manual { .. }) => Some(
             "replacement_key is manual-only; Ward will not guess deploy key material.".to_owned(),
         ),
-        Some(ExternalValueReference::Env { key }) if env::var(key).is_err() => Some(format!(
+        Some(ExternalValueReference::Env { key }) if read_env(key).is_err() => Some(format!(
             "replacement_key environment variable {key} is not set."
         )),
         _ => None,
@@ -2227,12 +2227,20 @@ fn actor_login(actor: &ActorReference) -> Option<&str> {
     }
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "production entry point for env-backed external values"
+)]
+fn read_env(key: &str) -> Result<String, env::VarError> {
+    env::var(key)
+}
+
 fn resolve_optional_external_value(
     reference: Option<&ExternalValueReference>,
 ) -> Result<Option<String>, String> {
     match reference {
         None => Ok(None),
-        Some(ExternalValueReference::Env { key }) => env::var(key)
+        Some(ExternalValueReference::Env { key }) => read_env(key)
             .map(Some)
             .map_err(|_| format!("environment variable `{key}` is not set")),
         Some(ExternalValueReference::Manual { hint }) => Err(match hint {
@@ -2248,7 +2256,7 @@ fn resolve_required_external_value(
 ) -> Result<String, String> {
     match reference {
         Some(ExternalValueReference::Env { key }) => {
-            env::var(key).map_err(|_| format!("{label} environment variable {key} is not set"))
+            read_env(key).map_err(|_| format!("{label} environment variable {key} is not set"))
         }
         Some(ExternalValueReference::Manual { .. }) => Err(format!(
             "{label} is manual-only and cannot be applied automatically"
@@ -2270,7 +2278,7 @@ fn resolve_required_url(webhook: &WebhookConfigV2) -> Result<String, String> {
         );
     }
     if let Some(key) = env_placeholder_key(&webhook.url) {
-        env::var(key).map_err(|_| format!("webhook URL environment variable {key} is not set"))
+        read_env(key).map_err(|_| format!("webhook URL environment variable {key} is not set"))
     } else {
         Ok(webhook.url.clone())
     }

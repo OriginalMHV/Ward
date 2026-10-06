@@ -84,7 +84,14 @@ strip = true
 inherits = "release"
 lto = "thin"
 
+[lints.rust]
+unsafe_code = "forbid"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unused_qualifications = "warn"
+
 [lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
 unwrap_used = "warn"
 expect_used = "warn"
 panic = "warn"

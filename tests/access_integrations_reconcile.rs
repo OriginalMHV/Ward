@@ -615,7 +615,7 @@ fn pages_status_autolink_recreate_and_idempotence_work() {
     let plan = plan_integrations(&current, &desired);
     assert!(matches!(
         plan.autolink_actions[0],
-        ward::reconcile::access_integrations::AutolinkAction::Recreate { .. }
+        AutolinkAction::Recreate { .. }
     ));
 
     let verify = verify_integrations_state(

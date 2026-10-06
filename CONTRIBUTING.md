@@ -10,7 +10,7 @@ cd Ward
 cargo build
 ```
 
-Requires Rust >= 1.85 and a GitHub token for integration tests.
+Requires Rust >= 1.88. Integration tests use wiremock and need no GitHub token. Tests do not need `HOME` isolation, because the audit log is injected.
 
 ## Workflow
 
@@ -24,11 +24,14 @@ Requires Rust >= 1.85 and a GitHub token for integration tests.
 ```bash
 cargo fmt -- --check
 cargo clippy --all-targets -- -D warnings
-cargo test --all-targets
+cargo nextest run --all-targets
+cargo test --doc
 cargo deny check
 ```
 
-All checks must pass. `cargo deny check` validates license and advisory compliance.
+All checks must pass. `cargo deny check` validates license and advisory compliance. Install [cargo-nextest](https://nexte.st) with `cargo install cargo-nextest --locked`. Plain `cargo test` also works.
+
+Lints: unsafe code is forbidden, and `dbg!` and `todo!` are denied. `unwrap`, `expect` and `panic` warn outside tests. Do not call `std::env::set_var`, `std::env::remove_var`, `std::env::var` or `std::thread::sleep`. Pass an injected lookup or policy instead. `src/reconcile`, `src/github` and `src/config` must not print or import `crate::cli`. CI checks these layer rules.
 
 For a deeper understanding of how Ward is structured, see the [Architecture](docs/architecture.md) guide.
 

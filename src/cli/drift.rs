@@ -158,11 +158,8 @@ mod tests {
         assert!(fail_when_drifted(&report).is_err());
     }
 
-    fn category_report(
-        disposition: &str,
-        outcome: Option<&str>,
-    ) -> crate::reconcile::unified::CategoryReport {
-        crate::reconcile::unified::CategoryReport {
+    fn category_report(disposition: &str, outcome: Option<&str>) -> unified::CategoryReport {
+        unified::CategoryReport {
             category: "rulesets".to_owned(),
             disposition: disposition.to_owned(),
             status: "noop".to_owned(),
@@ -172,7 +169,7 @@ mod tests {
             deferred: 0,
             coverage: Default::default(),
             coverage_outcomes: outcome
-                .map(|outcome| crate::reconcile::unified::CoverageOutcomeCount {
+                .map(|outcome| unified::CoverageOutcomeCount {
                     outcome: outcome.to_owned(),
                     count: 1,
                 })
@@ -185,8 +182,8 @@ mod tests {
         }
     }
 
-    fn report_with(category: crate::reconcile::unified::CategoryReport) -> UnifiedReport {
-        UnifiedReport::from_repos(vec![crate::reconcile::unified::RepoReport {
+    fn report_with(category: unified::CategoryReport) -> UnifiedReport {
+        UnifiedReport::from_repos(vec![unified::RepoReport {
             repo: "repo".to_owned(),
             actionable: category.actionable,
             blocked: category.blocked,

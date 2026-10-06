@@ -975,12 +975,46 @@ pub async fn apply_security_plan(
     Ok(SecurityApplyResult { applied_steps })
 }
 
+/// How long to wait for asynchronous CodeQL default setup to settle.
+#[derive(Clone, Copy, Debug)]
+pub struct VerifyPolicy {
+    pub attempts: u32,
+    pub interval: Duration,
+}
+
+impl Default for VerifyPolicy {
+    fn default() -> Self {
+        Self {
+            attempts: 10,
+            interval: Duration::from_millis(100),
+        }
+    }
+}
+
+impl VerifyPolicy {
+    /// Test-only policy without delays. Public because integration tests are separate crates.
+    pub const fn immediate_for_tests() -> Self {
+        Self {
+            attempts: 10,
+            interval: Duration::ZERO,
+        }
+    }
+}
+
 pub async fn verify_security_category(
     client: &Client,
     repo: &str,
     desired: &SecurityCategoryV2,
 ) -> Result<SecurityVerifyResult> {
-    const MAX_ATTEMPTS: u32 = 10;
+    verify_security_category_with(client, repo, desired, VerifyPolicy::default()).await
+}
+
+pub async fn verify_security_category_with(
+    client: &Client,
+    repo: &str,
+    desired: &SecurityCategoryV2,
+    policy: VerifyPolicy,
+) -> Result<SecurityVerifyResult> {
     let mut attempt = 1;
     loop {
         let actual = collect_security_category(client, repo, Some(desired)).await?;
@@ -1003,8 +1037,8 @@ pub async fn verify_security_category(
                 plan,
             });
         }
-        if waiting_on_codeql && attempt < MAX_ATTEMPTS {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+        if waiting_on_codeql && attempt < policy.attempts {
+            tokio::time::sleep(policy.interval).await;
             attempt += 1;
             continue;
         }

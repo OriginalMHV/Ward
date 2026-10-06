@@ -390,7 +390,7 @@ impl RepoPlan {
             category.coverage.push(CoverageEntry {
                 category: name,
                 endpoint: "pulls (open configuration pull request)".to_owned(),
-                outcome: crate::config::manifest::CoverageOutcome::Unavailable,
+                outcome: CoverageOutcome::Unavailable,
                 reason: Some(message.to_owned()),
                 required_permission: Some("pull_requests:read".to_owned()),
             });
@@ -1210,10 +1210,16 @@ pub async fn prepare_apply(
             "Skipping archived repository {}. Ward plans and audits archived repositories but does not apply changes to them",
             repository.name
         );
-        eprintln!(
-            "  warning: skipping archived repository {}",
-            repository.name
-        );
+        #[allow(
+            clippy::print_stderr,
+            reason = "user-visible warning; moves to cli with the module split"
+        )]
+        {
+            eprintln!(
+                "  warning: skipping archived repository {}",
+                repository.name
+            );
+        }
     }
     let branch = sync_branch(manifest);
     let prepared = crate::reconcile::map_buffered(repos, |repository| async {
@@ -2890,7 +2896,7 @@ mod tests {
             entry("GET /repos/{owner}/{repo}/topics"),
         ];
         let desired = RepositoryCategoryV2 {
-            policy: crate::config::manifest::CategoryPolicy::managed(),
+            policy: CategoryPolicy::managed(),
             settings: None,
             metadata: None,
             custom_properties: Vec::new(),

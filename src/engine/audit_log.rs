@@ -135,7 +135,7 @@ mod tests {
         let path = dir.path().join("audit.log");
         AuditLog::open(&path).unwrap();
 
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        let mode = fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
     }
 
@@ -154,7 +154,7 @@ mod tests {
         log.log("test-repo", "enable_thing", "success", false, true)
             .unwrap();
 
-        let content = std::fs::read_to_string(&path).unwrap();
+        let content = fs::read_to_string(&path).unwrap();
         assert!(content.contains("test-repo"));
         assert!(content.contains("enable_thing"));
         assert!(content.contains("success"));
@@ -175,7 +175,7 @@ mod tests {
         log.log("repo1", "action1", "success", false, true).unwrap();
         log.log("repo2", "action2", "failure", true, false).unwrap();
 
-        let content = std::fs::read_to_string(&path).unwrap();
+        let content = fs::read_to_string(&path).unwrap();
         let lines: Vec<&str> = content.lines().collect();
         assert_eq!(lines.len(), 2);
         assert!(lines[0].contains("repo1"));
@@ -202,7 +202,7 @@ mod tests {
         )
         .unwrap();
 
-        let content = std::fs::read_to_string(path).unwrap();
+        let content = fs::read_to_string(path).unwrap();
         let entry: AuditEntry = serde_json::from_str(content.trim()).unwrap();
         assert_eq!(entry.before["visibility"], "private");
         assert_eq!(entry.after["visibility"], "internal");
@@ -223,7 +223,7 @@ mod tests {
         log.log("test-repo", "test_action", "success", false, true)
             .unwrap();
 
-        let content = std::fs::read_to_string(&path).unwrap();
+        let content = fs::read_to_string(&path).unwrap();
         let entry: serde_json::Value = serde_json::from_str(content.trim()).unwrap();
         assert_eq!(entry["repo"], "test-repo");
         assert_eq!(entry["action"], "test_action");
