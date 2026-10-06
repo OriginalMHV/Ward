@@ -1473,6 +1473,16 @@ pub async fn collect_branch_protection_category_for_branch(
                 .map(|app| (app.app_id as i64, app.app_slug))
                 .collect()
         }
+        // User-owned accounts have no organization installations endpoint.
+        Err(error) if crate::github::is_not_found(&error) => {
+            coverage.push(not_applicable_entry(
+                ManifestCategoryName::BranchProtection,
+                "GET /orgs/{org}/installations",
+                "the owner is not an organization, so there are no organization app installations"
+                    .to_owned(),
+            ));
+            HashMap::new()
+        }
         Err(error) => {
             coverage.push(unavailable_entry(
                 ManifestCategoryName::BranchProtection,

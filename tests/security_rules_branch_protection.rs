@@ -146,3 +146,49 @@ async fn security_rules_branch_protection_enumerates_all_branches_and_round_trip
         .iter()
         .any(|action| matches!(action, BranchProtectionPlanAction::Delete { branch } if branch == "release/1.0")));
 }
+
+#[tokio::test]
+async fn missing_org_installations_on_a_user_account_is_not_applicable() {
+    use ward::config::manifest::CoverageOutcome;
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/example"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "name": "example",
+            "full_name": "test-org/example",
+            "archived": false,
+            "default_branch": "main",
+            "visibility": "public"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/example/branches"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/orgs/test-org/installations"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({ "message": "Not Found" })))
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("test-org", &server.uri());
+    let collected = collect_branch_protection_category(&client, "example", None)
+        .await
+        .unwrap();
+
+    let installations = collected
+        .coverage
+        .iter()
+        .find(|entry| entry.endpoint == "GET /orgs/{org}/installations")
+        .unwrap();
+    assert_eq!(installations.outcome, CoverageOutcome::NotApplicable);
+    assert!(
+        collected
+            .coverage
+            .iter()
+            .all(|entry| entry.outcome != CoverageOutcome::Unavailable)
+    );
+}

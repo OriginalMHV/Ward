@@ -100,6 +100,15 @@ impl GitHubApiError {
     }
 }
 
+/// True when any error in the chain is a GitHub 404.
+pub(crate) fn is_not_found(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<GitHubApiError>()
+            .is_some_and(|api| api.kind() == GitHubApiErrorKind::NotFound)
+    })
+}
+
 impl fmt::Display for GitHubApiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} {}", self.method, self.path)?;

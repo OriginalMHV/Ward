@@ -19,3 +19,4 @@ pub mod settings;
 pub mod teams;
 
 pub use client::Client;
+pub(crate) use response::is_not_found;
