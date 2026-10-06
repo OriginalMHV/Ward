@@ -206,7 +206,7 @@ ward plan --allow-high-impact
 ward apply
 ```
 
-Ward prompts before mutation. CI or other reviewed non-interactive execution can use:
+Ward shows the plan and prompts before mutation. CI or other reviewed non-interactive execution must pass `--yes` (or `-y`). Without a terminal and without `--yes`, `ward apply` exits with code 2 and does not change anything:
 
 ```bash
 ward apply --yes
@@ -283,7 +283,7 @@ Inherited organization or enterprise resources remain stable references. Unsuppo
 ```bash
 ward plan
 ward drift --system payments
-ward audit --system payments
+ward audit --system payments --category security,access
 ward doctor
 ```
 

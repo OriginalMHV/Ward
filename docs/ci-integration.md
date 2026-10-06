@@ -112,13 +112,13 @@ ward audit --system backend --format json
 ward audit --repo my-service --format json
 ```
 
-Returns per-repo security features, key GitHub configuration files, alert counts by severity, and dependency graph / SBOM audit data. The `dependency_graph` block is the primary signal for whether GitHub currently has usable dependency data for a repository.
+The audit covers `security`, `rulesets`, `branch-protection` and `access` for all configured systems. Use `--category` to select sections. JSON goes to stdout and progress goes to stderr, so the redirect above is safe. The report returns per-repo security features, key GitHub configuration files, alert counts by severity, and dependency graph / SBOM audit data. The `dependency_graph` block is the primary signal for whether GitHub currently has usable dependency data for a repository.
 
 ---
 
 ## Non-interactive apply
 
-Use `--yes` to skip confirmation prompts in CI:
+`ward apply` asks before it changes anything. CI has no terminal, so `--yes` (or `-y`) is required. Without it, `ward apply` exits with code 2 with `refusing to prompt in a non-interactive session; pass --yes`:
 
 ```bash
 ward apply --category security --system backend --yes

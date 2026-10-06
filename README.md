@@ -95,6 +95,16 @@ ward plan --category actions --category environments
 ward apply --category actions --category environments
 ```
 
+Narrow a run with `--org`, `--system` and `--repo`, and choose JSON output with `--format json`. Put these flags after the subcommand:
+
+```bash
+ward plan --system backend --format json
+ward audit --repo my-service --category security,access
+ward drift --category rulesets
+```
+
+`ward apply` prompts before it changes anything. Pass `--yes` in CI. `ward drift` exits with code 1 when it finds drift and with code 2 when it cannot run.
+
 Managed configuration files are committed through a pull request. Merge it, then run `ward plan` and `ward apply` again for settings that depended on those files.
 
 ## What Ward manages

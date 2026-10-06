@@ -14,19 +14,21 @@ pub mod repos;
 use clap::Parser;
 
 const AFTER_HELP: &str = "\x1b[1mGetting Started:\x1b[0m
-  init, doctor, config          Set up Ward and configure repos
+  init, import, doctor, config  Create or import a manifest, check your setup
 
 \x1b[1mPlan & Apply:\x1b[0m
   plan, apply                   Preview and apply changes across categories
-  teams, settings               Access control & repo settings (deprecated)
 
 \x1b[1mMonitor:\x1b[0m
-  drift, audit                  Detect drift, audit compliance
+  drift, audit                  Detect drift, report current state
+  repos                         List repositories
 
-\x1b[1mAdvanced:\x1b[0m
-  import                        Import existing repository state
+\x1b[1mCommon options (after the subcommand):\x1b[0m
+  --category C,..               Limit to categories (plan, apply, drift, audit)
+  --org, --system, --repo       Narrow the target
+  --format text|json            Output format
 
-\x1b[2mNew to Ward? Run: ward init --from OWNER/REPO → ward plan\x1b[0m
+\x1b[2mNew to Ward? Run: ward import OWNER/REPO → ward plan\x1b[0m
 \x1b[2mFull tutorial: https://github.com/OriginalMHV/Ward/blob/main/docs/getting-started.md\x1b[0m";
 
 #[derive(Parser)]
@@ -36,7 +38,7 @@ const AFTER_HELP: &str = "\x1b[1mGetting Started:\x1b[0m
     long_about = "Ward treats GitHub repository management as infrastructure-as-code.\n\
                   Declare your desired state in ward.toml, preview changes with plan,\n\
                   apply them, and verify the result.\n\n\
-                  Start here: ward init → ward doctor → ward plan",
+                  Start here: ward import OWNER/REPO → ward doctor → ward plan",
     version,
     propagate_version = true,
     after_long_help = AFTER_HELP,
