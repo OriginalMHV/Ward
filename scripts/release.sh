@@ -37,7 +37,7 @@ crate_published() {
 }
 
 bold "Checking the starting point"
-git fetch --quiet --tags origin
+git fetch --quiet origin main || fail "could not fetch origin/main"
 [[ -z "$(git status --porcelain)" ]] || fail "the working tree has uncommitted changes"
 
 if [[ "$(git show origin/main:Cargo.toml | sed -n 's/^version = "\(.*\)"/\1/p' | head -1)" == "$version" ]]; then
@@ -86,7 +86,7 @@ else
   confirm "Merge PR #$pr into main?"
   gh pr merge "$pr" --repo "$REPO" --squash --delete-branch \
     --subject "chore: release $tag (#$pr)" --body ""
-  git fetch --quiet origin
+  git fetch --quiet origin main
 fi
 
 git switch --quiet main
