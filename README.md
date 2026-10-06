@@ -9,13 +9,13 @@
 [![MSRV](https://img.shields.io/badge/MSRV-1.88-0F2A44.svg)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-14B8A6.svg)](LICENSE)
 
-**Manage GitHub repository settings as code. Preview every change. Verify every result.**
-
-[Install](#install) · [Quick start](#quick-start) · [Commands](#commands) · [Configuration](#configuration) · [CI](#ci) · [Docs](#documentation)
-
 </div>
 
-<br>
+> This README describes Ward 0.5.0. For the released 0.4.2, see the [v0.4.2 README](https://github.com/OriginalMHV/Ward/blob/v0.4.2/README.md).
+
+<p align="center">
+  <img src="docs/assets/ward-stats.svg" alt="9 categories. No state file. Plan, apply, verify. 4.5 times faster plan." width="100%">
+</p>
 
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Terminal recording: ward import, plan, apply and drift against a demo repository" width="900">
@@ -28,7 +28,7 @@
 - **Verify after apply.** Ward reads the state back from GitHub and checks it against the manifest.
 - **Drift checks for CI.** `ward drift` exits with `0` (in sync), `1` (drift) or `2` (could not run).
 - **Start from what you have.** `ward import` turns an existing repository into your baseline manifest.
-- **Fast.** `ward plan` on 10 repositories: 131 s → 29 s in 0.5.
+- **Measured speed.** On 10 repositories, `ward plan` took 131 s in 0.4.2 and 29 s in 0.5.0.
 
 ## Install
 
@@ -65,14 +65,9 @@ Edit `ward.toml`, run `ward plan` again, and repeat. See [Getting started](docs/
 
 ## How it works
 
-```mermaid
-flowchart LR
-    A["ward.toml<br/>desired state"] --> B["plan<br/>collect and diff"]
-    G["GitHub API<br/>live state"] --> B
-    B --> C["apply<br/>one category at a time"]
-    C --> D["verify<br/>read back and compare"]
-    D --> E["drift in CI<br/>exit 0, 1 or 2"]
-```
+<p align="center">
+  <img src="docs/assets/how-it-works.svg" alt="Flow: ward.toml, plan, apply, verify. A drift check runs in CI and exits 0, 1 or 2." width="100%">
+</p>
 
 Every category in `ward.toml` has a policy with a **disposition**:
 
@@ -161,7 +156,7 @@ jobs:
   drift:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Ward
         run: |
           curl --proto '=https' --tlsv1.2 -LsSf \
@@ -184,25 +179,25 @@ JSON goes to stdout and progress goes to stderr. See [CI integration](docs/ci-in
 
 | | Ward | [Terraform GitHub provider](https://github.com/integrations/terraform-provider-github) | [Probot Settings](https://github.com/repository-settings/app) | [safe-settings](https://github.com/github/safe-settings) |
 |---|---|---|---|---|
-| Runs as | CLI, locally or in CI | Terraform provider | GitHub App, hosted or self-hosted | Server, Action or Lambda (Probot app) |
+| Runs as | CLI, locally or in CI | Terraform provider | GitHub App, hosted or self-hosted | Server (Docker, Kubernetes), Lambda or GitHub Action |
 | State file | None. Reads live GitHub state each run. | Yes, Terraform state | None | None |
 | Preview before change | `ward plan` | `terraform plan` | Not documented in its README | Yes, dry run on pull requests (nop mode) |
 | Drift detection | `ward drift`, exit codes for CI | `terraform plan` shows it | Not documented in its README | Yes, scheduled and on webhook events |
 | Import an existing repository | `ward import` | Per-resource `terraform import` | Not documented in its README | Yes, a settings generator script |
 | Scope | Repository, files, security, rulesets, branch protection, Actions, environments, access, integrations | Broad. Repositories, teams, org settings, rulesets, Actions, webhooks and more | Repository settings from `.github/settings.yml` | Org, suborg and repository settings in an admin repository |
-| Many repositories | One manifest with systems | Yes, with modules and loops | Org-wide install | Yes, built for large orgs |
+| Many repositories | One manifest with systems | Yes, with modules and loops | Per repository, or one install for an org | Yes, at org, suborg and repository levels |
 | Learning curve | One TOML file and five commands | Terraform language, providers and state | Low. One YAML file. | Medium. Needs a deployed service. |
 
-Terraform covers more GitHub resources than Ward and has a mature state model. If you already run Terraform, its provider is a strong choice. The two apps run continuously and react to events. Ward is a CLI that you run on demand or in CI, and it needs nothing deployed. Entries marked "not documented" mean the project README does not say. They do not mean the feature is missing.
+The Terraform provider has broader resource coverage and an explicit state file. If you already run Terraform, it fits that workflow. The two apps run continuously and react to events. Ward is a CLI that you run on demand or in CI, and it needs no deployed service. A cell marked "Not documented" means the project README does not say. It does not mean the feature is missing.
 
 ## Safety
 
 - **No global apply-all.** `ward apply` works one category at a time, in a fixed safe order, and shows the plan first.
 - **Sensitive categories are gated.** They need `sensitive = true` and `disposition = "managed"` before Ward writes them.
-- **Secret values are never read.** Secrets stay outside `ward.toml` as placeholders and Ward resolves them only at write time. They never appear in the manifest, the plan or the audit log.
+- **Secret values stay out of Ward.** Ward never reads secret values from GitHub, and never stores them in the manifest, the plan or the audit log. It resolves each value from your environment only when it writes.
 - **Audit log.** Every change is appended to `~/.ward/audit.log`. On Windows this is `.ward\audit.log` in your user profile folder.
 - **A missing list is never pruned.** If `teams` or `collaborators` is absent from the manifest, Ward leaves them alone. Only an explicit list with `prune = true` removes entries.
-- **No repository lifecycle.** Ward never creates, renames, transfers or deletes repositories. Visibility and archive changes need `--allow-high-impact`.
+- **No repository lifecycle.** Ward never creates, renames, transfers or deletes repositories. Visibility and archive changes need `--allow-high-impact` or `sensitive = true` on the repository category.
 - **Files go through pull requests.** Ward never pushes managed files to the default branch.
 
 ## Documentation

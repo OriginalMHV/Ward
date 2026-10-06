@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" width="1200" height="360" role="img" aria-label="Ward flow: ward.toml, plan, apply, verify. A drift check runs in CI with exit codes 0, 1 and 2.">
+  <style>
+    .f { font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; }
+    .t { font-size: 24px; font-weight: 700; fill: #FFFFFF; }
+    .s { font-size: 14px; font-weight: 600; fill: #9FB3C8; }
+    .n { font-size: 13px; font-weight: 700; fill: #14B8A6; letter-spacing: 1px; }
+    .c { font-size: 14px; font-weight: 700; fill: #FFFFFF; }
+  </style>
+  <defs>
+    <marker id="at" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M1 1 L9 5 L1 9 z" fill="#14B8A6"/></marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M1 1 L9 5 L1 9 z" fill="#6F88A1"/></marker>
+    <clipPath id="card"><rect width="1200" height="360" rx="24"/></clipPath>
+  </defs>
+  <g clip-path="url(#card)" class="f">
+    <rect width="1200" height="360" rx="24" fill="#0F2A44"/>
+
+    <g stroke="#14B8A6" stroke-width="2.5" fill="none">
+      <path d="M280 125 H336" marker-end="url(#at)"/>
+      <path d="M570 125 H626" marker-end="url(#at)"/>
+      <path d="M860 125 H916" marker-end="url(#at)"/>
+    </g>
+    <g stroke="#6F88A1" stroke-width="2" fill="none" stroke-dasharray="6 6">
+      <path d="M165 184 V285 H336" marker-end="url(#ag)"/>
+      <path d="M1035 184 V236" marker-end="url(#ag)"/>
+    </g>
+
+    <rect x="50" y="70" width="230" height="114" rx="18" fill="#16385A" stroke="#14B8A6" stroke-width="2"/>
+    <text class="n" x="74" y="100">START</text>
+    <text class="t" x="74" y="130">ward.toml</text>
+    <text class="s" x="74" y="152">desired state</text>
+
+    <rect x="340" y="70" width="230" height="114" rx="18" fill="#16385A" stroke="#14B8A6" stroke-width="2"/>
+    <text class="n" x="364" y="100">1</text>
+    <text class="t" x="364" y="130">plan</text>
+    <text class="s" x="364" y="152">collect current state, diff</text>
+
+    <rect x="630" y="70" width="230" height="114" rx="18" fill="#16385A" stroke="#14B8A6" stroke-width="2"/>
+    <text class="n" x="654" y="100">2</text>
+    <text class="t" x="654" y="130">apply</text>
+    <text class="s" x="654" y="152">one category,</text>
+    <text class="s" x="654" y="170">after confirmation</text>
+
+    <rect x="920" y="70" width="230" height="114" rx="18" fill="#16385A" stroke="#14B8A6" stroke-width="2"/>
+    <text class="n" x="944" y="100">3</text>
+    <text class="t" x="944" y="130">verify</text>
+    <text class="s" x="944" y="152">read back and compare</text>
+
+    <rect x="340" y="240" width="810" height="90" rx="18" fill="#0F2A44" stroke="#6F88A1" stroke-width="2"/>
+    <text class="n" x="364" y="270" style="fill:#9FB3C8">IN CI</text>
+    <text class="t" x="364" y="302">drift</text>
+    <text class="s" x="460" y="302">compares live state with ward.toml</text>
+    <g>
+      <rect x="800" y="266" width="100" height="40" rx="20" fill="#14B8A6" fill-opacity="0.18" stroke="#14B8A6" stroke-width="1.5"/>
+      <text class="c" x="850" y="291" text-anchor="middle">0 in sync</text>
+      <rect x="912" y="266" width="90" height="40" rx="20" fill="#16385A" stroke="#6F88A1" stroke-width="1.5"/>
+      <text class="c" x="957" y="291" text-anchor="middle">1 drift</text>
+      <rect x="1014" y="266" width="120" height="40" rx="20" fill="#16385A" stroke="#6F88A1" stroke-width="1.5"/>
+      <text class="c" x="1074" y="291" text-anchor="middle">2 error</text>
+    </g>
+  </g>
+</svg>
