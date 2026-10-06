@@ -109,3 +109,77 @@ async fn test_update_branch_protection_omits_absent_check_app_id() {
         json!([{ "context": "build" }, { "context": "lint", "app_id": 15368 }])
     );
 }
+
+#[tokio::test]
+async fn empty_review_restrictions_are_omitted_so_user_owned_repositories_accept_the_put() {
+    use ward::github::branch_protection::DesiredBranchProtection;
+
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/repos/test-org/my-repo/branches/main/protection"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&server)
+        .await;
+
+    let desired = DesiredBranchProtection {
+        required_pull_request_reviews: true,
+        required_approving_review_count: 1,
+        ..DesiredBranchProtection::default()
+    };
+    let client = Client::new_for_test("test-org", &server.uri());
+    client
+        .update_branch_protection_detailed("my-repo", "main", &desired)
+        .await
+        .unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let reviews = &body["required_pull_request_reviews"];
+    assert_eq!(reviews["required_approving_review_count"], 1);
+    assert!(reviews.get("dismissal_restrictions").is_none(), "{reviews}");
+    assert!(
+        reviews.get("bypass_pull_request_allowances").is_none(),
+        "{reviews}"
+    );
+}
+
+#[tokio::test]
+async fn organization_only_restriction_errors_name_the_cause() {
+    use ward::github::branch_protection::{ActorSet, DesiredBranchProtection, TeamActor};
+
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/repos/test-org/my-repo/branches/main/protection"))
+        .respond_with(ResponseTemplate::new(422).set_body_json(json!({
+            "message": "Validation Failed",
+            "errors": ["Only organization repositories can have users and team restrictions"]
+        })))
+        .mount(&server)
+        .await;
+
+    let desired = DesiredBranchProtection {
+        required_pull_request_reviews: true,
+        dismissal_restrictions: ActorSet {
+            teams: vec![TeamActor {
+                slug: "core".to_owned(),
+            }],
+            ..ActorSet::default()
+        },
+        ..DesiredBranchProtection::default()
+    };
+    let client = Client::new_for_test("test-org", &server.uri());
+    let error = client
+        .update_branch_protection_detailed("my-repo", "main", &desired)
+        .await
+        .unwrap_err();
+    let message = format!("{error:#}");
+
+    assert!(
+        message.contains("require an organization-owned repository"),
+        "{message}"
+    );
+    assert!(
+        message.contains("Only organization repositories"),
+        "{message}"
+    );
+}

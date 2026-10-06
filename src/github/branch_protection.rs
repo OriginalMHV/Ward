@@ -59,6 +59,12 @@ pub struct ActorSet {
     pub apps: Vec<AppActor>,
 }
 
+impl ActorSet {
+    pub fn is_empty(&self) -> bool {
+        self.users.is_empty() && self.teams.is_empty() && self.apps.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PullRequestReviewState {
     #[serde(default)]
@@ -152,6 +158,14 @@ fn actor_slugs(actors: &[AppActor]) -> Vec<String> {
 
 fn team_slugs(actors: &[TeamActor]) -> Vec<String> {
     actors.iter().map(|actor| actor.slug.clone()).collect()
+}
+
+fn actor_set_body(set: &ActorSet) -> serde_json::Value {
+    json!({
+        "users": user_logins(&set.users),
+        "teams": team_slugs(&set.teams),
+        "apps": actor_slugs(&set.apps),
+    })
 }
 
 fn user_logins(actors: &[UserActor]) -> Vec<String> {
@@ -278,20 +292,19 @@ impl Client {
 
         let required_pull_request_reviews = if desired.required_pull_request_reviews {
             let mut body = json!({
-                "dismissal_restrictions": {
-                    "users": user_logins(&desired.dismissal_restrictions.users),
-                    "teams": team_slugs(&desired.dismissal_restrictions.teams),
-                    "apps": actor_slugs(&desired.dismissal_restrictions.apps),
-                },
                 "dismiss_stale_reviews": desired.dismiss_stale_reviews,
                 "require_code_owner_reviews": desired.require_code_owner_reviews,
                 "required_approving_review_count": desired.required_approving_review_count,
-                "bypass_pull_request_allowances": {
-                    "users": user_logins(&desired.pull_request_bypass_allowances.users),
-                    "teams": team_slugs(&desired.pull_request_bypass_allowances.teams),
-                    "apps": actor_slugs(&desired.pull_request_bypass_allowances.apps),
-                },
             });
+            // GitHub rejects these objects on user-owned repositories even when they are
+            // empty. PUT replaces the whole protection, so omitting them means "none".
+            if !desired.dismissal_restrictions.is_empty() {
+                body["dismissal_restrictions"] = actor_set_body(&desired.dismissal_restrictions);
+            }
+            if !desired.pull_request_bypass_allowances.is_empty() {
+                body["bypass_pull_request_allowances"] =
+                    actor_set_body(&desired.pull_request_bypass_allowances);
+            }
             if let Some(value) = desired.require_last_push_approval {
                 body["require_last_push_approval"] = json!(value);
             }
@@ -303,17 +316,10 @@ impl Client {
             serde_json::Value::Null
         };
 
-        let restrictions = if desired.push_restrictions.users.is_empty()
-            && desired.push_restrictions.teams.is_empty()
-            && desired.push_restrictions.apps.is_empty()
-        {
+        let restrictions = if desired.push_restrictions.is_empty() {
             serde_json::Value::Null
         } else {
-            json!({
-                "users": user_logins(&desired.push_restrictions.users),
-                "teams": team_slugs(&desired.push_restrictions.teams),
-                "apps": actor_slugs(&desired.push_restrictions.apps),
-            })
+            actor_set_body(&desired.push_restrictions)
         };
 
         let mut body = json!({
@@ -341,7 +347,17 @@ impl Client {
 
         let branch = encode_unreserved(branch);
         let path = format!("/repos/{}/{repo}/branches/{branch}/protection", self.org);
-        response::expect_empty(self.put_json(&path, &body).await?, "PUT", &path).await
+        response::expect_empty(self.put_json(&path, &body).await?, "PUT", &path)
+            .await
+            .map_err(|error| {
+                if format!("{error:#}").contains("Only organization repositories") {
+                    error.context(
+                        "dismissal restrictions, push restrictions and PR bypass allowances require an organization-owned repository",
+                    )
+                } else {
+                    error
+                }
+            })
     }
 
     pub async fn delete_branch_protection(&self, repo: &str, branch: &str) -> Result<()> {

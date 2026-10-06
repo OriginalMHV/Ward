@@ -428,9 +428,31 @@ enum GitHubErrorDetail {
         field: Option<String>,
         #[serde(default)]
         code: Option<String>,
+        #[serde(default)]
+        message: Option<String>,
     },
     Text(String),
-    Other(serde_json::Value),
+    Other(
+        #[allow(
+            dead_code,
+            reason = "deserialized to accept any shape, never displayed"
+        )]
+        serde_json::Value,
+    ),
+}
+
+/// Longest validation detail shown in an error. GitHub validation messages are
+/// short and are not secrets.
+const MAX_DETAIL_CHARS: usize = 300;
+
+fn truncate_detail(value: &str) -> String {
+    let value = value.trim();
+    if value.chars().count() <= MAX_DETAIL_CHARS {
+        return value.to_owned();
+    }
+    let mut truncated: String = value.chars().take(MAX_DETAIL_CHARS).collect();
+    truncated.push_str("...");
+    truncated
 }
 
 impl GitHubErrorDetail {
@@ -440,6 +462,7 @@ impl GitHubErrorDetail {
                 resource,
                 field,
                 code,
+                message,
             } => {
                 let mut summary = String::new();
 
@@ -460,6 +483,12 @@ impl GitHubErrorDetail {
                     summary.push_str(code);
                     summary.push(')');
                 }
+                if let Some(message) = message.as_deref().filter(|m| !m.trim().is_empty()) {
+                    if !summary.is_empty() {
+                        summary.push_str(": ");
+                    }
+                    summary.push_str(&truncate_detail(message));
+                }
 
                 if summary.is_empty() {
                     "additional error details omitted".to_owned()
@@ -467,14 +496,8 @@ impl GitHubErrorDetail {
                     summary
                 }
             }
-            Self::Text(value) => {
-                let _ = value;
-                "additional error details omitted".to_owned()
-            }
-            Self::Other(value) => {
-                let _ = value;
-                "additional error details omitted".to_owned()
-            }
+            Self::Text(value) if !value.trim().is_empty() => truncate_detail(value),
+            Self::Text(_) | Self::Other(_) => "additional error details omitted".to_owned(),
         }
     }
 }
@@ -498,7 +521,7 @@ mod tests {
     };
 
     #[tokio::test]
-    async fn classify_json_preserves_structured_context_without_leaking_raw_body() {
+    async fn classify_json_keeps_validation_details_without_leaking_the_raw_body() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/repos/test-org/private-repo"))
@@ -536,7 +559,7 @@ mod tests {
         assert!(display.contains("Validation Failed"));
         assert!(display.contains("Repository.name (invalid)"));
         assert!(display.contains("response body omitted"));
-        assert!(!display.contains("top-secret-value"));
+        assert!(display.contains("Repository.name (invalid): top-secret-value"));
         assert!(!display.contains("do-not-log"));
     }
 
@@ -783,5 +806,25 @@ mod tests {
             plan(StatusCode::FORBIDDEN, &headers, false, 1, Utc::now()),
             None
         );
+    }
+
+    #[test]
+    fn validation_details_include_string_entries_and_truncate_long_ones() {
+        let payload: super::GitHubErrorPayload = serde_json::from_value(json!({
+            "message": "Validation Failed",
+            "errors": [
+                "Only organization repositories can have users and team restrictions",
+                "x".repeat(1000)
+            ]
+        }))
+        .unwrap();
+
+        let details = payload.safe_details();
+
+        assert_eq!(
+            details[0],
+            "Only organization repositories can have users and team restrictions"
+        );
+        assert!(details[1].len() < 400 && details[1].ends_with("..."));
     }
 }

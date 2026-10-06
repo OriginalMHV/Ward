@@ -191,7 +191,7 @@ mod tests {
         assert!(display.contains("Validation Failed"));
         assert!(display.contains("Repository.name (invalid)"));
         assert!(display.contains("response body omitted"));
-        assert!(!display.contains("secret-name"));
+        assert!(display.contains("secret-name"));
         assert!(!display.contains("do-not-log"));
     }
 
