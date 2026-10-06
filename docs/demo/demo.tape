@@ -1,14 +1,18 @@
 # Records docs/assets/demo.gif. Requires: vhs, ward on PATH, GH_TOKEN set.
 # Run docs/demo/reset.sh before each recording.
+# Record to MP4 for exact colours, then convert:
+#   vhs docs/demo/demo.tape -o demo.mp4
+#   ffmpeg -i demo.mp4 -vf "fps=20,split[a][b];[a]palettegen=max_colors=128:stats_mode=full[p];[b][p]paletteuse=dither=none" demo.gif
+#   Then mask the outer corners to transparent (radius 16) and run gifsicle -O3.
 Output docs/assets/demo.gif
 
 Set Shell "bash"
 Set Theme { "name": "Ward Light", "background": "#FFFFFF", "foreground": "#1F2328", "cursor": "#0969DA", "selection": "#DDF4FF", "black": "#1F2328", "red": "#CF222E", "green": "#0969DA", "yellow": "#0550AE", "blue": "#0969DA", "magenta": "#59636E", "cyan": "#0550AE", "white": "#59636E", "brightBlack": "#8C959F", "brightRed": "#A40E26", "brightGreen": "#0550AE", "brightYellow": "#0550AE", "brightBlue": "#0550AE", "brightMagenta": "#59636E", "brightCyan": "#0550AE", "brightWhite": "#1F2328" }
 Set WindowBar Colorful
 Set WindowBarSize 40
-Set BorderRadius 14
-Set Margin 16
-Set MarginFill "#F6F8FA"
+Set BorderRadius 12
+Set Margin 4
+Set MarginFill "#D0D7DE"
 Set Padding 28
 Set FontFamily "JetBrains Mono"
 Set FontSize 22
@@ -44,9 +48,9 @@ Type `clear; printf '\033[1;38;2;9;105;218m%s\033[0m\n' '# 2. Change the desired
 Enter
 Sleep 300ms
 Show
-Type `grep -n -E 'delete_branch_on_merge|^topics' ward.toml`
+Type `diff ward.toml.bak ward.toml`
 Enter
-Sleep 2500ms
+Sleep 3s
 
 Hide
 Type `clear; printf '\033[1;38;2;9;105;218m%s\033[0m\n' '# 3. Preview the drift'`
