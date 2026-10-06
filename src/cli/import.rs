@@ -617,8 +617,8 @@ async fn snapshot_repository(
         inherited_rulesets: rulesets_category.references.len(),
         workflows: actions_category.workflows.len(),
         environments: environments_category.entries.len(),
-        access_entries: access_category.teams.len()
-            + access_category.collaborators.len()
+        access_entries: access_category.desired_teams().len()
+            + access_category.desired_collaborators().len()
             + access_category.references.len(),
         integrations: integrations_category.webhooks.len()
             + integrations_category.deploy_keys.len()

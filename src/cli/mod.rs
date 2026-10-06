@@ -11,7 +11,6 @@ mod output;
 pub mod plan;
 pub mod repos;
 pub mod settings;
-pub mod teams;
 
 use clap::Parser;
 
@@ -117,9 +116,9 @@ pub enum Command {
     #[command(hide = true)]
     Commit(deprecated::LegacyArgs),
 
-    /// Manage team access to repositories
-    #[command(display_order = 25)]
-    Teams(teams::TeamsCommand),
+    /// Deprecated. Use `ward plan|apply --category access`
+    #[command(hide = true)]
+    Teams(deprecated::TeamsArgs),
 
     /// Deprecated. Use `ward plan|apply|audit --category branch-protection`
     #[command(hide = true)]

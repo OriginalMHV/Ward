@@ -384,6 +384,22 @@ type = "app"
 name = "dependabot"
 ```
 
+Teams and collaborators are managed separately. A missing `teams` or `collaborators` key means Ward does not manage that list, and it never removes anything because the key is absent. Only an explicit list, including an explicit empty list, together with `prune = true` removes teams or collaborators that the list does not name:
+
+```toml
+[categories.access.policy]
+disposition = "managed"
+prune = true
+sensitive = true
+
+# collaborators is not set, so collaborators stay untouched.
+[[categories.access.teams]]
+slug = "developers"
+permission = "push"
+```
+
+Write `collaborators = []` (or `teams = []`) to say that the repository must have none. Place that line before any `[[...]]` table of the category. `ward import` writes both lists explicitly, so an imported baseline keeps its exact meaning.
+
 Custom repository roles and app installations remain stable references. Pending invitations retain enough target state to cancel the correct invitation when pruning is explicitly enabled.
 
 ## `[categories.integrations]`

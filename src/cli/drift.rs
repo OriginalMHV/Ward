@@ -51,21 +51,32 @@ impl DriftCommand {
             }
             None => &self.args,
         };
-        run_drift(client, manifest, system, repo, json, args).await
+        run_drift(
+            client,
+            manifest,
+            system,
+            repo,
+            json,
+            unified::select_categories(&args.category.categories),
+            args.allow_high_impact,
+        )
+        .await
     }
 }
 
-async fn run_drift(
+/// Plan the selected categories and fail with a drift outcome when anything differs.
+pub(crate) async fn run_drift(
     client: &Client,
     manifest: &Manifest,
     system: Option<&str>,
     repo: Option<&str>,
     json: bool,
-    args: &DriftArgs,
+    categories: Vec<unified::Category>,
+    allow_high_impact: bool,
 ) -> Result<()> {
     let options = UnifiedOptions {
-        categories: unified::select_categories(&args.category.categories),
-        allow_high_impact: args.allow_high_impact,
+        categories,
+        allow_high_impact,
         verify: true,
     };
     let report = crate::cli::plan::run_canonical_plan(

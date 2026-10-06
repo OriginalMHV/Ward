@@ -7,11 +7,12 @@ use ward::config::manifest::{
 };
 use ward::github::Client;
 use ward::reconcile::access_integrations::{
-    AccessCollection, AccessPlan, AutolinkAction, CollectedAccessReference, CollectedAccessState,
-    CollectedAutolink, CollectedCollaborator, CollectedDeployKey, CollectedIntegrationsState,
-    CollectedPages, CollectedWebhook, DeployKeyAction, IntegrationsCollection, IntegrationsPlan,
-    TeamAccessAction, apply_access, apply_integrations, canonicalize_url, plan_access,
-    plan_integrations, verify_integrations_state,
+    AccessCollection, AccessPlan, AutolinkAction, CollaboratorAccessAction,
+    CollectedAccessReference, CollectedAccessState, CollectedAutolink, CollectedCollaborator,
+    CollectedDeployKey, CollectedIntegrationsState, CollectedPages, CollectedWebhook,
+    DeployKeyAction, IntegrationsCollection, IntegrationsPlan, TeamAccessAction, apply_access,
+    apply_integrations, canonicalize_url, plan_access, plan_integrations, verify_access_state,
+    verify_integrations_state,
 };
 use ward::reconcile::actions_environments::{IssueSeverity, ReconcileIssue};
 use wiremock::matchers::{body_partial_json, method, path};
@@ -125,10 +126,10 @@ fn access_sensitive_gate_and_custom_role_reference_blocking_are_visible() {
             prune: false,
             sensitive: false,
         },
-        teams: vec![TeamAccess {
+        teams: Some(vec![TeamAccess {
             slug: "platform".to_owned(),
             permission: "Custom Maintainer".to_owned(),
-        }],
+        }]),
         ..RepositoryAccessCategoryV2::default()
     };
 
@@ -167,6 +168,7 @@ async fn pending_invitation_prune_uses_invitation_delete_endpoint() {
     };
     let desired = RepositoryAccessCategoryV2 {
         policy: managed_sensitive_policy(true),
+        collaborators: Some(Vec::new()),
         ..RepositoryAccessCategoryV2::default()
     };
     let plan = plan_access(&current, &desired);
@@ -780,4 +782,153 @@ async fn apply_with_sensitive_false_never_writes_autolinks() {
             .any(|message| message.contains("autolink"))
     );
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+fn current_access_with_team_and_collaborator() -> AccessCollection {
+    AccessCollection {
+        category: RepositoryAccessCategoryV2::default(),
+        state: CollectedAccessState {
+            teams: vec![TeamAccess {
+                slug: "legacy".to_owned(),
+                permission: "push".to_owned(),
+            }],
+            teams_complete: true,
+            collaborators: vec![CollectedCollaborator {
+                config: CollaboratorAccessConfig {
+                    actor: ActorReference::User {
+                        login: "octocat".to_owned(),
+                    },
+                    permission: "push".to_owned(),
+                },
+                outside: false,
+                pending: false,
+                invitation_id: None,
+            }],
+            collaborators_complete: true,
+            references: Vec::new(),
+        },
+        coverage: Vec::new(),
+        issues: Vec::new(),
+    }
+}
+
+#[test]
+fn absent_collaborators_key_never_revokes_collaborators_even_with_prune() {
+    let current = current_access_with_team_and_collaborator();
+    let desired = RepositoryAccessCategoryV2 {
+        policy: managed_sensitive_policy(true),
+        teams: Some(vec![TeamAccess {
+            slug: "platform".to_owned(),
+            permission: "push".to_owned(),
+        }]),
+        collaborators: None,
+        ..RepositoryAccessCategoryV2::default()
+    };
+
+    let plan = plan_access(&current, &desired);
+
+    assert!(plan.collaborator_actions.is_empty(), "{plan:?}");
+    assert!(
+        plan.team_actions.iter().any(
+            |action| matches!(action, TeamAccessAction::Remove(team) if team.slug == "legacy")
+        ),
+        "an explicit teams list still prunes teams"
+    );
+    assert!(
+        plan.notes
+            .iter()
+            .any(|note| note.contains("`collaborators` is not set")),
+        "{:?}",
+        plan.notes
+    );
+}
+
+#[test]
+fn absent_teams_key_never_removes_teams_even_with_prune() {
+    let current = current_access_with_team_and_collaborator();
+    let desired = RepositoryAccessCategoryV2 {
+        policy: managed_sensitive_policy(true),
+        teams: None,
+        collaborators: Some(Vec::new()),
+        ..RepositoryAccessCategoryV2::default()
+    };
+
+    let plan = plan_access(&current, &desired);
+
+    assert!(plan.team_actions.is_empty(), "{plan:?}");
+    assert_eq!(plan.collaborator_actions.len(), 1);
+}
+
+#[test]
+fn explicit_empty_collaborators_with_prune_revokes_every_collaborator() {
+    let current = current_access_with_team_and_collaborator();
+    let desired = RepositoryAccessCategoryV2 {
+        policy: managed_sensitive_policy(true),
+        collaborators: Some(Vec::new()),
+        ..RepositoryAccessCategoryV2::default()
+    };
+
+    let plan = plan_access(&current, &desired);
+
+    assert!(matches!(
+        plan.collaborator_actions.as_slice(),
+        [CollaboratorAccessAction::Revoke { login, .. }] if login == "octocat"
+    ));
+}
+
+#[test]
+fn explicit_collaborators_without_prune_keep_unlisted_collaborators() {
+    let current = current_access_with_team_and_collaborator();
+    let desired = RepositoryAccessCategoryV2 {
+        policy: managed_sensitive_policy(false),
+        collaborators: Some(Vec::new()),
+        ..RepositoryAccessCategoryV2::default()
+    };
+
+    assert!(
+        plan_access(&current, &desired)
+            .collaborator_actions
+            .is_empty()
+    );
+}
+
+#[test]
+fn verification_does_not_flag_unlisted_collaborators_when_the_key_is_absent() {
+    let current = current_access_with_team_and_collaborator();
+    let absent = RepositoryAccessCategoryV2 {
+        policy: managed_sensitive_policy(true),
+        ..RepositoryAccessCategoryV2::default()
+    };
+    let explicit = RepositoryAccessCategoryV2 {
+        collaborators: Some(Vec::new()),
+        teams: Some(Vec::new()),
+        ..absent.clone()
+    };
+
+    assert!(verify_access_state(&current, &absent).issues.is_empty());
+    let issues = verify_access_state(&current, &explicit).issues;
+    assert!(
+        issues.iter().any(|issue| issue.contains("octocat")),
+        "{issues:?}"
+    );
+    assert!(
+        issues.iter().any(|issue| issue.contains("legacy")),
+        "{issues:?}"
+    );
+}
+
+#[test]
+fn collaborators_key_round_trips_as_absent_or_explicit_empty() {
+    let absent: RepositoryAccessCategoryV2 = toml::from_str("[policy]\nprune = true\n").unwrap();
+    assert_eq!(absent.collaborators, None);
+    assert_eq!(absent.teams, None);
+
+    let explicit: RepositoryAccessCategoryV2 =
+        toml::from_str("collaborators = []\nteams = []\n").unwrap();
+    assert_eq!(explicit.collaborators, Some(Vec::new()));
+    assert_eq!(explicit.teams, Some(Vec::new()));
+
+    let written = toml::to_string(&explicit).unwrap();
+    assert!(written.contains("collaborators = []"), "{written}");
+    assert!(!toml::to_string(&absent).unwrap().contains("collaborators"));
 }

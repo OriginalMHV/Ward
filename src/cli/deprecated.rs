@@ -14,9 +14,9 @@ use crate::engine::audit_log::AuditLog;
 use crate::github::Client;
 use crate::reconcile::unified::{Category, UnifiedOptions};
 
-/// The actions of a legacy per-category command.
+/// The actions of `ward security`, `rulesets`, `protection` and `commit`.
 #[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LegacyAction {
+pub enum LegacyClapAction {
     /// Show what would change
     Plan,
 
@@ -35,20 +35,94 @@ pub enum LegacyAction {
     Audit,
 }
 
+/// The actions of `ward teams`.
+#[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TeamsClapAction {
+    /// List the teams of each repository
+    List,
+
+    /// Show what would change
+    Plan,
+
+    /// Apply the changes
+    Apply {
+        /// Skip the confirmation prompt
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
+
+    /// Compare team access with the manifest
+    Audit,
+}
+
+/// What a legacy command runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegacyAction {
+    Plan,
+    Apply { yes: bool, skip_verify: bool },
+    Audit,
+    Drift,
+}
+
 /// The arguments of a hidden legacy command such as `ward security plan`.
 #[derive(Args, Debug)]
 pub struct LegacyArgs {
     #[command(subcommand)]
-    action: LegacyAction,
+    action: LegacyClapAction,
 }
+
+/// The arguments of the hidden `ward teams` command.
+#[derive(Args, Debug)]
+pub struct TeamsArgs {
+    #[command(subcommand)]
+    action: TeamsClapAction,
+}
+
+const ACCESS_SCOPE_NOTE: &str = "note: the access category also covers collaborators. Ward manages them only when the manifest sets `collaborators`, and it never removes collaborators when the key is absent.";
 
 impl LegacyArgs {
     /// Bind the parsed action to the legacy command name and its category.
     pub fn into_legacy(self, command: &'static str, category: Category) -> LegacyCategory {
+        let (name, action) = match self.action {
+            LegacyClapAction::Plan => ("plan", LegacyAction::Plan),
+            LegacyClapAction::Apply { yes, skip_verify } => {
+                ("apply", LegacyAction::Apply { yes, skip_verify })
+            }
+            LegacyClapAction::Audit => ("audit", LegacyAction::Audit),
+        };
         LegacyCategory {
             command,
+            subcommand: name,
             category,
-            action: self.action,
+            action,
+            note: None,
+        }
+    }
+}
+
+impl TeamsArgs {
+    /// `teams plan` and `apply` run the access category. `list` becomes an audit
+    /// section and `audit` becomes a drift check.
+    pub fn into_legacy(self) -> LegacyCategory {
+        let (name, action, note) = match self.action {
+            TeamsClapAction::List => ("list", LegacyAction::Audit, None),
+            TeamsClapAction::Plan => ("plan", LegacyAction::Plan, Some(ACCESS_SCOPE_NOTE)),
+            TeamsClapAction::Apply { yes } => (
+                "apply",
+                LegacyAction::Apply {
+                    yes,
+                    skip_verify: false,
+                },
+                Some(ACCESS_SCOPE_NOTE),
+            ),
+            TeamsClapAction::Audit => ("audit", LegacyAction::Drift, None),
+        };
+        LegacyCategory {
+            command: "teams",
+            subcommand: name,
+            category: Category::Access,
+            action,
+            note,
         }
     }
 }
@@ -57,16 +131,19 @@ impl LegacyArgs {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LegacyCategory {
     pub command: &'static str,
+    pub subcommand: &'static str,
     pub category: Category,
     pub action: LegacyAction,
+    note: Option<&'static str>,
 }
 
 impl LegacyCategory {
-    fn action_name(&self) -> &'static str {
+    fn replacement_name(&self) -> &'static str {
         match self.action {
             LegacyAction::Plan => "plan",
             LegacyAction::Apply { .. } => "apply",
             LegacyAction::Audit => "audit",
+            LegacyAction::Drift => "drift",
         }
     }
 
@@ -74,7 +151,7 @@ impl LegacyCategory {
     pub fn replacement(&self) -> String {
         format!(
             "ward {} --category {}",
-            self.action_name(),
+            self.replacement_name(),
             self.category.stable_name()
         )
     }
@@ -84,9 +161,17 @@ impl LegacyCategory {
         format!(
             "warning: 'ward {} {}' is deprecated and will be removed in 0.6.0; use '{}'",
             self.command,
-            self.action_name(),
+            self.subcommand,
             self.replacement()
         )
+    }
+
+    /// Print the deprecation warning, and any scope note, to stderr.
+    pub fn announce(&self) {
+        eprintln!("{}", self.warning());
+        if let Some(note) = self.note {
+            eprintln!("{note}");
+        }
     }
 
     pub async fn run(
@@ -111,7 +196,7 @@ impl LegacyCategory {
         json: bool,
         open_audit: impl FnOnce() -> Result<AuditLog>,
     ) -> Result<()> {
-        eprintln!("{}", self.warning());
+        self.announce();
         let options = |verify| UnifiedOptions {
             categories: vec![self.category],
             allow_high_impact: false,
@@ -148,6 +233,18 @@ impl LegacyCategory {
             )
             .await
             .map(|_| ()),
+            LegacyAction::Drift => {
+                crate::cli::drift::run_drift(
+                    client,
+                    manifest,
+                    system,
+                    repo,
+                    json,
+                    vec![self.category],
+                    false,
+                )
+                .await
+            }
             LegacyAction::Audit => {
                 let Some(section) = self.audit_section() else {
                     bail!(
@@ -188,6 +285,7 @@ mod tests {
             Command::Rulesets(args) => args.into_legacy("rulesets", Category::Rulesets),
             Command::Protection(args) => args.into_legacy("protection", Category::BranchProtection),
             Command::Commit(args) => args.into_legacy("commit", Category::Files),
+            Command::Teams(args) => args.into_legacy(),
             _ => panic!("expected a legacy command"),
         }
     }
@@ -286,5 +384,45 @@ mod tests {
                 "{word} is listed in help"
             );
         }
+    }
+
+    #[test]
+    fn teams_plan_and_apply_map_to_the_access_category_with_a_scope_note() {
+        let plan = legacy(&["ward", "teams", "plan"]);
+        assert_eq!(plan.category, Category::Access);
+        assert_eq!(plan.action, LegacyAction::Plan);
+        assert!(plan.note.is_some_and(|note| note.contains("collaborators")));
+
+        let apply = legacy(&["ward", "teams", "apply", "-y"]);
+        assert_eq!(
+            apply.action,
+            LegacyAction::Apply {
+                yes: true,
+                skip_verify: false
+            }
+        );
+        assert!(apply.note.is_some());
+        assert_eq!(
+            apply.warning(),
+            "warning: 'ward teams apply' is deprecated and will be removed in 0.6.0; use 'ward apply --category access'"
+        );
+    }
+
+    #[test]
+    fn teams_list_maps_to_audit_and_teams_audit_maps_to_drift() {
+        let list = legacy(&["ward", "teams", "list"]);
+        assert_eq!(list.action, LegacyAction::Audit);
+        assert!(list.audit_section().is_some());
+        assert_eq!(
+            list.warning(),
+            "warning: 'ward teams list' is deprecated and will be removed in 0.6.0; use 'ward audit --category access'"
+        );
+
+        let audit = legacy(&["ward", "teams", "audit"]);
+        assert_eq!(audit.action, LegacyAction::Drift);
+        assert_eq!(
+            audit.warning(),
+            "warning: 'ward teams audit' is deprecated and will be removed in 0.6.0; use 'ward drift --category access'"
+        );
     }
 }

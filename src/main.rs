@@ -109,14 +109,10 @@ async fn run() -> Result<()> {
             )
             .await
         }
-        Command::Teams(cmd) => {
-            cmd.run(
-                &client,
-                &manifest,
-                cli.system.as_deref(),
-                cli.repo.as_deref(),
-            )
-            .await
+        Command::Teams(args) => {
+            args.into_legacy()
+                .run(&client, &manifest, system, repo, cli.json)
+                .await
         }
         Command::Audit(cmd) => {
             cmd.run(

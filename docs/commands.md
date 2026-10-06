@@ -55,7 +55,7 @@ Output columns: Repository, Language, Visibility, Default Branch.
 
 ## Deprecated per-category commands
 
-`ward security`, `ward rulesets`, `ward protection`, and `ward commit` are hidden aliases in 0.5.x. Each one prints a warning to stderr and then runs the replacement. They are removed in 0.6.0.
+`ward security`, `ward rulesets`, `ward protection`, `ward commit`, and `ward teams` are hidden aliases in 0.5.x. Each one prints a warning to stderr and then runs the replacement. They are removed in 0.6.0.
 
 | Old invocation | New invocation |
 |----------------|----------------|
@@ -65,6 +65,9 @@ Output columns: Repository, Language, Visibility, Default Branch.
 | `ward rulesets plan\|apply\|audit` | `ward plan\|apply\|audit --category rulesets` |
 | `ward protection plan\|apply\|audit` | `ward plan\|apply\|audit --category branch-protection` |
 | `ward commit plan\|apply` | `ward plan\|apply --category files` |
+| `ward teams plan\|apply` | `ward plan\|apply --category access` |
+| `ward teams list` | `ward audit --category access` |
+| `ward teams audit` | `ward drift --category access` |
 
 The warning has this form:
 
@@ -73,6 +76,8 @@ warning: 'ward security plan' is deprecated and will be removed in 0.6.0; use 'w
 ```
 
 `ward commit audit` never existed and has no replacement. Use `ward plan --category files`.
+
+`ward teams plan` and `ward teams apply` also print a note about collaborators. The old command managed only teams. The access category also covers collaborators, but Ward manages them only when the manifest sets `collaborators`.
 
 The aliases run the replacement command, so they behave like it. The audit aliases print the new audit section, and they cover all configured systems when you pass neither `--system` nor `--repo`.
 
@@ -141,55 +146,6 @@ Exit code `0` means all repos are in sync with `ward.toml`. Exit code `1` means 
 `ward drift check` is a deprecated alias of `ward drift`. It prints `warning: 'ward drift check' is deprecated; use 'ward drift'` to stderr and runs the same check.
 
 Checks every configured category by default. Use `--category <CATEGORY>` (repeatable, comma-separated) to narrow the drift gate, and `--allow-high-impact` to count visibility and archive changes as actionable.
-
----
-
-## `ward teams`
-
-Manage only the team portion of `[categories.access]`. Team configuration may be global or replaced per system under `[systems.categories.access]`.
-Team changes require `disposition = "managed"` and `sensitive = true`; target-only teams are removed only when `prune = true`.
-
-### `ward teams list`
-
-Show current team access per repository.
-
-```bash
-ward teams list --system backend
-ward teams list --repo my-service
-```
-
-### `ward teams plan`
-
-Preview team access changes.
-
-```bash
-ward teams plan --system backend
-ward teams plan --repo my-service
-```
-
-Use either `--system` or `--repo`.
-
-### `ward teams apply`
-
-Apply team access to repositories.
-
-```bash
-ward teams apply --system backend
-ward teams apply --system backend --yes
-ward teams apply --repo my-service --yes
-```
-
-| Flag | Description |
-|------|-------------|
-| `--yes` / `-y` | Skip confirmation prompt |
-
-### `ward teams audit`
-
-Full access matrix for a system.
-
-```bash
-ward teams audit --system backend
-```
 
 ---
 

@@ -361,11 +361,13 @@ pub async fn collect_access(
     .await?;
     let category = RepositoryAccessCategoryV2 {
         policy: desired.policy.clone(),
-        teams: teams.clone(),
-        collaborators: collaborators
-            .iter()
-            .map(|entry| entry.config.clone())
-            .collect(),
+        teams: Some(teams.clone()),
+        collaborators: Some(
+            collaborators
+                .iter()
+                .map(|entry| entry.config.clone())
+                .collect(),
+        ),
         references: derived_refs,
     };
 
@@ -398,7 +400,7 @@ pub fn plan_access(current: &AccessCollection, desired: &RepositoryAccessCategor
         .map(|team| (team.slug.clone(), team))
         .collect::<BTreeMap<_, _>>();
     let desired_teams = desired
-        .teams
+        .desired_teams()
         .iter()
         .cloned()
         .map(|team| (team.slug.clone(), team))
@@ -419,7 +421,13 @@ pub fn plan_access(current: &AccessCollection, desired: &RepositoryAccessCategor
         }
     }
 
-    if desired.policy.prune {
+    if desired.policy.prune && desired.teams.is_none() {
+        notes.push(
+            "Teams are not managed because `teams` is not set. Set `teams = []` to remove every team."
+                .to_owned(),
+        );
+    }
+    if desired.policy.prune && desired.teams.is_some() {
         if !current.state.teams_complete {
             issues.push(ReconcileIssue {
                 scope: "access.teams".to_owned(),
@@ -446,7 +454,7 @@ pub fn plan_access(current: &AccessCollection, desired: &RepositoryAccessCategor
         })
         .collect::<BTreeMap<_, _>>();
     let desired_collaborators = desired
-        .collaborators
+        .desired_collaborators()
         .iter()
         .cloned()
         .filter_map(|entry| {
@@ -506,7 +514,13 @@ pub fn plan_access(current: &AccessCollection, desired: &RepositoryAccessCategor
         }
     }
 
-    if desired.policy.prune {
+    if desired.policy.prune && desired.collaborators.is_none() {
+        notes.push(
+            "Collaborators are not managed because `collaborators` is not set. Set `collaborators = []` to remove every collaborator."
+                .to_owned(),
+        );
+    }
+    if desired.policy.prune && desired.collaborators.is_some() {
         if !current.state.collaborators_complete {
             issues.push(ReconcileIssue {
                 scope: "access.collaborators".to_owned(),
@@ -777,7 +791,7 @@ pub fn verify_access_state(
         .collect::<BTreeMap<_, _>>();
 
     if current.state.teams_complete {
-        for desired_team in &desired.teams {
+        for desired_team in desired.desired_teams() {
             match current_teams.get(desired_team.slug.as_str()) {
                 None => verification.issues.push(format!(
                     "Missing team {} ({})",
@@ -792,9 +806,9 @@ pub fn verify_access_state(
                 _ => {}
             }
         }
-        if desired.policy.prune {
+        if desired.policy.prune && desired.teams.is_some() {
             let desired_team_slugs = desired
-                .teams
+                .desired_teams()
                 .iter()
                 .map(|team| team.slug.as_str())
                 .collect::<BTreeSet<_>>();
@@ -807,7 +821,11 @@ pub fn verify_access_state(
                 }
             }
         }
-    } else if !desired.teams.is_empty() || desired.policy.prune {
+    } else if desired
+        .teams
+        .as_ref()
+        .is_some_and(|teams| !teams.is_empty() || desired.policy.prune)
+    {
         verification.notes.push(
             "Could not fully verify team access because repository team collection was incomplete."
                 .to_owned(),
@@ -821,7 +839,7 @@ pub fn verify_access_state(
         .filter_map(|entry| actor_login(&entry.config.actor).map(|login| (login, entry)))
         .collect::<BTreeMap<_, _>>();
 
-    for desired_collaborator in &desired.collaborators {
+    for desired_collaborator in desired.desired_collaborators() {
         let Some(login) = actor_login(&desired_collaborator.actor) else {
             verification.notes.push(format!(
                 "Skipping unsupported collaborator actor {:?}",
@@ -865,10 +883,10 @@ pub fn verify_access_state(
         }
     }
 
-    if desired.policy.prune {
+    if desired.policy.prune && desired.collaborators.is_some() {
         if current.state.collaborators_complete {
             let desired_logins = desired
-                .collaborators
+                .desired_collaborators()
                 .iter()
                 .filter_map(|entry| actor_login(&entry.actor))
                 .collect::<BTreeSet<_>>();

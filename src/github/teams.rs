@@ -103,18 +103,7 @@ impl Client {
         .context("Failed to parse org teams response")
     }
 
-    /// List teams that have access to a repository.
-    pub async fn list_repo_teams(&self, repo: &str) -> Result<Vec<Team>> {
-        pagination::collect_paginated(self, |page| {
-            format!(
-                "/repos/{}/{repo}/teams?per_page={}&page={}",
-                self.org, page.per_page, page.number
-            )
-        })
-        .await
-        .context("Failed to parse repo teams response")
-    }
-
+    /// List teams that have access to a repository, with the outcome of the read.
     pub async fn list_repo_teams_checked(&self, repo: &str) -> Result<ReadOutcome<Vec<Team>>> {
         pagination::collect_paginated_checked(self, |page| {
             format!(
