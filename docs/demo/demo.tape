@@ -15,7 +15,7 @@ Set FontSize 22
 Set Width 1300
 Set Height 700
 Set LineHeight 1.35
-Set TypingSpeed 45ms
+Set TypingSpeed 25ms
 Set Framerate 24
 
 Hide
@@ -30,25 +30,23 @@ Sleep 300ms
 Show
 Type "ward import OriginalMHV/ward-demo --output ward.toml"
 Enter
-Sleep 8s
-Sleep 3s
+Sleep 1500ms
+Hide
+Sleep 7s
+Show
+Sleep 2500ms
 
 Hide
+Type `sed -i.bak -e 's/delete_branch_on_merge = false/delete_branch_on_merge = true/' -e 's/^topics = .*/topics = ["managed-by-ward"]/' ward.toml`
+Enter
+Sleep 500ms
 Type `clear; printf '\033[1;38;2;245;165;36m%s\033[0m\n' '# 2. Change the desired state'`
 Enter
 Sleep 300ms
 Show
 Type `grep -n -E 'delete_branch_on_merge|^topics' ward.toml`
 Enter
-Sleep 2s
-Hide
-Type `sed -i.bak -e 's/delete_branch_on_merge = false/delete_branch_on_merge = true/' -e 's/^topics = .*/topics = ["managed-by-ward"]/' ward.toml`
-Enter
-Sleep 500ms
-Show
-Type `grep -n -E 'delete_branch_on_merge|^topics' ward.toml`
-Enter
-Sleep 4s
+Sleep 2500ms
 
 Hide
 Type `clear; printf '\033[1;38;2;245;165;36m%s\033[0m\n' '# 3. Preview the drift'`
@@ -57,7 +55,7 @@ Sleep 300ms
 Show
 Type "ward plan --category repository"
 Enter
-Sleep 2s
+Sleep 1500ms
 Sleep 3s
 
 Hide
@@ -67,7 +65,10 @@ Sleep 300ms
 Show
 Type "ward apply --category repository --yes"
 Enter
-Sleep 4s
+Sleep 1s
+Hide
+Sleep 3s
+Show
 Sleep 3s
 
 Hide
@@ -77,5 +78,8 @@ Sleep 300ms
 Show
 Type `ward drift --category repository; echo "exit code: $?"`
 Enter
-Sleep 4s
+Sleep 1s
+Hide
 Sleep 3s
+Show
+Sleep 3500ms
