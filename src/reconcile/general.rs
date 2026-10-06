@@ -583,9 +583,9 @@ pub async fn collect_with_rest(
         references: Vec::new(),
     };
 
-    let labels_collected = !has_coverage_entry(&coverage, "GET /repos/{owner}/{repo}/labels");
+    let labels_collected = !read_failed(&coverage, "GET /repos/{owner}/{repo}/labels");
     let custom_properties_collected =
-        !has_coverage_entry(&coverage, "GET /repos/{owner}/{repo}/properties/values");
+        !read_failed(&coverage, "GET /repos/{owner}/{repo}/properties/values");
 
     Ok(CollectedGeneralState {
         repository,
@@ -2068,8 +2068,11 @@ fn insert_value(map: &mut Map<String, Value>, field: &str, value: Value) {
     map.insert(field.to_owned(), value);
 }
 
-fn has_coverage_entry(coverage: &[CoverageEntry], endpoint: &str) -> bool {
-    coverage.iter().any(|entry| entry.endpoint == endpoint)
+/// True when an endpoint has a coverage entry other than `Collected`, meaning its read failed.
+fn read_failed(coverage: &[CoverageEntry], endpoint: &str) -> bool {
+    coverage
+        .iter()
+        .any(|entry| entry.endpoint == endpoint && entry.outcome != CoverageOutcome::Collected)
 }
 
 fn normalize_optional_policy(value: Option<&str>) -> Option<String> {
