@@ -2307,20 +2307,48 @@ fn actions_details(plan: &actions_environments::ActionsPlan) -> Vec<String> {
 
 /// Render a concise, human-readable summary of a unified report.
 pub fn render_report(report: &UnifiedReport, title: &str) {
+    let mut stdout = std::io::stdout().lock();
+    // Nothing useful can be done when stdout is closed.
+    if render_report_to(&mut stdout, report, title).is_err() {
+        tracing::debug!("could not write the report to stdout");
+    }
+}
+
+/// How many details are shown under each category before pointing to `--json`.
+const SHOWN_DETAILS: usize = 4;
+/// Longest error text shown under a category.
+const MAX_ERROR_CHARS: usize = 300;
+
+fn one_line_error(error: &str) -> String {
+    let flattened = error.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flattened.chars().count() <= MAX_ERROR_CHARS {
+        return flattened;
+    }
+    let mut truncated: String = flattened.chars().take(MAX_ERROR_CHARS).collect();
+    truncated.push_str("...");
+    truncated
+}
+
+pub fn render_report_to(
+    out: &mut impl std::io::Write,
+    report: &UnifiedReport,
+    title: &str,
+) -> std::io::Result<()> {
     use console::style;
 
-    println!();
-    println!("  {}", style(title).bold().cyan());
+    writeln!(out)?;
+    writeln!(out, "  {}", style(title).bold().cyan())?;
 
     for repo in &report.repos {
-        println!();
-        println!("  {}", style(&repo.repo).bold());
+        writeln!(out)?;
+        writeln!(out, "  {}", style(&repo.repo).bold())?;
         for category in &repo.categories {
             if category.status == "skipped" {
                 continue;
             }
             let status = style_status(&category.status);
-            println!(
+            writeln!(
+                out,
                 "    {:<18} {:<9} {status}  actionable={} blocked={} warnings={} deferred={}",
                 category.category,
                 category.disposition,
@@ -2328,26 +2356,39 @@ pub fn render_report(report: &UnifiedReport, title: &str) {
                 category.blocked,
                 category.warnings,
                 category.deferred,
-            );
-            for detail in category.details.iter().take(4) {
-                println!("        - {detail}");
+            )?;
+            if let Some(error) = category
+                .error
+                .as_deref()
+                .filter(|_| matches!(category.status.as_str(), "failed" | "blocked"))
+            {
+                writeln!(out, "        reason: {}", one_line_error(error))?;
+            }
+            for detail in category.details.iter().take(SHOWN_DETAILS) {
+                writeln!(out, "        - {detail}")?;
+            }
+            let hidden = category.details.len().saturating_sub(SHOWN_DETAILS);
+            if hidden > 0 {
+                writeln!(out, "        - {hidden} more, use --json")?;
             }
         }
     }
 
-    println!();
-    println!(
+    writeln!(out)?;
+    writeln!(
+        out,
         "  Summary: {} actionable, {} blocked, {} deferred, {} warnings across {} repo(s)",
         style(report.actionable).bold(),
         style(report.blocked).bold(),
         style(report.deferred).bold(),
         style(report.warnings).bold(),
         report.repos.len(),
-    );
-    println!(
+    )?;
+    writeln!(
+        out,
         "  Coverage: {}/{} collected, {} degraded",
         report.coverage.collected, report.coverage.total, report.coverage.degraded,
-    );
+    )
 }
 
 fn style_status(status: &str) -> console::StyledObject<&str> {
@@ -2832,5 +2873,55 @@ mod tests {
         assert_eq!(coverage[0].outcome, CoverageOutcome::NotApplicable);
         assert_eq!(coverage[1].outcome, CoverageOutcome::NotApplicable);
         assert_eq!(coverage[2].outcome, CoverageOutcome::PermissionDenied);
+    }
+
+    fn render(report: &UnifiedReport) -> String {
+        let mut out = Vec::new();
+        render_report_to(&mut out, report, "Test").unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    fn report_with(category: CategoryReport) -> UnifiedReport {
+        let mut repo = RepoPlan {
+            repo: "repo-a".to_owned(),
+            default_branch: "main".to_owned(),
+            categories: Vec::new(),
+        }
+        .to_report();
+        repo.categories.push(category);
+        UnifiedReport::from_repos(vec![repo])
+    }
+
+    #[test]
+    fn text_report_shows_the_reason_under_a_failed_category() {
+        let category = collection_failed(
+            Category::BranchProtection,
+            ManagementDisposition::Managed,
+            &anyhow::anyhow!("PUT failed\nwith HTTP 422: {}", "x".repeat(500)),
+        )
+        .to_report("failed", 0, None);
+
+        let text = render(&report_with(category));
+
+        let reason = text
+            .lines()
+            .find(|line| line.trim_start().starts_with("reason:"))
+            .expect("a reason line");
+        assert!(reason.contains("PUT failed with HTTP 422"));
+        assert!(reason.ends_with("..."), "{reason}");
+        assert!(reason.len() < 340, "{}", reason.len());
+    }
+
+    #[test]
+    fn text_report_counts_hidden_details() {
+        let mut category = planned_category(Category::Files, ManagementDisposition::Managed, 6, 0)
+            .to_report("planned", 6, None);
+        category.details = (0..6).map(|n| format!("change {n}")).collect();
+
+        let text = render(&report_with(category));
+
+        assert!(text.contains("change 3"));
+        assert!(!text.contains("change 4"));
+        assert!(text.contains("2 more, use --json"), "{text}");
     }
 }
