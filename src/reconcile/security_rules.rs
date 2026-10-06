@@ -992,6 +992,7 @@ impl Default for VerifyPolicy {
 }
 
 impl VerifyPolicy {
+    /// Test-only policy without delays. Public because integration tests are separate crates.
     pub const fn immediate_for_tests() -> Self {
         Self {
             attempts: 10,

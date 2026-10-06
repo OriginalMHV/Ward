@@ -37,14 +37,37 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - name: Check layer boundaries
         run: |
-          ! grep -rnE 'crate::cli' src/reconcile src/github src/config
-          ! grep -rnE 'crate::reconcile' src/github src/config
+          fail=0
+          check() {
+            local dirs=$1 pattern=$2 message=$3 hits
+            if hits=$(grep -rnE "$pattern" $dirs | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//'); then
+              echo "$hits"
+              echo "::error::$message"
+              fail=1
+            fi
+          }
+          check "src/reconcile src/github src/config src/engine" \
+            '(crate|super::super)::(cli\b|\{[^}]*\bcli\b)' \
+            "reconcile, github, config and engine must not import cli"
+          check "src/github src/config" \
+            '(crate|super::super)::(reconcile\b|\{[^}]*\breconcile\b)' \
+            "github and config must not import reconcile"
+          exit $fail
       - name: Report large files
         continue-on-error: true
         run: |
           find src tests -name '*.rs' ! -name 'tests.rs' -print0 \
             | xargs -0 wc -l \
             | awk '$2 != "total" && $1 > 1000 {print "::warning file=" $2 "::" $1 " lines"; found=1} END {exit found}'
+
+  msrv:
+    name: MSRV (1.88)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.88
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --all-targets --locked
 
   test:
     name: Test
