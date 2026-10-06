@@ -3,12 +3,12 @@
 Output docs/assets/demo.gif
 
 Set Shell "bash"
-Set Theme { "name": "Ward", "background": "#0B1F44", "foreground": "#E6EDF8", "cursor": "#93C5FD", "selection": "#1E40AF", "black": "#0B1F44", "red": "#F87171", "green": "#86EFAC", "yellow": "#FCD34D", "blue": "#60A5FA", "magenta": "#C4B5FD", "cyan": "#93C5FD", "white": "#E6EDF8", "brightBlack": "#5B7AAE", "brightRed": "#FCA5A5", "brightGreen": "#BBF7D0", "brightYellow": "#FDE68A", "brightBlue": "#93C5FD", "brightMagenta": "#DDD6FE", "brightCyan": "#BFDBFE", "brightWhite": "#FFFFFF" }
+Set Theme { "name": "Ward Ink", "background": "#0F172A", "foreground": "#E2E8F0", "cursor": "#F5A524", "selection": "#334155", "black": "#0F172A", "red": "#F87171", "green": "#FCD48A", "yellow": "#F5A524", "blue": "#A8B3C5", "magenta": "#CBD5E1", "cyan": "#FCD48A", "white": "#E2E8F0", "brightBlack": "#7C8AA0", "brightRed": "#FCA5A5", "brightGreen": "#FDE6B4", "brightYellow": "#FCD48A", "brightBlue": "#CBD5E1", "brightMagenta": "#E2E8F0", "brightCyan": "#FDE6B4", "brightWhite": "#FFFFFF" }
 Set WindowBar Colorful
 Set WindowBarSize 40
-Set BorderRadius 16
-Set Margin 24
-Set MarginFill "#2563EB"
+Set BorderRadius 14
+Set Margin 16
+Set MarginFill "#0A101F"
 Set Padding 28
 Set FontFamily "JetBrains Mono"
 Set FontSize 22
@@ -24,7 +24,7 @@ Enter
 Show
 
 Hide
-Type `clear; printf '\033[1;38;2;147;197;253m%s\033[0m\n' '# 1. Import a repository as the baseline'`
+Type `clear; printf '\033[1;38;2;245;165;36m%s\033[0m\n' '# 1. Import a repository as the baseline'`
 Enter
 Sleep 300ms
 Show
@@ -34,7 +34,7 @@ Sleep 8s
 Sleep 3s
 
 Hide
-Type `clear; printf '\033[1;38;2;147;197;253m%s\033[0m\n' '# 2. Change the desired state'`
+Type `clear; printf '\033[1;38;2;245;165;36m%s\033[0m\n' '# 2. Change the desired state'`
 Enter
 Sleep 300ms
 Show
@@ -51,7 +51,7 @@ Enter
 Sleep 4s
 
 Hide
-Type `clear; printf '\033[1;38;2;147;197;253m%s\033[0m\n' '# 3. Preview the drift'`
+Type `clear; printf '\033[1;38;2;245;165;36m%s\033[0m\n' '# 3. Preview the drift'`
 Enter
 Sleep 300ms
 Show
@@ -61,7 +61,7 @@ Sleep 2s
 Sleep 3s
 
 Hide
-Type `clear; printf '\033[1;38;2;147;197;253m%s\033[0m\n' '# 4. Apply and verify'`
+Type `clear; printf '\033[1;38;2;245;165;36m%s\033[0m\n' '# 4. Apply and verify'`
 Enter
 Sleep 300ms
 Show
@@ -71,7 +71,7 @@ Sleep 4s
 Sleep 3s
 
 Hide
-Type `clear; printf '\033[1;38;2;147;197;253m%s\033[0m\n' '# 5. CI drift check passes'`
+Type `clear; printf '\033[1;38;2;245;165;36m%s\033[0m\n' '# 5. CI drift check passes'`
 Enter
 Sleep 300ms
 Show
