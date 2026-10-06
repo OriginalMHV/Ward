@@ -34,8 +34,8 @@
       <polygon points="184,152 218,122 252,152" fill="#FFFFFF"/>
     </g>
     <text class="f" x="244" y="110" font-size="86" font-weight="700" fill="#FFFFFF" letter-spacing="-2">ward</text>
-    <text class="f" x="247" y="149" font-size="21" font-weight="600" fill="#B6C4D4">Declarative GitHub repository management. Plan, apply, verify.</text>
-    <g class="f" font-size="15" font-weight="600" text-anchor="middle">
+    <text class="f" x="247" y="149" font-size="22" font-weight="600" fill="#B6C4D4">Declarative GitHub repository management. Plan, apply, verify.</text>
+    <g class="f" font-size="17" font-weight="600" text-anchor="middle">
       <g class="pill"><rect x="247" y="168" width="96" height="32" rx="16" fill="#14B8A6" fill-opacity="0.16" stroke="#14B8A6" stroke-width="1.5"/><text x="295" y="189" fill="#7FE3D6">plan</text></g>
       <text x="366" y="190" fill="#7C93AA" font-size="18">→</text>
       <g class="pill p2"><rect x="389" y="168" width="96" height="32" rx="16" fill="#14B8A6" fill-opacity="0.16" stroke="#14B8A6" stroke-width="1.5"/><text x="437" y="189" fill="#7FE3D6">apply</text></g>

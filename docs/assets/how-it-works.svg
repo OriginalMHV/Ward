@@ -2,9 +2,9 @@
   <style>
     .f { font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; }
     .t { font-size: 24px; font-weight: 700; fill: #FFFFFF; }
-    .s { font-size: 14px; font-weight: 600; fill: #9FB3C8; }
-    .n { font-size: 13px; font-weight: 700; fill: #14B8A6; letter-spacing: 1px; }
-    .c { font-size: 14px; font-weight: 700; fill: #FFFFFF; }
+    .s { font-size: 16px; font-weight: 600; fill: #9FB3C8; }
+    .n { font-size: 15px; font-weight: 700; fill: #14B8A6; letter-spacing: 1px; }
+    .c { font-size: 16px; font-weight: 700; fill: #FFFFFF; }
   </style>
   <defs>
     <marker id="at" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M1 1 L9 5 L1 9 z" fill="#14B8A6"/></marker>

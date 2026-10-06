@@ -14,7 +14,7 @@
 > This README describes Ward 0.5.0. For the released 0.4.2, see the [v0.4.2 README](https://github.com/OriginalMHV/Ward/blob/v0.4.2/README.md).
 
 <p align="center">
-  <img src="docs/assets/ward-stats.svg" alt="9 categories. No state file. Plan, apply, verify. 4.5 times faster plan." width="100%">
+  <img src="docs/assets/ward-stats.svg" alt="9 categories. No state file. Plan, apply, verify. 4.6 times faster plan." width="100%">
 </p>
 
 <p align="center">
@@ -28,7 +28,7 @@
 - **Verify after apply.** Ward reads the state back from GitHub and checks it against the manifest.
 - **Drift checks for CI.** `ward drift` exits with `0` (in sync), `1` (drift) or `2` (could not run).
 - **Start from what you have.** `ward import` turns an existing repository into your baseline manifest.
-- **Measured speed.** On 10 repositories, `ward plan` took 131 s in 0.4.2 and 29 s in 0.5.0.
+- **Measured speed.** On 10 repositories, `ward plan` took 130.9 s in 0.4.2 and 28.6 s in 0.5.0 (median of 3 runs, 4.6× faster).
 
 ## Install
 

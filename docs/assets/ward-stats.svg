@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 120" width="1200" height="120" role="img" aria-label="9 categories. No state file. Plan, apply, verify. 4.5 times faster plan.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 120" width="1200" height="120" role="img" aria-label="9 categories. No state file. Plan, apply, verify. 4.6 times faster plan.">
   <style>
     .f { font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; }
-    .m { font-size: 24px; font-weight: 700; fill: #FFFFFF; }
-    .s { font-size: 14px; font-weight: 600; fill: #9FB3C8; }
+    .m { font-size: 26px; font-weight: 700; fill: #FFFFFF; }
+    .s { font-size: 17px; font-weight: 600; fill: #9FB3C8; }
     .a { fill: #14B8A6; }
   </style>
   <g class="f">
@@ -19,7 +19,7 @@
     <text class="s" x="598" y="84">one category at a time</text>
 
     <rect x="930" y="0" width="270" height="120" rx="20" fill="#0F2A44"/>
-    <text class="m" x="958" y="56"><tspan class="a">4.5×</tspan> faster plan</text>
+    <text class="m" x="958" y="56"><tspan class="a">4.6×</tspan> faster plan</text>
     <text class="s" x="958" y="84">plan on 10 repos, vs 0.4.2</text>
   </g>
 </svg>
