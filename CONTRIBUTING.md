@@ -78,7 +78,7 @@ To change repository settings:
 2. Run `ward --config .github/ward.toml plan` and check the result.
 3. After the PR merges, a maintainer runs `ward --config .github/ward.toml apply --category repository`.
 
-The `Ward drift` workflow runs every Monday, on manual dispatch and when `.github/ward.toml` changes on `main`. It opens or updates one issue titled "Ward drift detected" when GitHub differs from the manifest. It closes the issue when the drift is gone. The job needs a `WARD_DRIFT_TOKEN` repository secret. Without it, the job uses the default workflow token and some admin-level categories report as unreadable.
+The `Ward drift` workflow runs every Monday, on manual dispatch and when `.github/ward.toml` changes on `main`. It opens or updates one issue titled "Ward drift detected" when GitHub differs from the manifest. It closes the issue when the drift is gone. The job needs a `WARD_DRIFT_TOKEN` repository secret. Without it, the job warns and skips the check. Use a fine-grained token for this repository only, with read access to the categories the manifest reads and Contents: read and write. GitHub returns the merge settings only to tokens with push access, so a read-only token makes `ward drift` report the repository category as unreadable and exit 1.
 
 ## Releasing
 
