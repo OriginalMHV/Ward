@@ -16,9 +16,6 @@ name = "Imported from OriginalMHV/Ward"
 match_prefix = false
 repos = ["Ward"]
 
-[schema]
-version = 2
-
 [provenance]
 repository = "OriginalMHV/Ward"
 default_branch = "main"
