@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The `[schema]` table is removed from the manifest. Ward now fails with a clear error when `ward.toml` still contains it. To upgrade a manifest, delete the `[schema]` table and its `version` line. `ward import` and `ward init` no longer write it.
 
+### Changed
+
+- GitHub API errors are clearer. Ward now says what failed, why, and what to do next for an invalid token, a missing permission, a plan limit, SAML single sign-on, a rate limit, a missing resource, a conflict, a validation error and a GitHub outage. Responses in an unexpected shape now name the endpoint instead of saying `Failed to parse`.
+
 ### Fixed
 
 - `ward drift` and `ward plan` no longer report false repository changes when the token has read-only access. GitHub omits the merge settings (`allow_squash_merge`, `allow_merge_commit`, `allow_rebase_merge`, `allow_auto_merge`, `delete_branch_on_merge`, `allow_update_branch`, merge commit title and message, `use_squash_pr_title_as_default`) for callers without push or admin access, and Ward read the missing values as `false` or unset. Ward now records them as unreadable coverage (`permission_denied`) and plans no changes for them.

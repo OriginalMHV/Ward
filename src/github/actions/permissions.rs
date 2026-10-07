@@ -1,7 +1,8 @@
 use super::*;
 use crate::github::Client;
+use crate::github::error::ReadContext;
 use crate::github::response;
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 impl Client {
     // ---- Actions permissions ----
@@ -11,7 +12,7 @@ impl Client {
         let path = format!("/repos/{}/{repo}/actions/permissions", self.org());
         response::expect_json(self.get(&path).await?, "GET", &path)
             .await
-            .context("Failed to parse Actions permissions response")
+            .read_ctx("Actions permissions")
     }
 
     /// As [`Client::get_actions_permissions`], but classifies 403/404/422 as a
@@ -43,7 +44,7 @@ impl Client {
         );
         response::expect_json(self.get(&path).await?, "GET", &path)
             .await
-            .context("Failed to parse selected-actions response")
+            .read_ctx("selected-actions")
     }
 
     /// As [`Client::get_selected_actions`], classified.
@@ -76,7 +77,7 @@ impl Client {
         let path = format!("/repos/{}/{repo}/actions/permissions/workflow", self.org());
         response::expect_json(self.get(&path).await?, "GET", &path)
             .await
-            .context("Failed to parse workflow permissions response")
+            .read_ctx("workflow permissions")
     }
 
     /// As [`Client::get_workflow_permissions`], classified.
@@ -114,7 +115,7 @@ impl Client {
         );
         response::optional_json(self.get(&path).await?, "GET", &path)
             .await
-            .context("Failed to parse artifact/log retention response")
+            .read_ctx("artifact/log retention")
     }
 
     /// As [`Client::get_artifact_log_retention`], classified: 404 is
@@ -219,7 +220,7 @@ impl Client {
         );
         response::optional_json(self.get(&path).await?, "GET", &path)
             .await
-            .context("Failed to parse fork PR contributor approval response")
+            .read_ctx("fork PR contributor approval")
     }
 
     /// As [`Client::get_fork_pr_contributor_approval`], classified. Live
@@ -276,7 +277,7 @@ impl Client {
         );
         response::optional_json(self.get(&path).await?, "GET", &path)
             .await
-            .context("Failed to parse private-repo fork PR workflow settings response")
+            .read_ctx("private-repo fork PR workflow settings")
     }
 
     /// As [`Client::get_private_fork_pr_workflows`], classified: 404 is
@@ -315,7 +316,7 @@ impl Client {
         let path = format!("/repos/{}/{repo}/actions/permissions/access", self.org());
         response::optional_json(self.get(&path).await?, "GET", &path)
             .await
-            .context("Failed to parse workflow access level response")
+            .read_ctx("workflow access level")
     }
 
     /// As [`Client::get_workflow_access_level`], classified: 404 is
@@ -354,7 +355,7 @@ impl Client {
         );
         response::optional_json(self.get(&path).await?, "GET", &path)
             .await
-            .context("Failed to parse OIDC subject claim response")
+            .read_ctx("OIDC subject claim")
     }
 
     /// As [`Client::get_oidc_subject_claim`], classified.

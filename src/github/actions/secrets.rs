@@ -1,6 +1,7 @@
 use super::*;
 use crate::github::Client;
 use crate::github::encoding::encode_path_segment;
+use crate::github::error::ReadContext;
 use crate::github::response;
 use anyhow::{Context, Result, anyhow};
 
@@ -17,7 +18,7 @@ impl Client {
         let path = format!("/repos/{}/{repo}/actions/secrets/public-key", self.org());
         response::expect_json(self.get(&path).await?, "GET", &path)
             .await
-            .context("Failed to parse Actions public key response")
+            .read_ctx("Actions public key")
     }
 
     /// Paginated read, classified as a [`ReadOutcome`].
@@ -73,7 +74,7 @@ impl Client {
         );
         response::expect_json(self.get(&path).await?, "GET", &path)
             .await
-            .context("Failed to parse environment public key response")
+            .read_ctx("environment public key")
     }
 
     /// Paginated read, classified as a [`ReadOutcome`].
@@ -206,7 +207,7 @@ async fn collect_secrets_checked(
         } else {
             let body: SecretsResponse = response::expect_json(response, "GET", &path)
                 .await
-                .context("Failed to parse secrets response")?;
+                .read_ctx("secrets")?;
             let count = body.secrets.len();
             items.extend(body.secrets);
             if count < 30 {

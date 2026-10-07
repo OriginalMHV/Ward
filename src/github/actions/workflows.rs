@@ -1,8 +1,9 @@
 use super::*;
 use crate::github::Client;
+use crate::github::error::ReadContext;
 use crate::github::pagination;
 use crate::github::response;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -23,7 +24,7 @@ impl Client {
         pagination::collect_paginated_wrapped(
             self,
             100,
-            "Failed to parse workflows response",
+            "workflows",
             |page| {
                 format!(
                     "/repos/{}/{repo}/actions/workflows?per_page={}&page={}",
@@ -76,7 +77,7 @@ impl Client {
             } else {
                 let body: WorkflowsResponse = response::expect_json(response, "GET", &path)
                     .await
-                    .context("Failed to parse workflows response")?;
+                    .read_ctx("workflows")?;
                 let count = body.workflows.len();
                 items.extend(body.workflows);
                 if count < 100 {
@@ -131,7 +132,7 @@ impl Client {
             } else {
                 let body: RunnersResponse = response::expect_json(response, "GET", &path)
                     .await
-                    .context("Failed to parse self-hosted runners response")?;
+                    .read_ctx("self-hosted runners")?;
                 let count = body.runners.len();
                 items.extend(body.runners);
                 if count < 100 {

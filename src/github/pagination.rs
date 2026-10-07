@@ -1,3 +1,4 @@
+use crate::github::error::ReadContext;
 use anyhow::Result;
 use serde::de::DeserializeOwned;
 
@@ -107,11 +108,11 @@ pub(crate) struct WrappedPage<T> {
 
 /// Collect every page of an endpoint whose pages wrap the items in an object.
 ///
-/// `unwrap` extracts the items from each decoded page. Errors carry `context`.
+/// `unwrap` extracts the items from each decoded page. Errors name `what`, for example "Actions variables".
 pub(crate) async fn collect_paginated_wrapped<W, T, F, U>(
     client: &Client,
     page_size: u32,
-    context: &'static str,
+    what: &'static str,
     mut path_for_page: F,
     mut unwrap: U,
 ) -> Result<Vec<T>>
@@ -120,8 +121,6 @@ where
     F: FnMut(Page) -> String,
     U: FnMut(W) -> WrappedPage<T>,
 {
-    use anyhow::Context as _;
-
     let mut page = Page::with_size(page_size);
     let mut items = Vec::new();
 
@@ -129,7 +128,7 @@ where
         let path = path_for_page(page);
         let body: W = response::expect_json(client.get(&path).await?, "GET", &path)
             .await
-            .context(context)?;
+            .read_ctx(what)?;
         let wrapped = unwrap(body);
         let count = wrapped.items.len();
         items.extend(wrapped.items);
@@ -190,7 +189,7 @@ mod tests {
         let display = error.to_string();
         assert!(display.contains("Validation Failed"));
         assert!(display.contains("Repository.name (invalid)"));
-        assert!(display.contains("response body omitted"));
+        assert!(!display.contains("body omitted"));
         assert!(display.contains("secret-name"));
         assert!(!display.contains("do-not-log"));
     }
@@ -221,7 +220,7 @@ mod tests {
         let things = collect_paginated_wrapped(
             &client,
             2,
-            "Failed to parse things",
+            "things",
             |page| format!("/things?per_page={}&page={}", page.per_page, page.number),
             |body: Wrapped| WrappedPage {
                 items: body.things,
