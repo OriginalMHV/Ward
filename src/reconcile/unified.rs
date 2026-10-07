@@ -12,8 +12,8 @@ use serde::Serialize;
 
 use crate::config::Manifest;
 use crate::config::manifest::{
-    ActionsCategoryV2, CoverageEntry, CoverageOutcome, ManagementDisposition, ManifestCategories,
-    RepositoryCategoryV2, RepositoryIntegrationsCategoryV2,
+    ActionsCategory, CoverageEntry, CoverageOutcome, ManagementDisposition, ManifestCategories,
+    RepositoryCategory, RepositoryIntegrationsCategory,
 };
 use crate::engine::audit_log::AuditLog;
 use crate::github::Client;
@@ -707,7 +707,7 @@ fn collection_failed(
 /// is unknown managed state only when the manifest actually manages them.
 fn relax_unrequested_repository_coverage(
     coverage: &mut [CoverageEntry],
-    desired: &RepositoryCategoryV2,
+    desired: &RepositoryCategory,
 ) {
     let wants_properties = !desired.custom_properties.is_empty() || desired.policy.prune;
     let wants_immutable_releases = desired.immutable_releases.is_some();
@@ -1874,7 +1874,7 @@ fn actions_plan_for_apply(
 async fn verify_actions_safe_subset(
     client: &Client,
     repo: &str,
-    desired: &ActionsCategoryV2,
+    desired: &ActionsCategory,
 ) -> Result<bool> {
     let current =
         actions_environments::collect_actions_category(client, repo, Some(desired)).await?;
@@ -1913,7 +1913,7 @@ fn integrations_plan_for_apply(
 async fn verify_integrations_safe_subset(
     client: &Client,
     repo: &str,
-    desired: &RepositoryIntegrationsCategoryV2,
+    desired: &RepositoryIntegrationsCategory,
 ) -> Result<bool> {
     let current = access_integrations::collect_integrations(client, repo, desired).await?;
     let remaining = access_integrations::plan_integrations(&current, desired);
@@ -2847,11 +2847,11 @@ mod tests {
     #[test]
     fn build_general_desired_merges_integration_labels_under_repository_policy() {
         use crate::config::manifest::{
-            LabelConfigV2, RepositoryCategoryV2, RepositoryIntegrationsCategoryV2,
+            LabelConfig, RepositoryCategory, RepositoryIntegrationsCategory,
         };
 
         let mut manifest = Manifest::default();
-        manifest.categories.repository = Some(RepositoryCategoryV2 {
+        manifest.categories.repository = Some(RepositoryCategory {
             policy: CategoryPolicy::managed(),
             settings: None,
             metadata: None,
@@ -2859,15 +2859,15 @@ mod tests {
             immutable_releases: None,
             references: Vec::new(),
         });
-        manifest.categories.integrations = Some(RepositoryIntegrationsCategoryV2 {
+        manifest.categories.integrations = Some(RepositoryIntegrationsCategory {
             policy: CategoryPolicy::observe_sensitive(),
-            labels: vec![LabelConfigV2 {
+            labels: vec![LabelConfig {
                 name: "bug".to_owned(),
                 color: Some("d73a4a".to_owned()),
                 description: Some("Something is broken".to_owned()),
                 default: Some(true),
             }],
-            ..RepositoryIntegrationsCategoryV2::default()
+            ..RepositoryIntegrationsCategory::default()
         });
 
         let desired = build_general_desired(&manifest.categories).unwrap();
@@ -2903,7 +2903,7 @@ mod tests {
             entry("GET /repos/{owner}/{repo}/immutable-releases"),
             entry("GET /repos/{owner}/{repo}/topics"),
         ];
-        let desired = RepositoryCategoryV2 {
+        let desired = RepositoryCategory {
             policy: CategoryPolicy::managed(),
             settings: None,
             metadata: None,

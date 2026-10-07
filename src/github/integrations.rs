@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::config::manifest::{AutolinkConfigV2, PagesConfigV2, WebhookConfigV2};
+use crate::config::manifest::{AutolinkConfig, PagesConfig, WebhookConfig};
 
 use super::Client;
 use super::actions::ReadOutcome;
@@ -162,7 +162,7 @@ impl Client {
     pub async fn create_repo_webhook(
         &self,
         repo: &str,
-        webhook: &WebhookConfigV2,
+        webhook: &WebhookConfig,
         resolved_url: &str,
         secret: Option<&str>,
     ) -> Result<RepositoryWebhook> {
@@ -273,7 +273,7 @@ impl Client {
         }
     }
 
-    pub async fn create_repo_pages(&self, repo: &str, pages: &PagesConfigV2) -> Result<()> {
+    pub async fn create_repo_pages(&self, repo: &str, pages: &PagesConfig) -> Result<()> {
         let body = pages_request_body(pages);
         let path = format!("/repos/{}/{repo}/pages", self.org);
         response::expect_json::<Value>(self.post_json(&path, &body).await?, "POST", &path)
@@ -281,7 +281,7 @@ impl Client {
             .map(|_| ())
     }
 
-    pub async fn update_repo_pages(&self, repo: &str, pages: &PagesConfigV2) -> Result<()> {
+    pub async fn update_repo_pages(&self, repo: &str, pages: &PagesConfig) -> Result<()> {
         let body = pages_request_body(pages);
         let path = format!("/repos/{}/{repo}/pages", self.org);
         response::expect_json::<Value>(self.put_json(&path, &body).await?, "PUT", &path)
@@ -308,11 +308,7 @@ impl Client {
         .context("Failed to parse repo autolinks response")
     }
 
-    pub async fn create_repo_autolink(
-        &self,
-        repo: &str,
-        autolink: &AutolinkConfigV2,
-    ) -> Result<()> {
+    pub async fn create_repo_autolink(&self, repo: &str, autolink: &AutolinkConfig) -> Result<()> {
         let path = format!("/repos/{}/{repo}/autolinks", self.org);
         let mut body = Map::new();
         body.insert(
@@ -384,7 +380,7 @@ fn parse_insecure_ssl(value: &Value) -> Option<bool> {
 }
 
 fn webhook_create_request_body(
-    webhook: &WebhookConfigV2,
+    webhook: &WebhookConfig,
     resolved_url: &str,
     secret: Option<&str>,
 ) -> Value {
@@ -463,7 +459,7 @@ fn webhook_metadata_patch_body(patch: WebhookMetadataPatch<'_>) -> Value {
     Value::Object(payload)
 }
 
-fn pages_request_body(pages: &PagesConfigV2) -> Value {
+fn pages_request_body(pages: &PagesConfig) -> Value {
     let mut payload = Map::new();
 
     if let Some(build_type) = &pages.build_type {

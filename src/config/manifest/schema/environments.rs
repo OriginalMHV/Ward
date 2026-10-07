@@ -7,15 +7,15 @@ use super::{
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EnvironmentsCategoryV2 {
+pub struct EnvironmentsCategory {
     #[serde(default)]
     pub policy: CategoryPolicy,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub entries: Vec<EnvironmentConfigV2>,
+    pub entries: Vec<EnvironmentConfig>,
 }
 
-impl EnvironmentsCategoryV2 {
+impl EnvironmentsCategory {
     pub fn observe_sensitive() -> Self {
         Self {
             policy: CategoryPolicy::observe_sensitive(),
@@ -26,7 +26,7 @@ impl EnvironmentsCategoryV2 {
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EnvironmentConfigV2 {
+pub struct EnvironmentConfig {
     pub name: String,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]

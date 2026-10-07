@@ -8,8 +8,8 @@ use serde_json::{Map, Value, json};
 
 use crate::config::manifest::{
     CategoryPolicy, CoverageEntry, CoverageOutcome, CustomPropertyValueConfig,
-    ImmutableReleasesConfig, LabelConfigV2, ManagementDisposition, ManifestCategoryName,
-    RepositoryCategoryV2, RepositoryMetadataConfig, RepositorySettingsConfig,
+    ImmutableReleasesConfig, LabelConfig, ManagementDisposition, ManifestCategoryName,
+    RepositoryCategory, RepositoryMetadataConfig, RepositorySettingsConfig,
 };
 use crate::github::Client;
 use crate::github::settings::{
@@ -56,8 +56,8 @@ pub struct GeneralLabel {
     pub default: bool,
 }
 
-impl From<LabelConfigV2> for GeneralLabel {
-    fn from(value: LabelConfigV2) -> Self {
+impl From<LabelConfig> for GeneralLabel {
+    fn from(value: LabelConfig) -> Self {
         Self {
             name: value.name,
             color: value.color,
@@ -67,7 +67,7 @@ impl From<LabelConfigV2> for GeneralLabel {
     }
 }
 
-impl From<GeneralLabel> for LabelConfigV2 {
+impl From<GeneralLabel> for LabelConfig {
     fn from(value: GeneralLabel) -> Self {
         Self {
             name: value.name,
@@ -80,7 +80,7 @@ impl From<GeneralLabel> for LabelConfigV2 {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct GeneralDesiredState {
-    pub repository: RepositoryCategoryV2,
+    pub repository: RepositoryCategory,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub labels: Vec<GeneralLabel>,
@@ -92,8 +92,8 @@ pub struct GeneralDesiredState {
     pub extensions: GeneralDesiredExtensions,
 }
 
-impl From<RepositoryCategoryV2> for GeneralDesiredState {
-    fn from(repository: RepositoryCategoryV2) -> Self {
+impl From<RepositoryCategory> for GeneralDesiredState {
+    fn from(repository: RepositoryCategory) -> Self {
         let custom_properties = extract_manifest_custom_properties(&repository);
         Self {
             repository,
@@ -142,7 +142,7 @@ pub struct GeneralCollectedExtensions {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct CollectedGeneralState {
-    pub repository: RepositoryCategoryV2,
+    pub repository: RepositoryCategory,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub labels: Vec<GeneralLabel>,
@@ -565,7 +565,7 @@ pub async fn collect_with_rest(
         ClassifiedApiResponse::NoContent => Vec::new(),
     };
 
-    let repository = RepositoryCategoryV2 {
+    let repository = RepositoryCategory {
         policy: CategoryPolicy::managed(),
         settings: Some(build_repository_settings(
             &rest,
@@ -1656,7 +1656,7 @@ fn desired_custom_properties(desired: &GeneralDesiredState) -> Vec<GeneralCustom
 }
 
 fn extract_manifest_custom_properties(
-    repository: &RepositoryCategoryV2,
+    repository: &RepositoryCategory,
 ) -> Vec<GeneralCustomPropertyValue> {
     let Some(Value::Array(values)) = repository_to_value(repository)
         .ok()
@@ -1723,12 +1723,12 @@ fn metadata_to_value(metadata: Option<&RepositoryMetadataConfig>) -> Option<Map<
     value.as_object().cloned()
 }
 
-fn repository_to_value(repository: &RepositoryCategoryV2) -> Result<Map<String, Value>> {
+fn repository_to_value(repository: &RepositoryCategory) -> Result<Map<String, Value>> {
     let value = serde_json::to_value(repository)?;
     value
         .as_object()
         .cloned()
-        .context("RepositoryCategoryV2 did not serialize to an object")
+        .context("RepositoryCategory did not serialize to an object")
 }
 
 fn normalize_optional_value(value: Option<Value>) -> Option<String> {

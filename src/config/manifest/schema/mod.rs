@@ -88,31 +88,31 @@ pub struct ManifestProvenance {
 #[serde(deny_unknown_fields)]
 pub struct ManifestCategories {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub security: Option<SecurityCategoryV2>,
+    pub security: Option<SecurityCategory>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repository: Option<RepositoryCategoryV2>,
+    pub repository: Option<RepositoryCategory>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub branch_protection: Option<BranchProtectionCategoryV2>,
+    pub branch_protection: Option<BranchProtectionCategory>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rulesets: Option<RulesetsCategoryV2>,
+    pub rulesets: Option<RulesetsCategory>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub files: Option<FilesCategoryV2>,
+    pub files: Option<FilesCategory>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actions: Option<ActionsCategoryV2>,
+    pub actions: Option<ActionsCategory>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environments: Option<EnvironmentsCategoryV2>,
+    pub environments: Option<EnvironmentsCategory>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub access: Option<RepositoryAccessCategoryV2>,
+    pub access: Option<RepositoryAccessCategory>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub integrations: Option<RepositoryIntegrationsCategoryV2>,
+    pub integrations: Option<RepositoryIntegrationsCategory>,
 }
 
 impl ManifestCategories {

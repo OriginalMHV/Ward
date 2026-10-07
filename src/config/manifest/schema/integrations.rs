@@ -4,27 +4,27 @@ use super::{CategoryPolicy, ExternalValueReference};
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct RepositoryIntegrationsCategoryV2 {
+pub struct RepositoryIntegrationsCategory {
     #[serde(default)]
     pub policy: CategoryPolicy,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub webhooks: Vec<WebhookConfigV2>,
+    pub webhooks: Vec<WebhookConfig>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub deploy_keys: Vec<DeployKeyConfigV2>,
+    pub deploy_keys: Vec<DeployKeyConfig>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pages: Option<PagesConfigV2>,
+    pub pages: Option<PagesConfig>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub autolinks: Vec<AutolinkConfigV2>,
+    pub autolinks: Vec<AutolinkConfig>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub labels: Vec<LabelConfigV2>,
+    pub labels: Vec<LabelConfig>,
 }
 
-impl RepositoryIntegrationsCategoryV2 {
+impl RepositoryIntegrationsCategory {
     pub fn observe_sensitive() -> Self {
         Self {
             policy: CategoryPolicy::observe_sensitive(),
@@ -35,7 +35,7 @@ impl RepositoryIntegrationsCategoryV2 {
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct WebhookConfigV2 {
+pub struct WebhookConfig {
     pub url: String,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -59,7 +59,7 @@ pub struct WebhookConfigV2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DeployKeyConfigV2 {
+pub struct DeployKeyConfig {
     pub title: String,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -74,7 +74,7 @@ pub struct DeployKeyConfigV2 {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct PagesConfigV2 {
+pub struct PagesConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub build_type: Option<String>,
 
@@ -93,7 +93,7 @@ pub struct PagesConfigV2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct AutolinkConfigV2 {
+pub struct AutolinkConfig {
     pub key_prefix: String,
     pub url_template: String,
 
@@ -103,7 +103,7 @@ pub struct AutolinkConfigV2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct LabelConfigV2 {
+pub struct LabelConfig {
     pub name: String,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]

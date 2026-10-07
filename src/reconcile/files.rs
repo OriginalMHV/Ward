@@ -1,4 +1,4 @@
-//! Configuration-file snapshot and reconciliation for `FilesCategoryV2`.
+//! Configuration-file snapshot and reconciliation for `FilesCategory`.
 //!
 //! When `include` is empty, Ward observes the known root configuration registry,
 //! including `.github/**`, supported CODEOWNERS locations, Renovate metadata,
@@ -10,7 +10,7 @@ use anyhow::Result;
 use futures_util::StreamExt;
 
 use crate::config::manifest::{
-    CategoryPolicy, CoverageEntry, CoverageOutcome, FileEncoding, FilesCategoryV2, ManagedFileV2,
+    CategoryPolicy, CoverageEntry, CoverageOutcome, FileEncoding, FilesCategory, ManagedFile,
     ManagementDisposition, ManifestCategoryName,
 };
 use crate::github::Client;
@@ -125,7 +125,7 @@ pub struct ScopedRepoFile {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FilesCollection {
-    pub category: FilesCategoryV2,
+    pub category: FilesCategory,
     pub scoped_files: Vec<ScopedRepoFile>,
     pub issues: Vec<FilesIssue>,
     pub coverage: Vec<CoverageEntry>,
@@ -134,7 +134,7 @@ pub struct FilesCollection {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilesPlan {
-    pub upserts: Vec<ManagedFileV2>,
+    pub upserts: Vec<ManagedFile>,
     pub deletions: Vec<DeleteTreeEntry>,
     pub unchanged: Vec<String>,
     pub atomic_entries: Vec<AtomicCommitEntry>,
@@ -161,7 +161,7 @@ struct FileScope {
 }
 
 impl FileScope {
-    fn from_category(category: Option<&FilesCategoryV2>) -> Self {
+    fn from_category(category: Option<&FilesCategory>) -> Self {
         let include = category
             .filter(|category| !category.include.is_empty())
             .map(|category| category.include.clone())
@@ -213,7 +213,7 @@ pub async fn collect_files_category(
     client: &Client,
     repo: &str,
     branch: Option<&str>,
-    category: Option<&FilesCategoryV2>,
+    category: Option<&FilesCategory>,
 ) -> Result<FilesCollection> {
     let scope = FileScope::from_category(category);
     let tree_read = client.read_git_tree_recursive(repo, branch).await?;
@@ -255,7 +255,7 @@ pub async fn collect_files_category(
             )];
 
             return Ok(FilesCollection {
-                category: FilesCategoryV2 {
+                category: FilesCategory {
                     policy: category
                         .map(|category| category.policy.clone())
                         .unwrap_or_else(CategoryPolicy::observe),
@@ -482,7 +482,7 @@ pub async fn collect_files_category(
         });
 
     Ok(FilesCollection {
-        category: FilesCategoryV2 {
+        category: FilesCategory {
             policy,
             include: scope.include,
             exclude: scope.exclude,
@@ -495,10 +495,7 @@ pub async fn collect_files_category(
     })
 }
 
-pub fn plan_files_category(
-    desired: &FilesCategoryV2,
-    actual: &FilesCollection,
-) -> Result<FilesPlan> {
+pub fn plan_files_category(desired: &FilesCategory, actual: &FilesCollection) -> Result<FilesPlan> {
     let scope = FileScope::from_category(Some(desired));
     let mut issues = actual.issues.clone();
     issues.extend(validate_desired_category(desired, &scope));
@@ -646,7 +643,7 @@ pub async fn verify_files_category(
     client: &Client,
     repo: &str,
     branch: Option<&str>,
-    desired: &FilesCategoryV2,
+    desired: &FilesCategory,
 ) -> Result<FilesVerifyResult> {
     let actual = collect_files_category(client, repo, branch, Some(desired)).await?;
     let plan = plan_files_category(desired, &actual)?;
@@ -659,7 +656,7 @@ pub async fn verify_files_category(
     Ok(FilesVerifyResult { matches, plan })
 }
 
-fn validate_desired_category(desired: &FilesCategoryV2, scope: &FileScope) -> Vec<FilesIssue> {
+fn validate_desired_category(desired: &FilesCategory, scope: &FileScope) -> Vec<FilesIssue> {
     let mut issues = Vec::new();
     let mut seen_paths = BTreeSet::new();
 
@@ -732,7 +729,7 @@ fn parse_managed_mode(
     }
 }
 
-fn decode_managed_file(file: &ManagedFileV2, issues: &mut Vec<FilesIssue>) -> Option<Vec<u8>> {
+fn decode_managed_file(file: &ManagedFile, issues: &mut Vec<FilesIssue>) -> Option<Vec<u8>> {
     match file.encoding {
         FileEncoding::Utf8 => Some(file.content.as_bytes().to_vec()),
         FileEncoding::Base64 => {
@@ -758,7 +755,7 @@ fn decode_managed_file(file: &ManagedFileV2, issues: &mut Vec<FilesIssue>) -> Op
 }
 
 fn managed_file_to_atomic_entry(
-    file: &ManagedFileV2,
+    file: &ManagedFile,
     issues: &mut Vec<FilesIssue>,
 ) -> Option<AtomicCommitEntry> {
     let mode = parse_managed_mode(&file.mode, &file.path, issues)?;
@@ -777,21 +774,16 @@ fn managed_file_to_atomic_entry(
     }))
 }
 
-fn managed_file_from_bytes(
-    path: &str,
-    bytes: &[u8],
-    mode: GitEntryMode,
-    sha: &str,
-) -> ManagedFileV2 {
+fn managed_file_from_bytes(path: &str, bytes: &[u8], mode: GitEntryMode, sha: &str) -> ManagedFile {
     match safe_utf8_text(bytes) {
-        Some(text) => ManagedFileV2 {
+        Some(text) => ManagedFile {
             path: path.to_owned(),
             content: text,
             encoding: FileEncoding::Utf8,
             mode: mode.as_str().to_owned(),
             source_sha: Some(sha.to_owned()),
         },
-        None => ManagedFileV2 {
+        None => ManagedFile {
             path: path.to_owned(),
             content: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes),
             encoding: FileEncoding::Base64,
@@ -883,7 +875,7 @@ mod tests {
         is_lfs_pointer, parse_managed_mode, plan_files_category, safe_utf8_text,
     };
     use crate::config::manifest::{
-        CategoryPolicy, CoverageEntry, FileEncoding, FilesCategoryV2, ManagedFileV2,
+        CategoryPolicy, CoverageEntry, FileEncoding, FilesCategory, ManagedFile,
         ManagementDisposition,
     };
     use crate::github::contents::{GitEntryMode, GitObjectType};
@@ -891,7 +883,7 @@ mod tests {
 
     #[test]
     fn scope_exclude_overrides_include() {
-        let scope = FileScope::from_category(Some(&FilesCategoryV2 {
+        let scope = FileScope::from_category(Some(&FilesCategory {
             policy: CategoryPolicy::managed(),
             include: vec![".github/**".to_owned()],
             exclude: vec![".github/generated/**".to_owned()],
@@ -959,7 +951,7 @@ size 42
 
     #[test]
     fn decode_managed_file_reports_invalid_base64() {
-        let file = ManagedFileV2 {
+        let file = ManagedFile {
             path: ".github/logo.png".to_owned(),
             content: "***".to_owned(),
             encoding: FileEncoding::Base64,
@@ -983,7 +975,7 @@ size 42
 
     #[test]
     fn prune_blocks_on_truncated_actual_tree() {
-        let desired = FilesCategoryV2 {
+        let desired = FilesCategory {
             policy: CategoryPolicy {
                 disposition: ManagementDisposition::Managed,
                 prune: true,
@@ -991,7 +983,7 @@ size 42
             },
             include: vec![".github/**".to_owned()],
             exclude: Vec::new(),
-            entries: vec![ManagedFileV2 {
+            entries: vec![ManagedFile {
                 path: ".github/workflows/ci.yml".to_owned(),
                 content: "name: CI\n".to_owned(),
                 encoding: FileEncoding::Utf8,
@@ -1027,7 +1019,7 @@ size 42
 
     #[test]
     fn prune_blocks_a_managed_entry_without_a_git_mode() {
-        let desired = FilesCategoryV2 {
+        let desired = FilesCategory {
             policy: CategoryPolicy {
                 disposition: ManagementDisposition::Managed,
                 prune: true,

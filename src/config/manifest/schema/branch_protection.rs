@@ -6,7 +6,7 @@ use crate::config::manifest::BranchProtectionConfig;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct BranchProtectionCategoryV2 {
+pub struct BranchProtectionCategory {
     #[serde(default)]
     pub policy: CategoryPolicy,
 
@@ -14,7 +14,7 @@ pub struct BranchProtectionCategoryV2 {
     pub default_branch: Option<BranchProtectionConfig>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_branch_detailed: Option<DetailedBranchProtectionConfigV2>,
+    pub default_branch_detailed: Option<DetailedBranchProtectionConfig>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub protected_branches: Vec<ProtectedBranchConfig>,
@@ -22,7 +22,7 @@ pub struct BranchProtectionCategoryV2 {
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DetailedBranchProtectionConfigV2 {
+pub struct DetailedBranchProtectionConfig {
     #[serde(default)]
     pub protection: BranchProtectionConfig,
 
@@ -30,7 +30,7 @@ pub struct DetailedBranchProtectionConfigV2 {
     pub status_check_contexts: Vec<String>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub status_checks: Vec<BranchStatusCheckConfigV2>,
+    pub status_checks: Vec<BranchStatusCheckConfig>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub push_restrictions: Vec<ActorReference>,
@@ -75,7 +75,7 @@ pub struct ProtectedBranchConfig {
     pub status_check_contexts: Vec<String>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub status_checks: Vec<BranchStatusCheckConfigV2>,
+    pub status_checks: Vec<BranchStatusCheckConfig>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub push_restrictions: Vec<ActorReference>,
@@ -110,7 +110,7 @@ pub struct ProtectedBranchConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct BranchStatusCheckConfigV2 {
+pub struct BranchStatusCheckConfig {
     pub context: String,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]

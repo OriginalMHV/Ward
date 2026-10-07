@@ -6,8 +6,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use ward::config::manifest::{
     ActorReference, CategoryPolicy, CoverageOutcome, ManagementDisposition,
-    ReferencedResourceConfig, ReferencedResourceType, SecurityCategoryV2, SecurityReviewerConfigV2,
-    SecurityReviewerOptionsConfigV2,
+    ReferencedResourceConfig, ReferencedResourceType, SecurityCategory, SecurityReviewerConfig,
+    SecurityReviewerOptionsConfig,
 };
 use ward::github::Client;
 use ward::github::security::SecurityAndAnalysisState;
@@ -24,8 +24,8 @@ fn managed_sensitive_policy() -> CategoryPolicy {
     }
 }
 
-fn base_security_category() -> SecurityCategoryV2 {
-    SecurityCategoryV2::observe_sensitive()
+fn base_security_category() -> SecurityCategory {
+    SecurityCategory::observe_sensitive()
 }
 
 fn empty_security_collection() -> SecurityCollection {
@@ -183,7 +183,7 @@ async fn security_rules_attached_configuration_precedence_ignores_direct_setting
     let collected = collect_security_category(&client, "example", None)
         .await
         .unwrap();
-    let desired = SecurityCategoryV2 {
+    let desired = SecurityCategory {
         policy: managed_sensitive_policy(),
         advanced_security: None,
         code_security: None,
@@ -281,7 +281,7 @@ async fn matching_attached_configuration_verifies_without_sensitive_policy() {
         .mount(&server)
         .await;
 
-    let desired = SecurityCategoryV2 {
+    let desired = SecurityCategory {
         policy: CategoryPolicy::managed(),
         configuration_reference: Some(ReferencedResourceConfig {
             resource_type: ReferencedResourceType::CodeSecurityConfiguration,
@@ -473,22 +473,21 @@ fn security_rules_plan_never_patches_unsupported_repo_security_fields() {
     actual.category.secret_scanning_validity_checks = Some(false);
     actual
         .category
-        .secret_scanning_delegated_alert_dismissal_options =
-        Some(SecurityReviewerOptionsConfigV2 {
-            reviewers: vec![SecurityReviewerConfigV2 {
-                actor: ActorReference::Team {
-                    slug: "platform".to_owned(),
-                },
-                mode: Some("ALWAYS".to_owned()),
-            }],
-        });
+        .secret_scanning_delegated_alert_dismissal_options = Some(SecurityReviewerOptionsConfig {
+        reviewers: vec![SecurityReviewerConfig {
+            actor: ActorReference::Team {
+                slug: "platform".to_owned(),
+            },
+            mode: Some("ALWAYS".to_owned()),
+        }],
+    });
 
-    let desired = SecurityCategoryV2 {
+    let desired = SecurityCategory {
         policy: managed_sensitive_policy(),
         code_security: Some(true),
         secret_scanning_validity_checks: Some(true),
-        secret_scanning_delegated_alert_dismissal_options: Some(SecurityReviewerOptionsConfigV2 {
-            reviewers: vec![SecurityReviewerConfigV2 {
+        secret_scanning_delegated_alert_dismissal_options: Some(SecurityReviewerOptionsConfig {
+            reviewers: vec![SecurityReviewerConfig {
                 actor: ActorReference::Role {
                     name: "admin".to_owned(),
                 },
@@ -523,17 +522,17 @@ fn security_rules_plan_never_patches_unsupported_repo_security_fields() {
 #[test]
 fn security_rules_plan_uses_current_documented_bypass_patch_schema() {
     let actual = empty_security_collection();
-    let desired = SecurityCategoryV2 {
+    let desired = SecurityCategory {
         policy: managed_sensitive_policy(),
-        secret_scanning_delegated_bypass_options: Some(SecurityReviewerOptionsConfigV2 {
+        secret_scanning_delegated_bypass_options: Some(SecurityReviewerOptionsConfig {
             reviewers: vec![
-                SecurityReviewerConfigV2 {
+                SecurityReviewerConfig {
                     actor: ActorReference::Team {
                         slug: "platform".to_owned(),
                     },
                     mode: Some("always".to_owned()),
                 },
-                SecurityReviewerConfigV2 {
+                SecurityReviewerConfig {
                     actor: ActorReference::Role {
                         name: "admin".to_owned(),
                     },

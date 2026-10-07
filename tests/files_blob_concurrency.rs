@@ -12,7 +12,7 @@ use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
 use ward::config::manifest::{
-    CategoryPolicy, FileEncoding, FilesCategoryV2, ManagedFileV2, ManagementDisposition,
+    CategoryPolicy, FileEncoding, FilesCategory, ManagedFile, ManagementDisposition,
 };
 use ward::github::Client;
 use ward::reconcile::files::{collect_files_category, verify_files_category};
@@ -225,7 +225,7 @@ async fn verify_fetches_blobs_concurrently() {
         )
         .await;
     }
-    let desired = FilesCategoryV2 {
+    let desired = FilesCategory {
         policy: CategoryPolicy {
             disposition: ManagementDisposition::Managed,
             prune: false,
@@ -235,7 +235,7 @@ async fn verify_fetches_blobs_concurrently() {
         exclude: Vec::new(),
         entries: names
             .iter()
-            .map(|name| ManagedFileV2 {
+            .map(|name| ManagedFile {
                 path: format!(".github/{name}"),
                 content: name.clone(),
                 encoding: FileEncoding::Utf8,

@@ -6,7 +6,7 @@ use crate::config::manifest::RepositorySettingsConfig;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct RepositoryCategoryV2 {
+pub struct RepositoryCategory {
     #[serde(default)]
     pub policy: CategoryPolicy,
 

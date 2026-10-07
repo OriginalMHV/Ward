@@ -5,8 +5,8 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use ward::config::manifest::{
-    ActorReference, CategoryPolicy, ManagementDisposition, RepositoryRulesetV2,
-    RulesetBypassActorV2, RulesetsCategoryV2,
+    ActorReference, CategoryPolicy, ManagementDisposition, RepositoryRuleset, RulesetBypassActor,
+    RulesetsCategory,
 };
 use ward::github::Client;
 use ward::reconcile::security_rules::{
@@ -139,7 +139,7 @@ async fn security_rules_rulesets_remap_actors_and_prune_only_repository_owned_ru
             .any(|issue| issue.code == "rulesets-unsupported-user-bypass-actor")
     );
 
-    let desired = RulesetsCategoryV2 {
+    let desired = RulesetsCategory {
         policy: CategoryPolicy {
             disposition: ManagementDisposition::Managed,
             prune: true,
@@ -200,13 +200,13 @@ async fn ruleset_apply_propagates_required_app_lookup_failure() {
     let client = Client::new_for_test("test-org", &server.uri());
     let plan = RulesetsPlan {
         actions: vec![RulesetPlanAction::Create {
-            ruleset: RepositoryRulesetV2 {
+            ruleset: RepositoryRuleset {
                 name: "main".to_owned(),
                 target: "branch".to_owned(),
                 enforcement: "active".to_owned(),
                 conditions_json: None,
                 rules: Vec::new(),
-                bypass_actors: vec![RulesetBypassActorV2 {
+                bypass_actors: vec![RulesetBypassActor {
                     actor: ActorReference::App {
                         slug: "release-bot".to_owned(),
                     },
@@ -242,13 +242,13 @@ async fn ruleset_apply_propagates_required_role_lookup_failure() {
     let client = Client::new_for_test("test-org", &server.uri());
     let plan = RulesetsPlan {
         actions: vec![RulesetPlanAction::Create {
-            ruleset: RepositoryRulesetV2 {
+            ruleset: RepositoryRuleset {
                 name: "main".to_owned(),
                 target: "branch".to_owned(),
                 enforcement: "active".to_owned(),
                 conditions_json: None,
                 rules: Vec::new(),
-                bypass_actors: vec![RulesetBypassActorV2 {
+                bypass_actors: vec![RulesetBypassActor {
                     actor: ActorReference::Role {
                         name: "release-manager".to_owned(),
                     },
@@ -286,7 +286,7 @@ async fn forbidden_lookups_the_manifest_does_not_need_are_not_unknown_state() {
         .await;
 
     let client = Client::new_for_test("test-org", &server.uri());
-    let desired = RulesetsCategoryV2 {
+    let desired = RulesetsCategory {
         policy: CategoryPolicy {
             disposition: ManagementDisposition::Managed,
             prune: false,
@@ -327,7 +327,7 @@ async fn plan_limit_403_on_rulesets_names_the_status_and_github_message() {
     assert!(!message.contains("Failed to parse"), "{message}");
 }
 
-fn copilot_snippet_ruleset() -> RulesetsCategoryV2 {
+fn copilot_snippet_ruleset() -> RulesetsCategory {
     let manifest: ward::config::Manifest = toml::from_str(&format!(
         "[org]\nname = \"test-org\"\n\n[schema]\nversion = 2\n\n[categories.rulesets.policy]\ndisposition = \"managed\"\nsensitive = true\n\n{}\n",
         ward::cli::deprecated::COPILOT_REVIEW_SNIPPET

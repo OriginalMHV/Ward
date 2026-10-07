@@ -5,7 +5,7 @@ use wiremock::matchers::{body_partial_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use ward::config::manifest::{
-    CategoryPolicy, FileEncoding, FilesCategoryV2, ManagedFileV2, ManagementDisposition,
+    CategoryPolicy, FileEncoding, FilesCategory, ManagedFile, ManagementDisposition,
 };
 use ward::github::Client;
 use ward::reconcile::files::{
@@ -26,9 +26,9 @@ fn make_category(
     prune: bool,
     include: Vec<&str>,
     exclude: Vec<&str>,
-    entries: Vec<ManagedFileV2>,
-) -> FilesCategoryV2 {
-    FilesCategoryV2 {
+    entries: Vec<ManagedFile>,
+) -> FilesCategory {
+    FilesCategory {
         policy: managed_policy(prune),
         include: include.into_iter().map(str::to_owned).collect(),
         exclude: exclude.into_iter().map(str::to_owned).collect(),
@@ -350,7 +350,7 @@ async fn plan_files_category_respects_glob_precedence_and_generates_deletions() 
         true,
         vec![".github/**"],
         vec![".github/generated/**"],
-        vec![ManagedFileV2 {
+        vec![ManagedFile {
             path: ".github/workflows/ci.yml".to_owned(),
             content: "name: CI\n".to_owned(),
             encoding: FileEncoding::Utf8,
@@ -382,7 +382,7 @@ fn plan_files_category_blocks_prune_for_unsupported_target_only_entries() {
         true,
         vec![".github/**"],
         Vec::new(),
-        vec![ManagedFileV2 {
+        vec![ManagedFile {
             path: ".github/workflows/ci.yml".to_owned(),
             content: "name: CI\n".to_owned(),
             encoding: FileEncoding::Utf8,
@@ -424,7 +424,7 @@ fn plan_files_category_preserves_source_zero_drift_for_unsupported_entries() {
         true,
         vec![".github/**"],
         Vec::new(),
-        vec![ManagedFileV2 {
+        vec![ManagedFile {
             path: ".github/workflows/ci.yml".to_owned(),
             content: "name: CI\n".to_owned(),
             encoding: FileEncoding::Utf8,
@@ -473,14 +473,14 @@ async fn plan_files_category_blocks_unsafe_paths_and_invalid_modes() {
         vec![".github/**"],
         Vec::new(),
         vec![
-            ManagedFileV2 {
+            ManagedFile {
                 path: "../oops".to_owned(),
                 content: "bad\n".to_owned(),
                 encoding: FileEncoding::Utf8,
                 mode: "100644".to_owned(),
                 source_sha: None,
             },
-            ManagedFileV2 {
+            ManagedFile {
                 path: ".github/link".to_owned(),
                 content: "bad\n".to_owned(),
                 encoding: FileEncoding::Utf8,
@@ -610,14 +610,14 @@ async fn apply_files_plan_sends_one_atomic_commit_payload() {
         vec![".github/**"],
         Vec::new(),
         vec![
-            ManagedFileV2 {
+            ManagedFile {
                 path: ".github/logo.png".to_owned(),
                 content: "AAEC/w==".to_owned(),
                 encoding: FileEncoding::Base64,
                 mode: "100644".to_owned(),
                 source_sha: Some("blob-logo-new".to_owned()),
             },
-            ManagedFileV2 {
+            ManagedFile {
                 path: ".github/setup.sh".to_owned(),
                 content: "#!/bin/sh\necho hi\n".to_owned(),
                 encoding: FileEncoding::Utf8,
@@ -674,14 +674,14 @@ async fn verify_files_category_is_idempotent_for_matching_target() {
         vec![".github/**"],
         Vec::new(),
         vec![
-            ManagedFileV2 {
+            ManagedFile {
                 path: ".github/logo.png".to_owned(),
                 content: "AAEC/w==".to_owned(),
                 encoding: FileEncoding::Base64,
                 mode: "100644".to_owned(),
                 source_sha: Some("blob-logo".to_owned()),
             },
-            ManagedFileV2 {
+            ManagedFile {
                 path: ".github/setup.sh".to_owned(),
                 content: "#!/bin/sh\necho hi\n".to_owned(),
                 encoding: FileEncoding::Utf8,
@@ -726,7 +726,7 @@ async fn verify_files_category_blocks_prune_when_tree_is_truncated() {
         true,
         vec![".github/**"],
         Vec::new(),
-        vec![ManagedFileV2 {
+        vec![ManagedFile {
             path: ".github/workflows/ci.yml".to_owned(),
             content: "name: CI\n".to_owned(),
             encoding: FileEncoding::Utf8,

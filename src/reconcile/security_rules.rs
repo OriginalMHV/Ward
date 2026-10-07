@@ -13,12 +13,12 @@ use super::common::coverage::{
 pub use super::common::rules_issue::{ReconcileIssue, ReconcileIssueSeverity};
 use super::common::rules_issue::{blocker_issue, warning_issue};
 use crate::config::manifest::{
-    ActorReference, BranchProtectionCategoryV2, BranchProtectionConfig, BranchStatusCheckConfigV2,
-    CategoryPolicy, CodeqlDefaultSetupConfig, CoverageEntry, DetailedBranchProtectionConfigV2,
+    ActorReference, BranchProtectionCategory, BranchProtectionConfig, BranchStatusCheckConfig,
+    CategoryPolicy, CodeqlDefaultSetupConfig, CoverageEntry, DetailedBranchProtectionConfig,
     ManagementDisposition, ManifestCategoryName, ProtectedBranchConfig, ReferencedResourceConfig,
-    ReferencedResourceType, RepositoryRuleConfig, RepositoryRulesetV2, RulesetBypassActorV2,
-    RulesetReferenceV2, RulesetsCategoryV2, SecurityCategoryV2, SecurityReviewerConfigV2,
-    SecurityReviewerOptionsConfigV2,
+    ReferencedResourceType, RepositoryRuleConfig, RepositoryRuleset, RulesetBypassActor,
+    RulesetReferenceConfig, RulesetsCategory, SecurityCategory, SecurityReviewerConfig,
+    SecurityReviewerOptionsConfig,
 };
 use crate::github::Client;
 use crate::github::branch_protection::{
@@ -36,7 +36,7 @@ const SECURITY_ATTACHED_CONFIGURATION_PATH: &str = "categories.security.configur
 #[derive(Debug, Clone, PartialEq)]
 pub struct SecurityCollection {
     pub repository_id: u64,
-    pub category: SecurityCategoryV2,
+    pub category: SecurityCategory,
     pub analysis: SecurityAndAnalysisState,
     pub private_vulnerability_reporting: Option<bool>,
     pub codeql_default_setup: Option<CodeqlDefaultSetupState>,
@@ -98,12 +98,12 @@ pub struct ActualRepositoryRuleset {
     pub id: u64,
     pub source_type: String,
     pub source: String,
-    pub ruleset: RepositoryRulesetV2,
+    pub ruleset: RepositoryRuleset,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RulesetsCollection {
-    pub category: RulesetsCategoryV2,
+    pub category: RulesetsCategory,
     pub actual_repository_rulesets: Vec<ActualRepositoryRuleset>,
     pub inherited_rulesets: Vec<RulesetReference>,
     pub team_ids_by_slug: HashMap<String, u64>,
@@ -116,11 +116,11 @@ pub struct RulesetsCollection {
 #[derive(Debug, Clone, PartialEq)]
 pub enum RulesetPlanAction {
     Create {
-        ruleset: RepositoryRulesetV2,
+        ruleset: RepositoryRuleset,
     },
     Update {
         ruleset_id: u64,
-        ruleset: RepositoryRulesetV2,
+        ruleset: RepositoryRuleset,
     },
     Delete {
         ruleset_id: u64,
@@ -168,7 +168,7 @@ pub struct ActualProtectedBranch {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BranchProtectionCollection {
     pub default_branch_name: String,
-    pub category: BranchProtectionCategoryV2,
+    pub category: BranchProtectionCategory,
     pub actual_branches: Vec<ActualProtectedBranch>,
     pub app_ids_by_slug: HashMap<String, i64>,
     pub app_slugs_by_id: HashMap<i64, String>,
@@ -218,7 +218,7 @@ pub struct BranchProtectionVerifyResult {
 pub async fn collect_security_category(
     client: &Client,
     repo: &str,
-    category: Option<&SecurityCategoryV2>,
+    category: Option<&SecurityCategory>,
 ) -> Result<SecurityCollection> {
     let baseline = client.get_repository_security_baseline(repo).await?;
     collect_security_category_with_baseline(client, repo, baseline, category).await
@@ -229,7 +229,7 @@ pub async fn collect_security_category_with_baseline(
     client: &Client,
     repo: &str,
     baseline: RepositorySecurityBaseline,
-    category: Option<&SecurityCategoryV2>,
+    category: Option<&SecurityCategory>,
 ) -> Result<SecurityCollection> {
     let RepositorySecurityBaseline {
         id: repository_id,
@@ -545,7 +545,7 @@ pub async fn collect_security_category_with_baseline(
 
     Ok(SecurityCollection {
         repository_id,
-        category: SecurityCategoryV2 {
+        category: SecurityCategory {
             policy,
             advanced_security: bool_field(analysis.advanced_security.as_ref()),
             code_security: bool_field(analysis.code_security.as_ref()),
@@ -593,7 +593,7 @@ pub async fn collect_security_category_with_baseline(
 }
 
 pub fn plan_security_category(
-    desired: &SecurityCategoryV2,
+    desired: &SecurityCategory,
     actual: &SecurityCollection,
 ) -> Result<SecurityPlan> {
     let mut issues = actual.issues.clone();
@@ -774,12 +774,12 @@ pub fn plan_security_category(
             .clone()
             .or_else(|| {
                 (!desired.delegated_alert_dismissal_reviewers.is_empty()).then(|| {
-                    SecurityReviewerOptionsConfigV2 {
+                    SecurityReviewerOptionsConfig {
                         reviewers: desired
                             .delegated_alert_dismissal_reviewers
                             .iter()
                             .cloned()
-                            .map(|actor| SecurityReviewerConfigV2 { actor, mode: None })
+                            .map(|actor| SecurityReviewerConfig { actor, mode: None })
                             .collect(),
                     }
                 })
@@ -802,12 +802,12 @@ pub fn plan_security_category(
             .clone()
             .or_else(|| {
                 (!desired.delegated_bypass_reviewers.is_empty()).then(|| {
-                    SecurityReviewerOptionsConfigV2 {
+                    SecurityReviewerOptionsConfig {
                         reviewers: desired
                             .delegated_bypass_reviewers
                             .iter()
                             .cloned()
-                            .map(|actor| SecurityReviewerConfigV2 { actor, mode: None })
+                            .map(|actor| SecurityReviewerConfig { actor, mode: None })
                             .collect(),
                     }
                 })
@@ -997,7 +997,7 @@ impl VerifyPolicy {
 pub async fn verify_security_category(
     client: &Client,
     repo: &str,
-    desired: &SecurityCategoryV2,
+    desired: &SecurityCategory,
 ) -> Result<SecurityVerifyResult> {
     verify_security_category_with(client, repo, desired, VerifyPolicy::default()).await
 }
@@ -1005,7 +1005,7 @@ pub async fn verify_security_category(
 pub async fn verify_security_category_with(
     client: &Client,
     repo: &str,
-    desired: &SecurityCategoryV2,
+    desired: &SecurityCategory,
     policy: VerifyPolicy,
 ) -> Result<SecurityVerifyResult> {
     let mut attempt = 1;
@@ -1045,7 +1045,7 @@ pub async fn verify_security_category_with(
 pub async fn collect_rulesets_category(
     client: &Client,
     repo: &str,
-    category: Option<&RulesetsCategoryV2>,
+    category: Option<&RulesetsCategory>,
 ) -> Result<RulesetsCollection> {
     let mut issues = Vec::new();
     let mut coverage = vec![collected_entry(
@@ -1223,11 +1223,11 @@ pub async fn collect_rulesets_category(
         .unwrap_or_else(CategoryPolicy::observe_sensitive);
 
     Ok(RulesetsCollection {
-        category: RulesetsCategoryV2 {
+        category: RulesetsCategory {
             policy,
             references: inherited_rulesets
                 .iter()
-                .map(|reference| RulesetReferenceV2 {
+                .map(|reference| RulesetReferenceConfig {
                     name: reference.name.clone(),
                     target: reference.target.clone(),
                     enforcement: reference.enforcement.clone(),
@@ -1260,7 +1260,7 @@ pub async fn collect_rulesets_category(
 }
 
 pub fn plan_rulesets_category(
-    desired: &RulesetsCategoryV2,
+    desired: &RulesetsCategory,
     actual: &RulesetsCollection,
 ) -> Result<RulesetsPlan> {
     let mut issues = actual.issues.clone();
@@ -1444,7 +1444,7 @@ pub async fn apply_rulesets_plan(
 pub async fn verify_rulesets_category(
     client: &Client,
     repo: &str,
-    desired: &RulesetsCategoryV2,
+    desired: &RulesetsCategory,
 ) -> Result<RulesetsVerifyResult> {
     let actual = collect_rulesets_category(client, repo, Some(desired)).await?;
     let plan = plan_rulesets_category(desired, &actual)?;
@@ -1461,7 +1461,7 @@ pub async fn verify_rulesets_category(
 pub async fn collect_branch_protection_category(
     client: &Client,
     repo: &str,
-    category: Option<&BranchProtectionCategoryV2>,
+    category: Option<&BranchProtectionCategory>,
 ) -> Result<BranchProtectionCollection> {
     let repository = client.get_repo(repo).await?;
     collect_branch_protection_category_for_branch(client, repo, repository.default_branch, category)
@@ -1473,7 +1473,7 @@ pub async fn collect_branch_protection_category_for_branch(
     client: &Client,
     repo: &str,
     default_branch_name: String,
-    category: Option<&BranchProtectionCategoryV2>,
+    category: Option<&BranchProtectionCategory>,
 ) -> Result<BranchProtectionCollection> {
     let branches = client.list_protected_branches(repo).await?;
 
@@ -1608,7 +1608,7 @@ pub async fn collect_branch_protection_category_for_branch(
 
     Ok(BranchProtectionCollection {
         default_branch_name,
-        category: BranchProtectionCategoryV2 {
+        category: BranchProtectionCategory {
             policy,
             default_branch,
             default_branch_detailed,
@@ -1626,7 +1626,7 @@ pub async fn collect_branch_protection_category_for_branch(
 }
 
 pub fn plan_branch_protection_category(
-    desired: &BranchProtectionCategoryV2,
+    desired: &BranchProtectionCategory,
     actual: &BranchProtectionCollection,
 ) -> Result<BranchProtectionPlan> {
     let mut issues = actual.issues.clone();
@@ -1772,7 +1772,7 @@ pub async fn apply_branch_protection_plan(
 pub async fn verify_branch_protection_category(
     client: &Client,
     repo: &str,
-    desired: &BranchProtectionCategoryV2,
+    desired: &BranchProtectionCategory,
 ) -> Result<BranchProtectionVerifyResult> {
     let actual = collect_branch_protection_category(client, repo, Some(desired)).await?;
     let plan = plan_branch_protection_category(desired, &actual)?;
@@ -1836,7 +1836,7 @@ fn collect_repository_ruleset(
     user_by_id: &HashMap<u64, String>,
     resource_name: &str,
     issues: &mut Vec<ReconcileIssue>,
-) -> Result<RepositoryRulesetV2> {
+) -> Result<RepositoryRuleset> {
     let conditions_json = detail
         .conditions
         .filter(|value| !value.is_null())
@@ -1959,11 +1959,11 @@ fn collect_repository_ruleset(
                     ),
                 ));
             }
-            Some(RulesetBypassActorV2 { actor, bypass_mode })
+            Some(RulesetBypassActor { actor, bypass_mode })
         })
         .collect::<Vec<_>>();
 
-    Ok(RepositoryRulesetV2 {
+    Ok(RepositoryRuleset {
         name: detail.name,
         target: if detail.target.is_empty() {
             "branch".to_owned()
@@ -1979,7 +1979,7 @@ fn collect_repository_ruleset(
 
 async fn repository_ruleset_to_api_json(
     client: &Client,
-    ruleset: &RepositoryRulesetV2,
+    ruleset: &RepositoryRuleset,
     role_lookup: &HashMap<u64, String>,
     app_lookup: &HashMap<String, u64>,
 ) -> Result<serde_json::Value> {
@@ -2024,7 +2024,7 @@ async fn repository_ruleset_to_api_json(
 
 async fn resolve_ruleset_bypass_actor(
     client: &Client,
-    actor: &RulesetBypassActorV2,
+    actor: &RulesetBypassActor,
     role_lookup: &HashMap<u64, String>,
     app_lookup: &HashMap<String, u64>,
 ) -> Result<serde_json::Value> {
@@ -2072,7 +2072,7 @@ fn resolve_repository_role_id(name: &str, role_lookup: &HashMap<u64, String>) ->
         .with_context(|| format!("Repository role {name} is not known in the current organization"))
 }
 
-fn repository_ruleset_matches(left: &RepositoryRulesetV2, right: &RepositoryRulesetV2) -> bool {
+fn repository_ruleset_matches(left: &RepositoryRuleset, right: &RepositoryRuleset) -> bool {
     left.name == right.name
         && left.target == right.target
         && left.enforcement == right.enforcement
@@ -2106,7 +2106,7 @@ fn normalized_rules(rules: &[RepositoryRuleConfig]) -> Vec<(String, Option<Strin
     normalized
 }
 
-fn normalized_bypass_actors(actors: &[RulesetBypassActorV2]) -> Vec<(String, String)> {
+fn normalized_bypass_actors(actors: &[RulesetBypassActor]) -> Vec<(String, String)> {
     let mut normalized = actors
         .iter()
         .map(|actor| (actor_reference_key(&actor.actor), actor.bypass_mode.clone()))
@@ -2116,7 +2116,7 @@ fn normalized_bypass_actors(actors: &[RulesetBypassActorV2]) -> Vec<(String, Str
 }
 
 fn normalize_ruleset_references(
-    references: &[RulesetReferenceV2],
+    references: &[RulesetReferenceConfig],
 ) -> Vec<(String, String, String, String, String)> {
     let mut normalized = references
         .iter()
@@ -2134,7 +2134,7 @@ fn normalize_ruleset_references(
     normalized
 }
 
-fn validate_ruleset_bypass_actors(ruleset: &RepositoryRulesetV2, issues: &mut Vec<ReconcileIssue>) {
+fn validate_ruleset_bypass_actors(ruleset: &RepositoryRuleset, issues: &mut Vec<ReconcileIssue>) {
     for actor in &ruleset.bypass_actors {
         match &actor.actor {
             ActorReference::Unresolved {
@@ -2200,7 +2200,7 @@ fn protected_branch_from_detail(
                 checks
                     .contexts
                     .iter()
-                    .map(|context| BranchStatusCheckConfigV2 {
+                    .map(|context| BranchStatusCheckConfig {
                         context: context.clone(),
                         app_id: None,
                         app_slug: None,
@@ -2210,7 +2210,7 @@ fn protected_branch_from_detail(
                 checks
                     .checks
                     .iter()
-                    .map(|check| BranchStatusCheckConfigV2 {
+                    .map(|check| BranchStatusCheckConfig {
                         context: check.context.clone(),
                         app_id: check.app_id,
                         app_slug: check
@@ -2302,8 +2302,8 @@ fn protected_branch_from_detail(
 
 fn detailed_branch_config_from_manifest(
     branch: &ProtectedBranchConfig,
-) -> DetailedBranchProtectionConfigV2 {
-    DetailedBranchProtectionConfigV2 {
+) -> DetailedBranchProtectionConfig {
+    DetailedBranchProtectionConfig {
         protection: branch.protection.clone(),
         status_check_contexts: branch.status_check_contexts.clone(),
         status_checks: branch.status_checks.clone(),
@@ -2393,7 +2393,7 @@ fn desired_branch_protection_from_default(
 
 fn desired_branch_protection_from_detailed_manifest(
     branch_name: &str,
-    config: &DetailedBranchProtectionConfigV2,
+    config: &DetailedBranchProtectionConfig,
     existing: Option<&ActualProtectedBranch>,
     app_ids_by_slug: &HashMap<String, i64>,
     issues: &mut Vec<ReconcileIssue>,
@@ -2451,7 +2451,7 @@ fn desired_branch_protection_from_parts(
     branch_name: &str,
     config: &BranchProtectionConfig,
     status_check_contexts: &[String],
-    status_checks_config: &[BranchStatusCheckConfigV2],
+    status_checks_config: &[BranchStatusCheckConfig],
     push_restrictions: &[ActorReference],
     dismissal_restrictions: &[ActorReference],
     pull_request_bypass_allowances: &[ActorReference],
@@ -2509,7 +2509,7 @@ fn desired_branch_protection_from_parts(
 fn desired_status_checks(
     branch_name: &str,
     status_check_contexts: &[String],
-    status_checks_config: &[BranchStatusCheckConfigV2],
+    status_checks_config: &[BranchStatusCheckConfig],
     existing: Option<&ActualProtectedBranch>,
     app_ids_by_slug: &HashMap<String, i64>,
     issues: &mut Vec<ReconcileIssue>,
@@ -2572,7 +2572,7 @@ fn reviewer_options_from_api(
     repository_role_ids_by_name: &HashMap<String, u64>,
     repo: &str,
     issues: &mut Vec<ReconcileIssue>,
-) -> Result<SecurityReviewerOptionsConfigV2> {
+) -> Result<SecurityReviewerOptionsConfig> {
     let team_slugs_by_id = team_ids_by_slug
         .iter()
         .map(|(slug, id)| (*id, slug.clone()))
@@ -2638,18 +2638,18 @@ fn reviewer_options_from_api(
                     }
                 }
             };
-            Ok(SecurityReviewerConfigV2 {
+            Ok(SecurityReviewerConfig {
                 actor,
                 mode: reviewer.mode.clone(),
             })
         })
         .collect::<Result<Vec<_>>>()?;
 
-    Ok(SecurityReviewerOptionsConfigV2 { reviewers })
+    Ok(SecurityReviewerOptionsConfig { reviewers })
 }
 
 fn security_reviewer_options_to_api_json(
-    options: &SecurityReviewerOptionsConfigV2,
+    options: &SecurityReviewerOptionsConfig,
     team_ids_by_slug: &HashMap<String, u64>,
     repository_role_ids_by_name: &HashMap<String, u64>,
 ) -> Result<serde_json::Value> {
@@ -2790,7 +2790,7 @@ fn normalize_actor_set(set: &ActorSet) -> Vec<String> {
 }
 
 fn normalize_branch_status_checks(
-    values: &[BranchStatusCheckConfigV2],
+    values: &[BranchStatusCheckConfig],
 ) -> Vec<(String, Option<i64>)> {
     let mut normalized = values
         .iter()
@@ -2842,7 +2842,7 @@ mod tests {
 
     #[test]
     fn ruleset_match_is_order_insensitive() {
-        let left = RepositoryRulesetV2 {
+        let left = RepositoryRuleset {
             name: "main".to_owned(),
             target: "branch".to_owned(),
             enforcement: "active".to_owned(),
@@ -2859,7 +2859,7 @@ mod tests {
                     parameters_json: None,
                 },
             ],
-            bypass_actors: vec![RulesetBypassActorV2 {
+            bypass_actors: vec![RulesetBypassActor {
                 actor: ActorReference::Team {
                     slug: "platform".to_owned(),
                 },
@@ -2971,7 +2971,7 @@ mod tests {
 
         let user = resolve_ruleset_bypass_actor(
             &client,
-            &RulesetBypassActorV2 {
+            &RulesetBypassActor {
                 actor: ActorReference::User {
                     login: "alice".to_owned(),
                 },
@@ -2993,7 +2993,7 @@ mod tests {
 
         let org_admin = resolve_ruleset_bypass_actor(
             &client,
-            &RulesetBypassActorV2 {
+            &RulesetBypassActor {
                 actor: ActorReference::OrganizationAdmin,
                 bypass_mode: "always".to_owned(),
             },
@@ -3013,7 +3013,7 @@ mod tests {
 
         let base_role = resolve_ruleset_bypass_actor(
             &client,
-            &RulesetBypassActorV2 {
+            &RulesetBypassActor {
                 actor: ActorReference::Role {
                     name: "admin".to_owned(),
                 },
@@ -3035,7 +3035,7 @@ mod tests {
 
         let deploy_key = resolve_ruleset_bypass_actor(
             &client,
-            &RulesetBypassActorV2 {
+            &RulesetBypassActor {
                 actor: ActorReference::Unresolved {
                     actor_type: "DeployKey".to_owned(),
                     actor_id: None,

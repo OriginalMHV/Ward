@@ -13,8 +13,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use ward::config::Manifest;
 use ward::config::manifest::{
-    CategoryPolicy, FileEncoding, FilesCategoryV2, ManagedFileV2, ManifestSchema,
-    RepositoryCategoryV2, RepositoryMetadataConfig, SecurityCategoryV2,
+    CategoryPolicy, FileEncoding, FilesCategory, ManagedFile, ManifestSchema, RepositoryCategory,
+    RepositoryMetadataConfig, SecurityCategory,
 };
 use ward::github::Client;
 use ward::github::repos::Repository;
@@ -27,8 +27,8 @@ fn base_manifest() -> Manifest {
     manifest
 }
 
-fn managed_files_category(entries: Vec<ManagedFileV2>) -> FilesCategoryV2 {
-    FilesCategoryV2 {
+fn managed_files_category(entries: Vec<ManagedFile>) -> FilesCategory {
+    FilesCategory {
         policy: CategoryPolicy::managed(),
         include: Vec::new(),
         exclude: Vec::new(),
@@ -36,8 +36,8 @@ fn managed_files_category(entries: Vec<ManagedFileV2>) -> FilesCategoryV2 {
     }
 }
 
-fn dependabot_entry(content: &str) -> ManagedFileV2 {
-    ManagedFileV2 {
+fn dependabot_entry(content: &str) -> ManagedFile {
+    ManagedFile {
         path: ".github/dependabot.yml".to_owned(),
         content: content.to_owned(),
         encoding: FileEncoding::Utf8,
@@ -129,7 +129,7 @@ async fn plan_selects_only_requested_category() {
     )]));
     // A second, present category that must NOT be collected when not selected.
     // If it were collected, its missing mocks would surface it as blocked.
-    manifest.categories.security = Some(SecurityCategoryV2::observe_sensitive());
+    manifest.categories.security = Some(SecurityCategory::observe_sensitive());
 
     let client = Client::new_for_test("test-org", &server.uri());
     let repos = vec![test_repo("my-repo")];
@@ -464,7 +464,7 @@ async fn high_impact_repository_change_is_gated() {
             .await;
 
         let mut manifest = base_manifest();
-        manifest.categories.repository = Some(RepositoryCategoryV2 {
+        manifest.categories.repository = Some(RepositoryCategory {
             policy: CategoryPolicy::managed(),
             settings: None,
             metadata: Some(RepositoryMetadataConfig {
@@ -746,7 +746,7 @@ async fn prepare_apply_reports_the_plan_without_mutating() {
 
 #[tokio::test]
 async fn plan_reads_the_repository_endpoint_once_per_repository() {
-    use ward::config::manifest::BranchProtectionCategoryV2;
+    use ward::config::manifest::BranchProtectionCategory;
 
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -771,7 +771,7 @@ async fn plan_reads_the_repository_endpoint_once_per_repository() {
         .await;
 
     let mut manifest = base_manifest();
-    manifest.categories.repository = Some(RepositoryCategoryV2 {
+    manifest.categories.repository = Some(RepositoryCategory {
         policy: CategoryPolicy::observe(),
         settings: None,
         metadata: None,
@@ -779,8 +779,8 @@ async fn plan_reads_the_repository_endpoint_once_per_repository() {
         immutable_releases: None,
         references: Vec::new(),
     });
-    manifest.categories.security = Some(SecurityCategoryV2::observe_sensitive());
-    manifest.categories.branch_protection = Some(BranchProtectionCategoryV2 {
+    manifest.categories.security = Some(SecurityCategory::observe_sensitive());
+    manifest.categories.branch_protection = Some(BranchProtectionCategory {
         policy: CategoryPolicy::observe(),
         default_branch: None,
         default_branch_detailed: None,
@@ -830,7 +830,7 @@ async fn org_hits(server: &MockServer, suffix: &str) -> usize {
 #[tokio::test]
 async fn plan_reads_organization_lookups_once_for_many_repositories() {
     use ward::config::manifest::{
-        ReferencedResourceConfig, ReferencedResourceType, RepositoryAccessCategoryV2,
+        ReferencedResourceConfig, ReferencedResourceType, RepositoryAccessCategory,
     };
 
     let server = MockServer::start().await;
@@ -852,7 +852,7 @@ async fn plan_reads_organization_lookups_once_for_many_repositories() {
         .await;
 
     let mut manifest = base_manifest();
-    manifest.categories.access = Some(RepositoryAccessCategoryV2 {
+    manifest.categories.access = Some(RepositoryAccessCategory {
         policy: CategoryPolicy::observe(),
         references: vec![
             ReferencedResourceConfig {
@@ -864,7 +864,7 @@ async fn plan_reads_organization_lookups_once_for_many_repositories() {
                 name: "Maintainer+".to_owned(),
             },
         ],
-        ..RepositoryAccessCategoryV2::default()
+        ..RepositoryAccessCategory::default()
     });
 
     let client = Client::new_for_test("test-org", &server.uri());

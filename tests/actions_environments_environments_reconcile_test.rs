@@ -7,8 +7,8 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use ward::config::manifest::{
-    ActorReference, CategoryPolicy, CoverageOutcome, EnvironmentConfigV2,
-    EnvironmentDeploymentPolicyConfig, EnvironmentReviewerConfig, EnvironmentsCategoryV2,
+    ActorReference, CategoryPolicy, CoverageOutcome, EnvironmentConfig,
+    EnvironmentDeploymentPolicyConfig, EnvironmentReviewerConfig, EnvironmentsCategory,
     ExternalValueReference, ManagementDisposition, ManifestCategoryName, NamedValueConfig,
     ReferencedResourceConfig, ReferencedResourceType, SecretPlaceholderConfig,
 };
@@ -114,9 +114,9 @@ async fn plan_creates_missing_environment() {
         .mount(&server)
         .await;
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(false),
-        entries: vec![EnvironmentConfigV2 {
+        entries: vec![EnvironmentConfig {
             name: "staging".to_owned(),
             wait_timer_minutes: Some(5),
             ..Default::default()
@@ -151,9 +151,9 @@ async fn plan_is_idempotent_when_settings_already_match() {
         .await;
     mount_empty_environment_subresources(&server, "my-repo", "staging").await;
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(false),
-        entries: vec![EnvironmentConfigV2 {
+        entries: vec![EnvironmentConfig {
             name: "staging".to_owned(),
             wait_timer_minutes: Some(5),
             prevent_self_review: Some(false),
@@ -202,9 +202,9 @@ async fn apply_resolves_reviewer_actors_to_ids_before_put() {
         .mount(&server)
         .await;
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(false),
-        entries: vec![EnvironmentConfigV2 {
+        entries: vec![EnvironmentConfig {
             name: "production".to_owned(),
             wait_timer_minutes: Some(15),
             reviewers: vec![
@@ -259,9 +259,9 @@ async fn apply_blocks_when_reviewer_actor_cannot_be_resolved() {
         .mount(&server)
         .await;
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(false),
-        entries: vec![EnvironmentConfigV2 {
+        entries: vec![EnvironmentConfig {
             name: "production".to_owned(),
             reviewers: vec![EnvironmentReviewerConfig {
                 actor: ActorReference::User {
@@ -306,9 +306,9 @@ async fn apply_blocks_when_actor_kind_is_unsupported_for_reviewers() {
         .mount(&server)
         .await;
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(false),
-        entries: vec![EnvironmentConfigV2 {
+        entries: vec![EnvironmentConfig {
             name: "production".to_owned(),
             reviewers: vec![EnvironmentReviewerConfig {
                 actor: ActorReference::App {
@@ -394,9 +394,9 @@ async fn deployment_branch_and_tag_patterns_are_created_when_missing() {
         .mount(&server)
         .await;
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(false),
-        entries: vec![EnvironmentConfigV2 {
+        entries: vec![EnvironmentConfig {
             name: "production".to_owned(),
             deployment_policy: Some(EnvironmentDeploymentPolicyConfig {
                 protected_branches: Some(false),
@@ -433,9 +433,9 @@ async fn branch_patterns_without_custom_policy_enabled_is_a_warning() {
         .mount(&server)
         .await;
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(false),
-        entries: vec![EnvironmentConfigV2 {
+        entries: vec![EnvironmentConfig {
             name: "production".to_owned(),
             deployment_policy: Some(EnvironmentDeploymentPolicyConfig {
                 protected_branches: Some(false),
@@ -524,9 +524,9 @@ async fn protection_app_is_enabled_when_available() {
         .mount(&server)
         .await;
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(false),
-        entries: vec![EnvironmentConfigV2 {
+        entries: vec![EnvironmentConfig {
             name: "production".to_owned(),
             protection_apps: vec![ReferencedResourceConfig {
                 resource_type: ReferencedResourceType::App,
@@ -574,9 +574,9 @@ async fn protection_app_unavailable_is_blocked() {
         .mount(&server)
         .await;
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(false),
-        entries: vec![EnvironmentConfigV2 {
+        entries: vec![EnvironmentConfig {
             name: "production".to_owned(),
             protection_apps: vec![ReferencedResourceConfig {
                 resource_type: ReferencedResourceType::App,
@@ -625,9 +625,9 @@ async fn environment_prune_deletes_environments_not_in_desired() {
         .mount(&server)
         .await;
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(true),
-        entries: vec![EnvironmentConfigV2 {
+        entries: vec![EnvironmentConfig {
             name: "production".to_owned(),
             ..Default::default()
         }],
@@ -716,9 +716,9 @@ async fn environment_variable_and_secret_upserts_and_prune() {
         .mount(&server)
         .await;
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(true),
-        entries: vec![EnvironmentConfigV2 {
+        entries: vec![EnvironmentConfig {
             name: "production".to_owned(),
             variables: vec![NamedValueConfig {
                 name: "NEW_VAR".to_owned(),
@@ -763,9 +763,9 @@ async fn environment_secret_placeholder_with_unresolved_manual_value_is_blocked(
         .mount(&server)
         .await;
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(false),
-        entries: vec![EnvironmentConfigV2 {
+        entries: vec![EnvironmentConfig {
             name: "production".to_owned(),
             secrets: vec![SecretPlaceholderConfig {
                 name: "API_KEY".to_owned(),
@@ -804,9 +804,9 @@ async fn verify_environments_reports_compliant_when_matching() {
         .await;
     mount_empty_environment_subresources(&server, "my-repo", "staging").await;
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(false),
-        entries: vec![EnvironmentConfigV2 {
+        entries: vec![EnvironmentConfig {
             name: "staging".to_owned(),
             ..Default::default()
         }],
@@ -1009,9 +1009,9 @@ async fn already_present_environment_secret_is_not_replanned_and_verify_converge
         .mount(&server)
         .await;
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(false),
-        entries: vec![EnvironmentConfigV2 {
+        entries: vec![EnvironmentConfig {
             name: "production".to_owned(),
             secrets: vec![SecretPlaceholderConfig {
                 name: "API_KEY".to_owned(),
@@ -1091,7 +1091,7 @@ async fn reconcile_snapshot_preserves_desired_policy() {
         .mount(&server)
         .await;
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(true),
         ..Default::default()
     };
@@ -1180,9 +1180,9 @@ async fn omitted_protected_branches_with_custom_plans_and_orders_settings_before
         .mount(&server)
         .await;
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(false),
-        entries: vec![EnvironmentConfigV2 {
+        entries: vec![EnvironmentConfig {
             name: "production".to_owned(),
             deployment_policy: Some(EnvironmentDeploymentPolicyConfig {
                 protected_branches: None,
@@ -1270,9 +1270,9 @@ async fn omitted_protected_branches_custom_policy_converges_once_applied() {
         .await;
     mount_empty_non_branch_subresources(&server, "my-repo", "production").await;
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(false),
-        entries: vec![EnvironmentConfigV2 {
+        entries: vec![EnvironmentConfig {
             name: "production".to_owned(),
             deployment_policy: Some(EnvironmentDeploymentPolicyConfig {
                 protected_branches: None,
@@ -1341,9 +1341,9 @@ async fn prune_deletes_branch_and_tag_patterns_absent_from_desired() {
             .await;
     }
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(true),
-        entries: vec![EnvironmentConfigV2 {
+        entries: vec![EnvironmentConfig {
             name: "production".to_owned(),
             deployment_policy: Some(EnvironmentDeploymentPolicyConfig {
                 protected_branches: Some(false),
@@ -1412,9 +1412,9 @@ async fn prune_disabled_keeps_patterns_absent_from_desired() {
         .await;
     mount_empty_non_branch_subresources(&server, "my-repo", "production").await;
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(false),
-        entries: vec![EnvironmentConfigV2 {
+        entries: vec![EnvironmentConfig {
             name: "production".to_owned(),
             deployment_policy: Some(EnvironmentDeploymentPolicyConfig {
                 protected_branches: Some(false),
@@ -1464,9 +1464,9 @@ async fn incomplete_branch_policy_collection_never_prunes_patterns() {
         .await;
     mount_empty_non_branch_subresources(&server, "my-repo", "production").await;
 
-    let desired = EnvironmentsCategoryV2 {
+    let desired = EnvironmentsCategory {
         policy: managed_policy(true),
-        entries: vec![EnvironmentConfigV2 {
+        entries: vec![EnvironmentConfig {
             name: "production".to_owned(),
             deployment_policy: Some(EnvironmentDeploymentPolicyConfig {
                 protected_branches: Some(false),

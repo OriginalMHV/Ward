@@ -16,7 +16,7 @@ use ward::cli::deprecated::LegacyCategory;
 use ward::cli::{Cli, Command};
 use ward::config::Manifest;
 use ward::config::manifest::{
-    CategoryPolicy, FileEncoding, FilesCategoryV2, ManagedFileV2, ManifestCategories, SystemConfig,
+    CategoryPolicy, FileEncoding, FilesCategory, ManagedFile, ManifestCategories, SystemConfig,
 };
 use ward::github::Client;
 use ward::github::commits::{AtomicCommitEntry, AtomicCommitFile, CommitContent, DeleteTreeEntry};
@@ -751,11 +751,11 @@ async fn commit_apply_reports_collection_failures_for_every_repository() {
     let mut manifest = Manifest::default();
     manifest.org.name = "test-org".to_owned();
     manifest.file_delivery.branch = "chore/ward-sync".to_owned();
-    manifest.categories.files = Some(FilesCategoryV2 {
+    manifest.categories.files = Some(FilesCategory {
         policy: CategoryPolicy::managed(),
         include: Vec::new(),
         exclude: Vec::new(),
-        entries: vec![ManagedFileV2 {
+        entries: vec![ManagedFile {
             path: ".github/managed.yml".to_owned(),
             content: "version: 1\n".to_owned(),
             encoding: FileEncoding::Utf8,

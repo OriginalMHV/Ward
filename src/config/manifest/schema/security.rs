@@ -4,7 +4,7 @@ use super::{ActorReference, CategoryPolicy, ReferencedResourceConfig};
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SecurityCategoryV2 {
+pub struct SecurityCategory {
     #[serde(default)]
     pub policy: CategoryPolicy,
 
@@ -42,10 +42,10 @@ pub struct SecurityCategoryV2 {
     pub secret_scanning_delegated_bypass: Option<bool>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub secret_scanning_delegated_alert_dismissal_options: Option<SecurityReviewerOptionsConfigV2>,
+    pub secret_scanning_delegated_alert_dismissal_options: Option<SecurityReviewerOptionsConfig>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub secret_scanning_delegated_bypass_options: Option<SecurityReviewerOptionsConfigV2>,
+    pub secret_scanning_delegated_bypass_options: Option<SecurityReviewerOptionsConfig>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub private_vulnerability_reporting: Option<bool>,
@@ -66,7 +66,7 @@ pub struct SecurityCategoryV2 {
     pub references: Vec<ReferencedResourceConfig>,
 }
 
-impl SecurityCategoryV2 {
+impl SecurityCategory {
     pub fn observe_sensitive() -> Self {
         Self {
             policy: CategoryPolicy::observe_sensitive(),
@@ -95,14 +95,14 @@ impl SecurityCategoryV2 {
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SecurityReviewerOptionsConfigV2 {
+pub struct SecurityReviewerOptionsConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub reviewers: Vec<SecurityReviewerConfigV2>,
+    pub reviewers: Vec<SecurityReviewerConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SecurityReviewerConfigV2 {
+pub struct SecurityReviewerConfig {
     pub actor: ActorReference,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
