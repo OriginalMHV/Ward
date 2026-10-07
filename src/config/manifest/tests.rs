@@ -367,3 +367,25 @@ fn shipped_example_manifest_parses() {
 
     toml::from_str::<Manifest>(source).unwrap();
 }
+
+#[test]
+fn an_explicit_missing_manifest_is_an_error_with_the_next_step() {
+    let error = Manifest::load(Some("/nonexistent/dir/ward.toml")).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "No manifest found at /nonexistent/dir/ward.toml. Run 'ward init' to create one, or 'ward import <owner/repo>' to build one from a repository."
+    );
+}
+
+#[test]
+fn a_syntax_error_reports_the_line_and_column() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ward.toml");
+    std::fs::write(&path, "[org]\nname = \"x\"\n[categories\n").unwrap();
+
+    let error = Manifest::load(path.to_str()).unwrap_err();
+
+    let text = format!("{error:#}");
+    assert!(text.contains("line 3, column 12"), "{text}");
+}

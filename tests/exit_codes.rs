@@ -173,3 +173,101 @@ fn plan_help_lists_target_and_format_options() {
     }
     assert!(!stdout.contains("--json"), "{stdout}");
 }
+
+fn stderr_of(output: &std::process::Output) -> String {
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+#[test]
+fn a_missing_manifest_names_the_path_and_the_commands_that_create_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("missing.toml");
+
+    let output = ward(&["--config", path.to_str().unwrap(), "plan"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stderr_of(&output),
+        format!(
+            "Error: No manifest found at {}. Run 'ward init' to create one, or 'ward import <owner/repo>' to build one from a repository.\n",
+            path.display()
+        )
+    );
+}
+
+#[test]
+fn a_toml_syntax_error_shows_the_path_line_and_column() {
+    let output = run_with_config(&["plan"], "[org]\nname = \"x\"\n[categories\n", None);
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = stderr_of(&output);
+    assert!(stderr.contains("ward.toml"), "{stderr}");
+    assert!(stderr.contains("line 3, column 12"), "{stderr}");
+    assert!(stderr.contains("unclosed table"), "{stderr}");
+    assert!(!stderr.contains("Stack backtrace"), "{stderr}");
+}
+
+#[test]
+fn an_unknown_field_is_named_with_the_allowed_fields() {
+    let output = run_with_config(&["plan"], "[org]\nname = \"x\"\nfoo = 1\n", None);
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = stderr_of(&output);
+    assert!(stderr.contains("line 3, column 1"), "{stderr}");
+    assert!(
+        stderr.contains("unknown field `foo`, expected `name`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn an_unknown_category_lists_the_valid_categories() {
+    let output = run_with_config(&["plan", "--category", "nope"], SECURITY_MANIFEST, None);
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = stderr_of(&output);
+    assert!(stderr.contains("invalid value 'nope'"), "{stderr}");
+    assert!(
+        stderr.contains(
+            "[possible values: repository, files, security, rulesets, branch-protection, actions, environments, access, integrations]"
+        ),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn no_token_and_no_gh_says_how_to_fix_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ward.toml");
+    std::fs::write(&path, SECURITY_MANIFEST).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ward"))
+        .arg("--config")
+        .arg(&path)
+        .arg("plan")
+        .env("HOME", home.path())
+        .env("PATH", dir.path())
+        .env_remove("GH_TOKEN")
+        .env_remove("GITHUB_TOKEN")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stderr_of(&output),
+        "Error: No GitHub token found. The GitHub CLI (gh) is not installed. Set GH_TOKEN or GITHUB_TOKEN to a token, or install gh from https://cli.github.com and run 'gh auth login'.\n"
+    );
+}
+
+#[test]
+fn verbose_errors_show_the_full_chain() {
+    let output = run_with_config(&["-v", "plan"], "[org\n", None);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr_of(&output).contains("Caused by:\n"),
+        "{}",
+        stderr_of(&output)
+    );
+}

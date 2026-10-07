@@ -4,12 +4,29 @@ use anyhow::{Context, Result};
 
 use super::*;
 
+/// The manifest path Ward reads when `--config` is not given.
+pub const DEFAULT_MANIFEST_PATH: &str = "ward.toml";
+
+/// The message for a manifest that does not exist at `path`.
+pub fn missing_manifest_message(path: &str) -> String {
+    let shown = std::path::absolute(path).map_or_else(
+        |_| path.to_owned(),
+        |absolute| absolute.display().to_string(),
+    );
+    format!(
+        "No manifest found at {shown}. Run 'ward init' to create one, or 'ward import <owner/repo>' to build one from a repository."
+    )
+}
+
 impl Manifest {
     pub fn load(path: Option<&str>) -> Result<Self> {
-        let default_path = "ward.toml";
-        let path = path.unwrap_or(default_path);
+        let explicit = path.is_some();
+        let path = path.unwrap_or(DEFAULT_MANIFEST_PATH);
 
         if !Path::new(path).exists() {
+            if explicit {
+                anyhow::bail!("{}", missing_manifest_message(path));
+            }
             tracing::info!("No ward.toml found, using defaults");
             return Ok(Self::default());
         }

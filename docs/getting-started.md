@@ -172,7 +172,7 @@ ward plan
 The plan reports, per repository and category:
 
 - policy disposition
-- actionable changes
+- changes to make
 - blocked changes
 - warnings
 - coverage outcomes
