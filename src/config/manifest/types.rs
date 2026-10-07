@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::schema::{CoverageEntry, ManifestCategories, ManifestProvenance, ManifestSchema};
+use super::schema::{CoverageEntry, ManifestCategories, ManifestProvenance};
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -12,9 +12,6 @@ pub struct Manifest {
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub systems: Vec<SystemConfig>,
-
-    #[serde(default = "ManifestSchema::current")]
-    pub schema: ManifestSchema,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<ManifestProvenance>,

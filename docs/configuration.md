@@ -17,9 +17,6 @@ Ward rejects unknown keys in every table. The error names the key and its line.
 [org]
 name = "acme"
 
-[schema]
-version = 2
-
 [provenance]
 repository = "acme/reference-service"
 default_branch = "main"
@@ -30,10 +27,9 @@ default_branch_head_oid = "..."
 | Table | Purpose |
 |---|---|
 | `[org]` | Owner containing the existing target repositories |
-| `[schema]` | Manifest format version |
 | `[provenance]` | Optional source branch and stable source identity captured during repository bootstrap |
 
-Manually authored manifests need only `[org]`, `[schema]`, targets, and desired categories. Targets must remain under the configured owner. Ward does not create, rename, transfer, or delete repositories.
+Manually authored manifests need only `[org]`, targets, and desired categories. Targets must remain under the configured owner. Ward does not create, rename, transfer, or delete repositories.
 
 ## Category policies
 

@@ -131,12 +131,9 @@ ward repos list --system payments
 
 ## 3. Review category policies
 
-The manifest stores repository state under versioned categories:
+The manifest stores repository state under categories:
 
 ```toml
-[schema]
-version = 2
-
 [categories.repository.policy]
 disposition = "managed"
 prune = false

@@ -17,16 +17,15 @@ impl Manifest {
         let content =
             std::fs::read_to_string(path).with_context(|| format!("Failed to read {path}"))?;
 
-        let manifest: Self =
+        let table: toml::Table =
             toml::from_str(&content).with_context(|| format!("Failed to parse {path}"))?;
-        let current = ManifestSchema::current().version;
-        if manifest.schema.version != current {
+        if table.contains_key("schema") {
             anyhow::bail!(
-                "Unsupported Ward manifest schema version {}; expected {current}",
-                manifest.schema.version
+                "{path} contains a [schema] table. Ward no longer uses it. Remove the table."
             );
         }
-        Ok(manifest)
+
+        toml::from_str(&content).with_context(|| format!("Failed to parse {path}"))
     }
 
     pub fn system(&self, id: &str) -> Option<&SystemConfig> {
@@ -120,7 +119,6 @@ impl Default for Manifest {
             },
             file_delivery: FileDeliveryConfig::default(),
             systems: Vec::new(),
-            schema: ManifestSchema::current(),
             provenance: None,
             categories: ManifestCategories::default(),
             coverage: Vec::new(),

@@ -1,9 +1,6 @@
 [org]
 name = "my-github-org"
 
-[schema]
-version = 2
-
 [provenance]
 repository = "my-github-org/reference-service"
 default_branch = "main"

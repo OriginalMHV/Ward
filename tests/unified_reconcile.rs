@@ -13,7 +13,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use ward::config::Manifest;
 use ward::config::manifest::{
-    CategoryPolicy, FileEncoding, FilesCategory, ManagedFile, ManifestSchema, RepositoryCategory,
+    CategoryPolicy, FileEncoding, FilesCategory, ManagedFile, RepositoryCategory,
     RepositoryMetadataConfig, SecurityCategory,
 };
 use ward::github::Client;
@@ -23,7 +23,6 @@ use ward::reconcile::unified::{self, Category, UnifiedOptions};
 fn base_manifest() -> Manifest {
     let mut manifest = Manifest::default();
     manifest.org.name = "test-org".to_owned();
-    manifest.schema = ManifestSchema::current();
     manifest
 }
 

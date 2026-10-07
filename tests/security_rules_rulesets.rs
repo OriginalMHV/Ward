@@ -329,7 +329,7 @@ async fn plan_limit_403_on_rulesets_names_the_status_and_github_message() {
 
 fn copilot_snippet_ruleset() -> RulesetsCategory {
     let manifest: ward::config::Manifest = toml::from_str(&format!(
-        "[org]\nname = \"test-org\"\n\n[schema]\nversion = 2\n\n[categories.rulesets.policy]\ndisposition = \"managed\"\nsensitive = true\n\n{}\n",
+        "[org]\nname = \"test-org\"\n\n[categories.rulesets.policy]\ndisposition = \"managed\"\nsensitive = true\n\n{}\n",
         ward::cli::deprecated::COPILOT_REVIEW_SNIPPET
     ))
     .unwrap();

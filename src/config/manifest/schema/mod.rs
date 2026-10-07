@@ -17,8 +17,6 @@ pub use self::{
 
 use crate::config::manifest::Manifest;
 
-const MANIFEST_SCHEMA_VERSION: u32 = 2;
-
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(transparent)]
 pub struct ManifestDocument(pub Manifest);
@@ -52,20 +50,6 @@ impl From<&Manifest> for ManifestDocument {
 impl Manifest {
     pub fn to_document(&self) -> ManifestDocument {
         ManifestDocument::from(self)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ManifestSchema {
-    pub version: u32,
-}
-
-impl ManifestSchema {
-    pub const fn current() -> Self {
-        Self {
-            version: MANIFEST_SCHEMA_VERSION,
-        }
     }
 }
 

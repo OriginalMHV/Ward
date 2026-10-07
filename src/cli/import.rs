@@ -10,9 +10,9 @@ use console::style;
 use crate::config::manifest::{
     ActionsCategory, BranchProtectionCategory, CategoryPolicy, CoverageEntry, CoverageOutcome,
     EnvironmentsCategory, ExternalValueReference, FileDeliveryConfig, FilesCategory, LabelConfig,
-    Manifest, ManifestCategories, ManifestCategoryName, ManifestProvenance, ManifestSchema,
-    OrgConfig, RepositoryAccessCategory, RepositoryIntegrationsCategory, RulesetsCategory,
-    SecurityCategory, SystemConfig,
+    Manifest, ManifestCategories, ManifestCategoryName, ManifestProvenance, OrgConfig,
+    RepositoryAccessCategory, RepositoryIntegrationsCategory, RulesetsCategory, SecurityCategory,
+    SystemConfig,
 };
 use crate::github::Client;
 use crate::reconcile::access_integrations::{collect_access, collect_integrations};
@@ -597,7 +597,6 @@ async fn snapshot_repository(
             repos: targets.to_vec(),
             categories: ManifestCategories::default(),
         }],
-        schema: ManifestSchema::current(),
         provenance: Some(ManifestProvenance {
             repository: source.full_name(),
             default_branch: Some(default_branch.to_owned()),
@@ -1088,7 +1087,6 @@ mod tests {
                 repos: vec!["reference".to_owned()],
                 categories: ManifestCategories::default(),
             }],
-            schema: ManifestSchema::current(),
             provenance: Some(ManifestProvenance {
                 repository: "acme/reference".to_owned(),
                 default_branch: Some("main".to_owned()),

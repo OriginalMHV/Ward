@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn minimal_manifest_uses_current_schema_and_empty_categories() {
+fn minimal_manifest_has_empty_categories() {
     let manifest: Manifest = toml::from_str(
         r#"
         [org]
@@ -11,7 +11,6 @@ fn minimal_manifest_uses_current_schema_and_empty_categories() {
     .unwrap();
 
     assert_eq!(manifest.org.name, "acme");
-    assert_eq!(manifest.schema, ManifestSchema::current());
     assert!(manifest.categories.is_empty());
     assert!(manifest.systems.is_empty());
 }
@@ -21,9 +20,6 @@ fn canonical_manifest_round_trips_without_compatibility_fields() {
     let source = r#"
         [org]
         name = "acme"
-
-        [schema]
-        version = 2
 
         [provenance]
         repository = "acme/reference"
@@ -107,7 +103,7 @@ fn source_section_is_rejected_in_favor_of_provenance() {
 }
 
 #[test]
-fn load_rejects_unsupported_schema_version() {
+fn load_rejects_schema_table_with_a_specific_error() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("ward.toml");
     std::fs::write(
@@ -117,16 +113,17 @@ fn load_rejects_unsupported_schema_version() {
         name = "acme"
 
         [schema]
-        version = 99
+        version = 2
         "#,
     )
     .unwrap();
 
     let error = Manifest::load(path.to_str()).unwrap_err();
     assert!(
-        error
-            .to_string()
-            .contains("Unsupported Ward manifest schema version 99")
+        error.to_string().ends_with(
+            "ward.toml contains a [schema] table. Ward no longer uses it. Remove the table."
+        ),
+        "{error}"
     );
 }
 
@@ -255,7 +252,6 @@ fn file_delivery_defaults_are_stable() {
 fn checked_in_example_is_a_valid_canonical_manifest() {
     let manifest: Manifest = toml::from_str(include_str!("../../../ward.example.toml")).unwrap();
 
-    assert_eq!(manifest.schema, ManifestSchema::current());
     assert_eq!(manifest.org.name, "my-github-org");
     assert_eq!(
         manifest
@@ -321,7 +317,6 @@ fn unknown_keys_are_rejected_in_nested_tables_and_tagged_enums() {
     for fragment in [
         "[file_delivery]\nbranchh = \"x\"",
         "[[systems]]\nid = \"a\"\nname = \"A\"\nrepo = [\"x\"]",
-        "[schema]\nversion = 2\nextra = 1",
         "[categories.repository.settings]\nhas_issue = true",
         "[categories.branch_protection.default]\nenabeld = true",
         "[[categories.integrations.webhooks]]\nurl_from = { source = \"env\", key = \"K\", extra = 1 }",
