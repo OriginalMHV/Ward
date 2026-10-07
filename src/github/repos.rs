@@ -1,3 +1,4 @@
+use crate::github::error::ReadContext;
 use anyhow::{Context, Result};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -59,7 +60,7 @@ impl Client {
             )
         })
         .await
-        .context("Failed to parse repo list response")
+        .read_ctx("repo list")
     }
 
     /// Search for repos matching a name query within the configured org.
@@ -80,7 +81,7 @@ impl Client {
             let search_result: SearchResponse =
                 response::expect_json(self.get(&path).await?, "GET", &path)
                     .await
-                    .context("Failed to parse search response")?;
+                    .read_ctx("search")?;
             let item_count = search_result.items.len();
             all_repos.extend(search_result.items);
 
@@ -168,7 +169,7 @@ impl Client {
         let path = format!("/repos/{}/{repo_name}", self.org);
         response::expect_json(self.get(&path).await?, "GET", &path)
             .await
-            .context("Failed to parse repo response")
+            .read_ctx("repo")
     }
 
     /// Get a single repository.
@@ -176,6 +177,6 @@ impl Client {
         let path = format!("/repos/{}/{repo_name}", self.org);
         response::expect_json(self.get(&path).await?, "GET", &path)
             .await
-            .context("Failed to parse repo response")
+            .read_ctx("repo")
     }
 }

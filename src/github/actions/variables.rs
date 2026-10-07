@@ -1,9 +1,10 @@
 use super::*;
 use crate::github::Client;
 use crate::github::encoding::encode_path_segment;
+use crate::github::error::ReadContext;
 use crate::github::pagination;
 use crate::github::response;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -180,7 +181,7 @@ async fn collect_variables(client: &Client, base_path: &str) -> Result<Vec<Actio
     pagination::collect_paginated_wrapped(
         client,
         30,
-        "Failed to parse Actions variables response",
+        "Actions variables",
         |page| {
             format!(
                 "{base_path}{separator}per_page={}&page={}",
@@ -227,7 +228,7 @@ async fn collect_variables_checked(
         } else {
             let body: VariablesResponse = response::expect_json(response, "GET", &path)
                 .await
-                .context("Failed to parse Actions variables response")?;
+                .read_ctx("Actions variables")?;
             let count = body.variables.len();
             items.extend(body.variables);
             if count < 30 {

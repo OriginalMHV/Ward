@@ -1,6 +1,7 @@
 //! Repository collaborator and access APIs.
 
-use anyhow::{Context, Result};
+use crate::github::error::ReadContext;
+use anyhow::Result;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -186,7 +187,7 @@ impl Client {
             )
         })
         .await
-        .context("Failed to parse repo collaborators response")
+        .read_ctx("repo collaborators")
         .map(|outcome| match outcome {
             ReadOutcome::Available(items) => ReadOutcome::Available(
                 items
@@ -211,7 +212,7 @@ impl Client {
             )
         })
         .await
-        .context("Failed to parse repo invitations response")
+        .read_ctx("repo invitations")
         .map(|outcome| match outcome {
             ReadOutcome::Available(items) => ReadOutcome::Available(
                 items
@@ -576,7 +577,7 @@ impl Client {
         let repository: RepositoryIdentity =
             response::expect_json(self.get(&path).await?, "GET", &path)
                 .await
-                .context("Failed to parse repository identity response")?;
+                .read_ctx("repository identity")?;
         Ok(repository.id)
     }
 }

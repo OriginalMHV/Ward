@@ -1,9 +1,10 @@
-use std::{error::Error as StdError, fmt, time::Duration};
+use std::time::Duration;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, TimeZone, Utc};
 use reqwest::{Response, StatusCode, header};
-use serde::Deserialize;
+
+use super::error::{ApiFailure, GitHubApiErrorKind, ResponseShapeError};
 use serde::de::DeserializeOwned;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,134 +30,18 @@ impl ResponseDisposition {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum GitHubApiErrorKind {
-    NotFound,
-    Forbidden,
-    Unprocessable,
-    UnexpectedStatus,
-    Graphql,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct GitHubApiError {
-    kind: GitHubApiErrorKind,
-    status: Option<StatusCode>,
-    method: String,
-    path: String,
-    message: Option<String>,
-    details: Vec<String>,
-    documentation_url: Option<String>,
-    content_type: Option<String>,
-    body_omitted: bool,
-}
-
-impl GitHubApiError {
-    async fn from_response(response: Response, method: &str, path: &str) -> Self {
-        let status = response.status();
-        let content_type = response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .map(ToOwned::to_owned);
-        let body = response.text().await.unwrap_or_default();
-        let payload = serde_json::from_str::<GitHubErrorPayload>(&body).ok();
-
-        Self {
-            kind: kind_from_disposition(ResponseDisposition::from_status(status)),
-            status: Some(status),
-            method: method.to_owned(),
-            path: path.to_owned(),
-            message: payload.as_ref().and_then(|payload| payload.message.clone()),
-            details: payload
-                .as_ref()
-                .map_or_else(Vec::new, GitHubErrorPayload::safe_details),
-            documentation_url: payload.and_then(|payload| payload.documentation_url),
-            content_type,
-            body_omitted: !body.trim().is_empty(),
-        }
-    }
-
-    pub(crate) fn graphql(path: &str, messages: Vec<String>) -> Self {
-        Self {
-            kind: GitHubApiErrorKind::Graphql,
-            status: Some(StatusCode::OK),
-            method: "POST".to_owned(),
-            path: path.to_owned(),
-            message: Some("GitHub GraphQL returned error(s)".to_owned()),
-            details: messages,
-            documentation_url: None,
-            content_type: Some("application/json".to_owned()),
-            body_omitted: true,
-        }
-    }
-
-    pub(crate) fn kind(&self) -> GitHubApiErrorKind {
-        self.kind
-    }
-
-    pub(crate) fn status(&self) -> Option<StatusCode> {
-        self.status
-    }
-}
-
-/// True when any error in the chain is a GitHub 404.
-pub(crate) fn is_not_found(error: &anyhow::Error) -> bool {
-    error.chain().any(|cause| {
-        cause
-            .downcast_ref::<GitHubApiError>()
-            .is_some_and(|api| api.kind() == GitHubApiErrorKind::NotFound)
-    })
-}
-
-impl fmt::Display for GitHubApiError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {}", self.method, self.path)?;
-
-        if let Some(status) = self.status {
-            write!(f, " failed with HTTP {status}")?;
-        } else {
-            write!(f, " failed")?;
-        }
-
-        if let Some(message) = &self.message {
-            write!(f, ": {message}")?;
-        }
-
-        if !self.details.is_empty() {
-            write!(f, " [{}]", self.details.join("; "))?;
-        }
-
-        if let Some(documentation_url) = &self.documentation_url {
-            write!(f, " ({documentation_url})")?;
-        }
-
-        if self.body_omitted {
-            if let Some(content_type) = &self.content_type {
-                write!(f, " [response body omitted, content type {content_type}]")?;
-            } else {
-                write!(f, " [response body omitted]")?;
-            }
-        }
-
-        Ok(())
-    }
-}
-
-impl StdError for GitHubApiError {}
-
 #[derive(Debug)]
 pub(crate) enum ClassifiedResponse<T> {
     Success(T),
     NoContent,
-    NotFound(GitHubApiError),
-    Forbidden(GitHubApiError),
-    Unprocessable(GitHubApiError),
-    Other(GitHubApiError),
+    NotFound(ApiFailure),
+    Forbidden(ApiFailure),
+    Unprocessable(ApiFailure),
+    Other(ApiFailure),
 }
 
 impl<T> ClassifiedResponse<T> {
-    fn from_error(error: GitHubApiError) -> Self {
+    fn from_error(error: ApiFailure) -> Self {
         match error.kind() {
             GitHubApiErrorKind::NotFound => Self::NotFound(error),
             GitHubApiErrorKind::Forbidden => Self::Forbidden(error),
@@ -168,6 +53,11 @@ impl<T> ClassifiedResponse<T> {
     }
 }
 
+async fn failure(response: Response, method: &str, path: &str) -> ApiFailure {
+    let kind = kind_from_disposition(ResponseDisposition::from_status(response.status()));
+    ApiFailure::from_response(response, method, path, kind).await
+}
+
 pub(crate) async fn classify_json<T>(
     response: Response,
     method: &str,
@@ -177,13 +67,20 @@ where
     T: DeserializeOwned,
 {
     match ResponseDisposition::from_status(response.status()) {
-        ResponseDisposition::Success => Ok(ClassifiedResponse::Success(response.json().await?)),
+        ResponseDisposition::Success => {
+            let body = response.bytes().await.with_context(|| {
+                format!("{method} {path}: could not read the response from GitHub")
+            })?;
+            let value = serde_json::from_slice(&body)
+                .map_err(|source| ResponseShapeError::new(method, path, source))?;
+            Ok(ClassifiedResponse::Success(value))
+        }
         ResponseDisposition::NoContent => Ok(ClassifiedResponse::NoContent),
         ResponseDisposition::NotFound
         | ResponseDisposition::Forbidden
         | ResponseDisposition::Unprocessable
         | ResponseDisposition::Other(_) => Ok(ClassifiedResponse::from_error(
-            GitHubApiError::from_response(response, method, path).await,
+            failure(response, method, path).await,
         )),
     }
 }
@@ -200,7 +97,7 @@ pub(crate) async fn classify_empty(
         | ResponseDisposition::Forbidden
         | ResponseDisposition::Unprocessable
         | ResponseDisposition::Other(_) => Ok(ClassifiedResponse::from_error(
-            GitHubApiError::from_response(response, method, path).await,
+            failure(response, method, path).await,
         )),
     }
 }
@@ -408,123 +305,6 @@ fn fallback_retry_delay(retry_number: usize, fallback_schedule: &[Duration]) -> 
     fallback_schedule.get(index).copied()
 }
 
-#[derive(Debug, Deserialize)]
-struct GitHubErrorPayload {
-    #[serde(default)]
-    message: Option<String>,
-    #[serde(default)]
-    documentation_url: Option<String>,
-    #[serde(default)]
-    errors: Vec<GitHubErrorDetail>,
-}
-
-impl GitHubErrorPayload {
-    fn safe_details(&self) -> Vec<String> {
-        let mut details: Vec<String> = self
-            .errors
-            .iter()
-            .take(MAX_DETAILS)
-            .map(GitHubErrorDetail::safe_summary)
-            .collect();
-        if self.errors.len() > MAX_DETAILS {
-            details.push(format!("{} more", self.errors.len() - MAX_DETAILS));
-        }
-        details
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum GitHubErrorDetail {
-    Object {
-        #[serde(default)]
-        resource: Option<String>,
-        #[serde(default)]
-        field: Option<String>,
-        #[serde(default)]
-        code: Option<String>,
-        #[serde(default)]
-        message: Option<String>,
-    },
-    Text(String),
-    Other(
-        #[allow(
-            dead_code,
-            reason = "deserialized to accept any shape, never displayed"
-        )]
-        serde_json::Value,
-    ),
-}
-
-/// Longest validation detail shown in an error. GitHub validation messages are
-/// short and are not secrets.
-const MAX_DETAIL_CHARS: usize = 300;
-
-const MAX_DETAILS: usize = 5;
-
-fn truncate_detail(value: &str) -> String {
-    // One line per detail, so GitHub text cannot inject extra lines into Ward's output.
-    let flattened: String = value
-        .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .collect();
-    let value = flattened.split_whitespace().collect::<Vec<_>>().join(" ");
-    let value = value.as_str();
-    if value.chars().count() <= MAX_DETAIL_CHARS {
-        return value.to_owned();
-    }
-    let mut truncated: String = value.chars().take(MAX_DETAIL_CHARS).collect();
-    truncated.push_str("...");
-    truncated
-}
-
-impl GitHubErrorDetail {
-    fn safe_summary(&self) -> String {
-        match self {
-            Self::Object {
-                resource,
-                field,
-                code,
-                message,
-            } => {
-                let mut summary = String::new();
-
-                if let Some(resource) = resource {
-                    summary.push_str(resource);
-                }
-                if let Some(field) = field {
-                    if !summary.is_empty() {
-                        summary.push('.');
-                    }
-                    summary.push_str(field);
-                }
-                if let Some(code) = code {
-                    if !summary.is_empty() {
-                        summary.push(' ');
-                    }
-                    summary.push('(');
-                    summary.push_str(code);
-                    summary.push(')');
-                }
-                if let Some(message) = message.as_deref().filter(|m| !m.trim().is_empty()) {
-                    if !summary.is_empty() {
-                        summary.push_str(": ");
-                    }
-                    summary.push_str(&truncate_detail(message));
-                }
-
-                if summary.is_empty() {
-                    "additional error details omitted".to_owned()
-                } else {
-                    summary
-                }
-            }
-            Self::Text(value) if !value.trim().is_empty() => truncate_detail(value),
-            Self::Text(_) | Self::Other(_) => "additional error details omitted".to_owned(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -539,8 +319,8 @@ mod tests {
     use crate::github::Client;
 
     use super::{
-        ClassifiedResponse, GitHubApiError, GitHubErrorPayload, MAX_DETAILS, RetryKind, RetryPlan,
-        RetryTiming, classify_empty, classify_json, mentions_rate_limit, retry_delay,
+        ApiFailure, ClassifiedResponse, RetryKind, RetryPlan, RetryTiming, classify_empty,
+        classify_json, mentions_rate_limit, retry_delay,
     };
 
     #[tokio::test]
@@ -581,7 +361,7 @@ mod tests {
         let display = error.to_string();
         assert!(display.contains("Validation Failed"));
         assert!(display.contains("Repository.name (invalid)"));
-        assert!(display.contains("response body omitted"));
+        assert!(!display.contains("body omitted"));
         assert!(display.contains("Repository.name (invalid): top-secret-value"));
         assert!(!display.contains("do-not-log"));
     }
@@ -637,9 +417,9 @@ mod tests {
 
     #[test]
     fn graphql_errors_are_collector_friendly() {
-        let error = GitHubApiError::graphql(
+        let error = ApiFailure::graphql(
             "/graphql",
-            vec!["Resource not accessible by integration".to_owned()],
+            &["Resource not accessible by integration".to_owned()],
         );
 
         assert_eq!(error.kind(), super::GitHubApiErrorKind::Graphql);
@@ -648,7 +428,7 @@ mod tests {
                 .to_string()
                 .contains("Resource not accessible by integration")
         );
-        assert!(error.to_string().contains("response body omitted"));
+        assert!(!error.to_string().contains("body omitted"));
     }
 
     const SCHEDULE: [Duration; 3] = [
@@ -829,43 +609,5 @@ mod tests {
             plan(StatusCode::FORBIDDEN, &headers, false, 1, Utc::now()),
             None
         );
-    }
-
-    #[test]
-    fn validation_details_include_string_entries_and_truncate_long_ones() {
-        let payload: GitHubErrorPayload = serde_json::from_value(json!({
-            "message": "Validation Failed",
-            "errors": [
-                "Only organization repositories can have users and team restrictions",
-                "x".repeat(1000)
-            ]
-        }))
-        .unwrap();
-
-        let details = payload.safe_details();
-
-        assert_eq!(
-            details[0],
-            "Only organization repositories can have users and team restrictions"
-        );
-        assert!(details[1].len() < 400 && details[1].ends_with("..."));
-    }
-
-    #[test]
-    fn validation_details_are_single_line_and_capped() {
-        let payload: GitHubErrorPayload = serde_json::from_value(json!({
-            "message": "Validation Failed",
-            "errors": [
-                "first line\nsecond line\r\n\u{1b}[31minjected",
-                "b", "c", "d", "e", "f", "g"
-            ]
-        }))
-        .unwrap();
-
-        let details = payload.safe_details();
-
-        assert_eq!(details[0], "first line second line [31minjected");
-        assert_eq!(details.len(), MAX_DETAILS + 1);
-        assert_eq!(details[MAX_DETAILS], "2 more");
     }
 }

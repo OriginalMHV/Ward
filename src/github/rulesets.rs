@@ -1,3 +1,4 @@
+use crate::github::error::ReadContext;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
@@ -104,7 +105,7 @@ impl Client {
         );
         let outcome = classify_read::<Vec<BranchRule>>(self.get(&path).await?, "GET", &path, true)
             .await
-            .context("Failed to parse branch rules response")?;
+            .read_ctx("branch rules")?;
         Ok(match outcome {
             ReadOutcome::Available(rules) => {
                 ReadOutcome::Available(rules.into_iter().map(|rule| rule.rule_type).collect())
@@ -138,7 +139,7 @@ impl Client {
         let path = format!("/repos/{}/{repo}/rulesets/{ruleset_id}", self.org);
         response::expect_json(self.get(&path).await?, "GET", &path)
             .await
-            .context("Failed to parse ruleset detail response")
+            .read_ctx("ruleset detail")
     }
 
     pub async fn create_ruleset(
@@ -149,7 +150,7 @@ impl Client {
         let path = format!("/repos/{}/{repo}/rulesets", self.org);
         response::expect_json(self.post_json(&path, ruleset).await?, "POST", &path)
             .await
-            .context("Failed to parse created ruleset response")
+            .read_ctx("created ruleset")
     }
 
     pub async fn update_ruleset(
@@ -186,7 +187,7 @@ impl Client {
         Ok(
             response::expect_json::<TeamIdResponse>(self.get(&path).await?, "GET", &path)
                 .await
-                .context("Failed to parse team response")?
+                .read_ctx("team")?
                 .id,
         )
     }
@@ -204,7 +205,7 @@ impl Client {
         let path = format!("/users/{login}");
         response::expect_json(self.get(&path).await?, "GET", &path)
             .await
-            .context("Failed to parse user response")
+            .read_ctx("user")
     }
 
     pub async fn list_ruleset_repo_collaborators(
@@ -218,7 +219,7 @@ impl Client {
             )
         })
         .await
-        .context("Failed to parse repository collaborators response")
+        .read_ctx("repository collaborators")
     }
 
     pub async fn list_ruleset_custom_repository_roles(
@@ -250,7 +251,7 @@ impl Client {
         pagination::collect_paginated_wrapped(
             self,
             pagination::PAGE_SIZE,
-            "Failed to parse organization installations response",
+            "organization installations",
             |page| {
                 format!(
                     "/orgs/{}/installations?per_page={}&page={}",

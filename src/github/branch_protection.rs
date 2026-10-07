@@ -1,4 +1,5 @@
-use anyhow::{Context, Result};
+use crate::github::error::ReadContext;
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -181,7 +182,7 @@ impl Client {
             )
         })
         .await
-        .context("Failed to parse protected branches response")
+        .read_ctx("protected branches")
     }
 
     pub async fn get_branch_protection_detail(
@@ -204,7 +205,7 @@ impl Client {
         let path = format!("/repos/{}/{repo}/branches/{branch}/protection", self.org);
         classify_read(self.get(&path).await?, "GET", &path, true)
             .await
-            .context("Failed to parse branch protection response")
+            .read_ctx("branch protection")
     }
 
     pub async fn get_branch_protection(

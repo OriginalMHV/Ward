@@ -1,4 +1,5 @@
-use anyhow::{Context, Result};
+use crate::github::error::ReadContext;
+use anyhow::Result;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value, json};
@@ -257,7 +258,7 @@ impl Client {
         let path = format!("/repos/{}/{repo}", self.org);
         response::expect_json(self.get(&path).await?, "GET", &path)
             .await
-            .context("Failed to parse repository settings response")
+            .read_ctx("repository settings")
     }
 
     /// Update repository settings.
@@ -545,7 +546,7 @@ impl Client {
             &path,
         )
         .await
-        .context("Failed to parse created label response")
+        .read_ctx("created label")
     }
 
     pub async fn update_label(
@@ -575,7 +576,7 @@ impl Client {
             &path,
         )
         .await
-        .context("Failed to parse updated label response")
+        .read_ctx("updated label")
     }
 
     pub async fn delete_label(&self, repo: &str, name: &str) -> Result<()> {

@@ -1,3 +1,4 @@
+use crate::github::error::ReadContext;
 use std::fmt;
 use std::str::FromStr;
 
@@ -342,7 +343,7 @@ impl Client {
 
         response::optional_json(self.get(&url).await?, "GET", &url)
             .await
-            .context("Failed to parse file content response")
+            .read_ctx("file content")
     }
 
     /// Inspect the repository tree recursively using the Git Trees API.
@@ -539,7 +540,7 @@ impl Client {
         )?;
         let blob = response::expect_json::<GitBlobResponse>(self.get(&url).await?, "GET", &url)
             .await
-            .context("Failed to parse blob response")?;
+            .read_ctx("blob")?;
 
         if blob.encoding != "base64" {
             anyhow::bail!("Unsupported Git blob encoding {} for {sha}", blob.encoding);

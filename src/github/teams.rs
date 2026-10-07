@@ -1,4 +1,5 @@
-use anyhow::{Context, Result};
+use crate::github::error::ReadContext;
+use anyhow::Result;
 use serde::Deserialize;
 
 use crate::config::manifest::TeamAccess;
@@ -81,7 +82,7 @@ impl Client {
             )
         })
         .await
-        .context("Failed to parse org teams response")
+        .read_ctx("org teams")
     }
 
     pub async fn list_org_teams_checked(&self) -> Result<ReadOutcome<Vec<Team>>> {
@@ -100,7 +101,7 @@ impl Client {
             )
         })
         .await
-        .context("Failed to parse org teams response")
+        .read_ctx("org teams")
     }
 
     /// List teams that have access to a repository, with the outcome of the read.
@@ -112,7 +113,7 @@ impl Client {
             )
         })
         .await
-        .context("Failed to parse repo teams response")
+        .read_ctx("repo teams")
     }
 
     /// Add or update a team's access to a repository.

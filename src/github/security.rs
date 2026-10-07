@@ -1,3 +1,4 @@
+use crate::github::error::ReadContext;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -144,7 +145,7 @@ impl Client {
         let path = format!("/repos/{}/{repo}", self.org);
         response::expect_json(self.get(&path).await?, "GET", &path)
             .await
-            .context("Failed to parse repository security baseline response")
+            .read_ctx("repository security baseline")
     }
 
     pub async fn get_repository_security_and_analysis_with_repo_data(
@@ -184,7 +185,7 @@ impl Client {
 
         serde_json::from_value(value.clone())
             .map(Some)
-            .context("Failed to parse pre-fetched security_and_analysis data")
+            .read_ctx("pre-fetched security_and_analysis data")
     }
 
     pub async fn read_private_vulnerability_reporting_status(
@@ -221,7 +222,7 @@ impl Client {
         let path = format!("/repos/{}/{repo}/code-scanning/default-setup", self.org);
         classify_read(self.get(&path).await?, "GET", &path, false)
             .await
-            .context("Failed to parse CodeQL default setup response")
+            .read_ctx("CodeQL default setup")
     }
 
     pub async fn update_codeql_default_setup(
@@ -232,7 +233,7 @@ impl Client {
         let path = format!("/repos/{}/{repo}/code-scanning/default-setup", self.org);
         response::optional_json(self.patch_json(&path, body).await?, "PATCH", &path)
             .await
-            .context("Failed to parse CodeQL default setup update response")
+            .read_ctx("CodeQL default setup update")
     }
 
     pub async fn list_code_security_configurations(
@@ -263,7 +264,7 @@ impl Client {
         let path = format!("/repos/{}/{repo}/code-security-configuration", self.org);
         classify_read(self.get(&path).await?, "GET", &path, false)
             .await
-            .context("Failed to parse repository code security configuration response")
+            .read_ctx("repository code security configuration")
     }
 
     pub async fn attach_code_security_configuration(

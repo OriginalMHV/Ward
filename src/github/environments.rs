@@ -7,7 +7,8 @@
 //! were additionally confirmed against live public-repository API responses,
 //! since GitHub's reference docs only describe the field as "array of object".
 
-use anyhow::{Context, Result};
+use crate::github::error::ReadContext;
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use super::Client;
@@ -223,7 +224,7 @@ impl Client {
             } else {
                 let body: EnvironmentsResponse = response::expect_json(response, "GET", &path)
                     .await
-                    .context("Failed to parse environments response")?;
+                    .read_ctx("environments")?;
                 let count = body.environments.len();
                 items.extend(body.environments);
                 if count < 30 {
@@ -301,7 +302,7 @@ impl Client {
                 let body: DeploymentBranchPoliciesResponse =
                     response::expect_json(response, "GET", &path)
                         .await
-                        .context("Failed to parse deployment branch policies response")?;
+                        .read_ctx("deployment branch policies")?;
                 let count = body.branch_policies.len();
                 items.extend(body.branch_policies);
                 if count < 30 {
@@ -371,7 +372,7 @@ impl Client {
         pagination::collect_paginated_wrapped(
             self,
             30,
-            "Failed to parse deployment protection rules response",
+            "deployment protection rules",
             |page| {
                 format!(
                     "/repos/{}/{repo}/environments/{env}/deployment_protection_rules?per_page={}&page={}",
@@ -426,7 +427,7 @@ impl Client {
                 let body: DeploymentProtectionRulesResponse =
                     response::expect_json(response, "GET", &path)
                         .await
-                        .context("Failed to parse deployment protection rules response")?;
+                        .read_ctx("deployment protection rules")?;
                 let count = body.custom_deployment_protection_rules.len();
                 items.extend(body.custom_deployment_protection_rules);
                 if count < 30 {
@@ -450,7 +451,7 @@ impl Client {
         pagination::collect_paginated_wrapped(
             self,
             30,
-            "Failed to parse available deployment protection rule apps response",
+            "available deployment protection rule apps",
             |page| {
                 format!(
                     "/repos/{}/{repo}/environments/{env}/deployment_protection_rules/apps?per_page={}&page={}",

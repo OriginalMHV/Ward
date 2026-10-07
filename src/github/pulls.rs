@@ -1,4 +1,5 @@
-use anyhow::{Context, Result};
+use crate::github::error::ReadContext;
+use anyhow::Result;
 use serde::Deserialize;
 
 use super::Client;
@@ -50,7 +51,7 @@ impl Client {
         let pr: PullRequest =
             response::expect_json(self.post_json(&path, &pr_body).await?, "POST", &path)
                 .await
-                .context("Failed to parse PR response")?;
+                .read_ctx("PR")?;
 
         // Request reviewers (best-effort)
         if !reviewers.is_empty() {

@@ -1,3 +1,4 @@
+use crate::github::error::ReadContext;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
@@ -324,7 +325,7 @@ impl Client {
         let ref_info: RefResponse =
             response::expect_json(self.get(&ref_path).await?, "GET", &ref_path)
                 .await
-                .context("Failed to parse ref response")?;
+                .read_ctx("ref")?;
         Ok(ref_info.object.sha)
     }
 
@@ -342,7 +343,7 @@ impl Client {
         let commit: CommitResponse =
             response::expect_json(self.get(&commit_path).await?, "GET", &commit_path)
                 .await
-                .context("Failed to parse commit response")?;
+                .read_ctx("commit")?;
         Ok(commit.tree.sha)
     }
 

@@ -1,6 +1,7 @@
 //! Repository webhook, deploy key, Pages, autolink, label, and custom-property APIs.
 
-use anyhow::{Context, Result};
+use crate::github::error::ReadContext;
+use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -148,7 +149,7 @@ impl Client {
             )
         })
         .await
-        .context("Failed to parse repo webhooks response")
+        .read_ctx("repo webhooks")
         .map(|outcome| match outcome {
             ReadOutcome::Available(items) => {
                 ReadOutcome::Available(items.into_iter().map(RepositoryWebhook::from).collect())
@@ -213,7 +214,7 @@ impl Client {
             )
         })
         .await
-        .context("Failed to parse repo deploy keys response")
+        .read_ctx("repo deploy keys")
         .map(|outcome| match outcome {
             ReadOutcome::Available(items) => {
                 ReadOutcome::Available(items.into_iter().map(RepositoryDeployKey::from).collect())
@@ -305,7 +306,7 @@ impl Client {
             )
         })
         .await
-        .context("Failed to parse repo autolinks response")
+        .read_ctx("repo autolinks")
     }
 
     pub async fn create_repo_autolink(&self, repo: &str, autolink: &AutolinkConfig) -> Result<()> {

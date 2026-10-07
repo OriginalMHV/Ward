@@ -8,7 +8,7 @@ use super::response::{self, ClassifiedResponse};
 /// errors, organization-locked settings, or endpoints that do not apply to a
 /// given repository). `Blocked` carries a redacted, human-readable reason
 /// (GitHub response bodies are never included verbatim; see
-/// [`super::response::GitHubApiError`]'s `Display` impl) so callers can
+/// [`super::error::ApiFailure`]'s `Display` impl) so callers can
 /// report it without treating it as a hard failure of the whole run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WriteOutcome<T = ()> {

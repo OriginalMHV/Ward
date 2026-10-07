@@ -227,9 +227,13 @@ impl Client {
         let body: GraphqlResponse<T> = response::expect_json(response, "POST", path).await?;
 
         if !body.errors.is_empty() {
-            return Err(anyhow::Error::new(response::GitHubApiError::graphql(
+            return Err(anyhow::Error::new(super::error::ApiFailure::graphql(
                 path,
-                body.errors.into_iter().map(|error| error.message).collect(),
+                &body
+                    .errors
+                    .into_iter()
+                    .map(|error| error.message)
+                    .collect::<Vec<_>>(),
             )));
         }
 
