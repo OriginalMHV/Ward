@@ -7,6 +7,16 @@ pub mod general;
 pub mod security_rules;
 pub mod unified;
 
+pub mod access;
+pub mod actions;
+pub mod branch_protection;
+pub mod common;
+pub mod environments;
+pub mod integrations;
+pub mod repository;
+pub mod rulesets;
+pub mod security;
+
 use std::future::Future;
 
 use crate::github::actions::ReadOutcome;
