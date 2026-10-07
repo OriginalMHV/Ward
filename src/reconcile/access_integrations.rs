@@ -19,7 +19,7 @@ use crate::github::access::{
 };
 use crate::github::actions::{ReadOutcome, WriteOutcome};
 use crate::github::integrations::{WebhookConfigPatch, WebhookMetadataPatch};
-use crate::reconcile::actions_environments::{IssueSeverity, ReconcileIssue};
+use crate::reconcile::common::issue::{IssueSeverity, ReconcileIssue, format_issue};
 
 const WEBHOOK_SECRET_HINT: &str =
     "GitHub does not return existing webhook secret values; preserve or rotate it explicitly.";
@@ -2479,10 +2479,6 @@ fn reference_kind_label(kind: ReferencedResourceType) -> &'static str {
         ReferencedResourceType::ProtectionRule => "protection_rule",
         ReferencedResourceType::Runner => "runner",
     }
-}
-
-fn format_issue(issue: &ReconcileIssue) -> String {
-    format!("{}: {}", issue.scope, issue.message)
 }
 
 fn record_read_outcome<T>(

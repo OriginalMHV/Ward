@@ -5,40 +5,33 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
+use super::common::actors::{actor_reference_key, normalize_actor_refs, repository_role_lookup};
+use super::common::coverage::{
+    collected_entry, lookup_failure_entry, not_applicable_entry, permission_denied_entry,
+    unavailable_entry,
+};
+pub use super::common::rules_issue::{ReconcileIssue, ReconcileIssueSeverity};
+use super::common::rules_issue::{blocker_issue, warning_issue};
 use crate::config::manifest::{
     ActorReference, BranchProtectionCategoryV2, BranchProtectionConfig, BranchStatusCheckConfigV2,
-    CategoryPolicy, CodeqlDefaultSetupConfig, CoverageEntry, CoverageOutcome,
-    DetailedBranchProtectionConfigV2, ManagementDisposition, ManifestCategoryName,
-    ProtectedBranchConfig, ReferencedResourceConfig, ReferencedResourceType, RepositoryRuleConfig,
-    RepositoryRulesetV2, RulesetBypassActorV2, RulesetReferenceV2, RulesetsCategoryV2,
-    SecurityCategoryV2, SecurityReviewerConfigV2, SecurityReviewerOptionsConfigV2,
+    CategoryPolicy, CodeqlDefaultSetupConfig, CoverageEntry, DetailedBranchProtectionConfigV2,
+    ManagementDisposition, ManifestCategoryName, ProtectedBranchConfig, ReferencedResourceConfig,
+    ReferencedResourceType, RepositoryRuleConfig, RepositoryRulesetV2, RulesetBypassActorV2,
+    RulesetReferenceV2, RulesetsCategoryV2, SecurityCategoryV2, SecurityReviewerConfigV2,
+    SecurityReviewerOptionsConfigV2,
 };
 use crate::github::Client;
 use crate::github::branch_protection::{
     ActorSet, AppActor, DesiredBranchProtection, DetailedBranchProtection, StatusCheckRequirement,
     TeamActor, UserActor,
 };
-use crate::github::rulesets::{RulesetCustomRepositoryRole, RulesetDetail};
+use crate::github::rulesets::RulesetDetail;
 use crate::github::security::{
     CodeSecurityConfiguration, CodeqlDefaultSetupState, RepositoryCodeSecurityConfiguration,
     RepositorySecurityBaseline, SecurityAndAnalysisState,
 };
 
 const SECURITY_ATTACHED_CONFIGURATION_PATH: &str = "categories.security.configuration_reference";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReconcileIssueSeverity {
-    Warning,
-    Blocker,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReconcileIssue {
-    pub resource: Option<String>,
-    pub code: &'static str,
-    pub severity: ReconcileIssueSeverity,
-    pub message: String,
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SecurityCollection {
@@ -1831,28 +1824,6 @@ fn configuration_reference_from_attachment(
     }
 }
 
-fn normalize_actor_refs(values: &[ActorReference]) -> Vec<String> {
-    let mut normalized = values.iter().map(actor_reference_key).collect::<Vec<_>>();
-    normalized.sort();
-    normalized
-}
-
-fn actor_reference_key(actor: &ActorReference) -> String {
-    match actor {
-        ActorReference::OrganizationAdmin => "org-admin".to_owned(),
-        ActorReference::Team { slug } => format!("team:{slug}"),
-        ActorReference::User { login } => format!("user:{login}"),
-        ActorReference::App { slug } => format!("app:{slug}"),
-        ActorReference::Role { name } => format!("role:{name}"),
-        ActorReference::Unresolved {
-            actor_type,
-            actor_id,
-        } => {
-            format!("unresolved:{actor_type}:{}", actor_id.unwrap_or_default())
-        }
-    }
-}
-
 fn clientless_org_hint() -> &'static str {
     "the configured organization"
 }
@@ -2004,20 +1975,6 @@ fn collect_repository_ruleset(
         rules,
         bypass_actors,
     })
-}
-
-fn repository_role_lookup(custom_roles: &[RulesetCustomRepositoryRole]) -> HashMap<u64, String> {
-    let mut roles = HashMap::from([
-        (1, "read".to_owned()),
-        (2, "maintain".to_owned()),
-        (3, "triage".to_owned()),
-        (4, "write".to_owned()),
-        (5, "admin".to_owned()),
-    ]);
-    for role in custom_roles {
-        roles.insert(role.id, role.name.clone());
-    }
-    roles
 }
 
 async fn repository_ruleset_to_api_json(
@@ -2873,97 +2830,6 @@ fn branch_action_sort_key(action: &BranchProtectionPlanAction) -> (u8, String) {
         BranchProtectionPlanAction::Upsert { branch, .. } => (0, branch.clone()),
         BranchProtectionPlanAction::Delete { branch } => (1, branch.clone()),
         BranchProtectionPlanAction::Unchanged { branch } => (2, branch.clone()),
-    }
-}
-
-fn collected_entry(category: ManifestCategoryName, endpoint: &str) -> CoverageEntry {
-    CoverageEntry {
-        category,
-        endpoint: endpoint.to_owned(),
-        outcome: CoverageOutcome::Collected,
-        reason: None,
-        required_permission: None,
-    }
-}
-
-fn permission_denied_entry(
-    category: ManifestCategoryName,
-    endpoint: &str,
-    reason: String,
-) -> CoverageEntry {
-    CoverageEntry {
-        category,
-        endpoint: endpoint.to_owned(),
-        outcome: CoverageOutcome::PermissionDenied,
-        reason: Some(reason),
-        required_permission: None,
-    }
-}
-
-fn not_applicable_entry(
-    category: ManifestCategoryName,
-    endpoint: &str,
-    reason: String,
-) -> CoverageEntry {
-    CoverageEntry {
-        category,
-        endpoint: endpoint.to_owned(),
-        outcome: CoverageOutcome::NotApplicable,
-        reason: Some(reason),
-        required_permission: None,
-    }
-}
-
-/// Record a failed lookup. A lookup the manifest does not need is not applicable,
-/// so it does not make the category count as unknown.
-fn lookup_failure_entry(
-    category: ManifestCategoryName,
-    endpoint: &str,
-    reason: String,
-    requested: bool,
-) -> CoverageEntry {
-    if requested {
-        unavailable_entry(category, endpoint, reason)
-    } else {
-        CoverageEntry {
-            category,
-            endpoint: endpoint.to_owned(),
-            outcome: CoverageOutcome::NotApplicable,
-            reason: Some(format!("not required by the manifest: {reason}")),
-            required_permission: None,
-        }
-    }
-}
-
-fn unavailable_entry(
-    category: ManifestCategoryName,
-    endpoint: &str,
-    reason: String,
-) -> CoverageEntry {
-    CoverageEntry {
-        category,
-        endpoint: endpoint.to_owned(),
-        outcome: CoverageOutcome::Unavailable,
-        reason: Some(reason),
-        required_permission: None,
-    }
-}
-
-fn warning_issue(resource: Option<String>, code: &'static str, message: String) -> ReconcileIssue {
-    ReconcileIssue {
-        resource,
-        code,
-        severity: ReconcileIssueSeverity::Warning,
-        message,
-    }
-}
-
-fn blocker_issue(resource: Option<String>, code: &'static str, message: String) -> ReconcileIssue {
-    ReconcileIssue {
-        resource,
-        code,
-        severity: ReconcileIssueSeverity::Blocker,
-        message,
     }
 }
 

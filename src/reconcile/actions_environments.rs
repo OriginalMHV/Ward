@@ -12,10 +12,14 @@
 //! whose `Debug` impl always redacts.
 
 use std::collections::BTreeMap;
-use std::fmt;
 
 use anyhow::{Context, Result};
 
+use super::common::coverage::record_read_outcome;
+pub use super::common::issue::{IssueSeverity, ReconcileIssue};
+use super::common::issue::{has_blocker, write_outcome_issue};
+pub use super::common::secrets::{EnvLookup, ResolvedSecret, SecretValue, process_env};
+use super::common::secrets::{resolve_secrets, seal_or_block};
 use super::relax_unrequested;
 
 use crate::config::manifest::{
@@ -32,156 +36,8 @@ use crate::github::environments::{
     self, DeploymentBranchPolicySummary, EnvironmentReviewerInput, EnvironmentUpdate,
 };
 
-// ---------------------------------------------------------------------------
-// Shared issue/severity vocabulary
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IssueSeverity {
-    /// Observational or non-blocking: the desired configuration could not be
-    /// applied as specified, but this does not indicate a failure.
-    Warning,
-    /// Prevents part of the plan from being applied (unresolved secret,
-    /// invalid combination, endpoint not applicable, etc.).
-    Blocker,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReconcileIssue {
-    /// Dotted path identifying what the issue concerns, e.g.
-    /// `actions.settings.enabled` or `environments.production.secrets.TOKEN`.
-    pub scope: String,
-    pub severity: IssueSeverity,
-    pub message: String,
-}
-
-impl ReconcileIssue {
-    fn warning(scope: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            scope: scope.into(),
-            severity: IssueSeverity::Warning,
-            message: message.into(),
-        }
-    }
-
-    fn blocker(scope: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            scope: scope.into(),
-            severity: IssueSeverity::Blocker,
-            message: message.into(),
-        }
-    }
-}
-
-fn has_blocker(issues: &[ReconcileIssue]) -> bool {
-    issues
-        .iter()
-        .any(|issue| issue.severity == IssueSeverity::Blocker)
-}
-
-// ---------------------------------------------------------------------------
-// Secret handling: resolution, redaction, encryption
-// ---------------------------------------------------------------------------
-
-/// A resolved secret plaintext value. `Debug` always redacts; the plaintext
-/// is only ever exposed to the sealed-box encryption call at apply time.
-#[derive(Clone, PartialEq, Eq)]
-pub struct SecretValue(String);
-
-impl SecretValue {
-    pub fn expose_for_encryption(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Debug for SecretValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("SecretValue(REDACTED)")
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedSecret {
-    pub name: String,
-    pub value: SecretValue,
-}
-
-/// Looks up an environment variable by name. Production code passes [`process_env`].
-pub type EnvLookup<'a> = &'a dyn Fn(&str) -> Option<String>;
-
-/// Read a variable from the process environment. Non-Unicode values count as unset.
-#[allow(
-    clippy::disallowed_methods,
-    reason = "the single production env lookup; everything else takes an injected lookup"
-)]
-pub fn process_env(key: &str) -> Option<String> {
-    std::env::var(key).ok()
-}
-
-/// Resolve a [`ExternalValueReference`] to a plaintext value. Returns `Err`
-/// with a safe (non-sensitive) reason string on failure; the reason never
-/// contains any resolved value.
-fn resolve_external_value_with(
-    reference: &ExternalValueReference,
-    lookup: EnvLookup<'_>,
-) -> Result<SecretValue, String> {
-    match reference {
-        ExternalValueReference::Env { key } => lookup(key)
-            .map(SecretValue)
-            .ok_or_else(|| format!("environment variable `{key}` is not set")),
-        ExternalValueReference::Manual { hint } => Err(match hint {
-            Some(hint) => format!("value must be provided manually ({hint})"),
-            None => "value must be provided manually".to_owned(),
-        }),
-    }
-}
-
-fn resolve_secrets(
-    placeholders: &[SecretPlaceholderConfig],
-    scope_prefix: &str,
-    issues: &mut Vec<ReconcileIssue>,
-    lookup: EnvLookup<'_>,
-) -> Vec<ResolvedSecret> {
-    let mut resolved = Vec::new();
-    for placeholder in placeholders {
-        match resolve_external_value_with(&placeholder.value_from, lookup) {
-            Ok(value) => resolved.push(ResolvedSecret {
-                name: placeholder.name.clone(),
-                value,
-            }),
-            Err(reason) => issues.push(ReconcileIssue::blocker(
-                format!("{scope_prefix}.secrets.{}", placeholder.name),
-                format!("Cannot resolve secret `{}`: {reason}", placeholder.name),
-            )),
-        }
-    }
-    resolved
-}
-
-/// Fetch a public key and seal `value` for it, converting encryption
-/// failures into a blocked-action reason rather than propagating a hard
-/// error (the plaintext is still never included in the reason).
-fn seal_or_block(public_key: &str, name: &str, value: &SecretValue) -> Result<String, String> {
-    actions::seal_secret_value(public_key, value.expose_for_encryption())
-        .map_err(|_| format!("Failed to encrypt secret `{name}` with the target public key"))
-}
-
 fn wants_change<T: PartialEq>(desired: Option<&T>, current: Option<&T>) -> bool {
     desired.is_some_and(|value| current != Some(value))
-}
-
-fn write_outcome_issue(
-    scope: &str,
-    outcome: WriteOutcome,
-    applied: &mut Vec<String>,
-) -> Option<ReconcileIssue> {
-    match outcome {
-        WriteOutcome::Applied(()) => {
-            applied.push(scope.to_owned());
-            None
-        }
-        WriteOutcome::Blocked(reason) => Some(ReconcileIssue::blocker(scope, reason)),
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -394,51 +250,6 @@ async fn resolve_org_variable_reference(
         repositories,
         coverage,
     ))
-}
-
-/// Record a classified [`actions::ReadOutcome`] into `coverage` when it is
-/// not `Available`, returning the value on success. Used throughout
-/// collection so an optional endpoint's 403/404/422/other failure becomes a
-/// [`CoverageEntry`] instead of aborting the rest of the snapshot.
-fn record_read_outcome<T>(
-    coverage: &mut Vec<CoverageEntry>,
-    category: ManifestCategoryName,
-    endpoint: &str,
-    outcome: actions::ReadOutcome<T>,
-) -> Option<T> {
-    match outcome {
-        actions::ReadOutcome::Available(value) => Some(value),
-        actions::ReadOutcome::NotApplicable(reason) => {
-            coverage.push(CoverageEntry {
-                category,
-                endpoint: endpoint.to_owned(),
-                outcome: CoverageOutcome::NotApplicable,
-                reason: Some(reason),
-                required_permission: None,
-            });
-            None
-        }
-        actions::ReadOutcome::PermissionDenied(reason) => {
-            coverage.push(CoverageEntry {
-                category,
-                endpoint: endpoint.to_owned(),
-                outcome: CoverageOutcome::PermissionDenied,
-                reason: Some(reason),
-                required_permission: None,
-            });
-            None
-        }
-        actions::ReadOutcome::Unavailable(reason) => {
-            coverage.push(CoverageEntry {
-                category,
-                endpoint: endpoint.to_owned(),
-                outcome: CoverageOutcome::Unavailable,
-                reason: Some(reason),
-                required_permission: None,
-            });
-            None
-        }
-    }
 }
 
 /// Collect the observable Actions configuration for `repo`. When `desired`
