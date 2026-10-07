@@ -18,6 +18,8 @@ use crate::github::settings::{
 use anyhow::{Context, Result};
 use serde_json::{Map, Value, json};
 
+const MERGE_SETTINGS_UNREADABLE: &str = "GitHub returns the merge settings (allow_squash_merge, allow_merge_commit, allow_rebase_merge, allow_auto_merge, delete_branch_on_merge, allow_update_branch, merge commit title and message, use_squash_pr_title_as_default) only to callers with push or admin access to the repository. This token has read-only access, so Ward skips them. Use a token with write access to the repository to check them.";
+
 pub async fn collect(client: &Client, repo: &str) -> Result<CollectedGeneralState> {
     let rest = client.get_repository_general_settings(repo).await?;
     collect_with_rest(client, repo, rest).await
@@ -41,6 +43,16 @@ pub async fn collect_with_rest(
 ) -> Result<CollectedGeneralState> {
     let mut coverage = unsupported_repository_settings_coverage();
     coverage.push(collected("GET /repos/{owner}/{repo}"));
+    let merge_settings_unreadable = !rest.merge_settings_returned();
+    if merge_settings_unreadable {
+        coverage.push(coverage_entry(
+            ManifestCategoryName::Repository,
+            "GET /repos/{owner}/{repo} merge settings",
+            CoverageOutcome::PermissionDenied,
+            Some(MERGE_SETTINGS_UNREADABLE.to_owned()),
+            Some("push".to_owned()),
+        ));
+    }
 
     let (graphql_result, topics_result, properties_result, immutable_result, labels_result) = tokio::join!(
         client.get_repository_graphql_settings_classified(repo),
@@ -301,6 +313,7 @@ pub async fn collect_with_rest(
         extensions: GeneralCollectedExtensions {
             repository_id: rest.node_id,
             graphql_settings_collected: graphql.is_some(),
+            merge_settings_unreadable,
             labels_collected,
             custom_properties_collected,
             immutable_releases_collected: immutable_releases.is_some(),
@@ -340,32 +353,24 @@ pub(super) fn build_repository_settings(
     if let Some(value) = normalize_optional_policy(rest.pull_request_creation_policy.as_deref()) {
         insert_value(&mut map, "pull_request_creation_policy", json!(value));
     }
-    insert_value(
-        &mut map,
-        "allow_squash_merge",
-        json!(rest.allow_squash_merge),
-    );
-    insert_value(
-        &mut map,
-        "allow_merge_commit",
-        json!(rest.allow_merge_commit),
-    );
-    insert_value(
-        &mut map,
-        "allow_rebase_merge",
-        json!(rest.allow_rebase_merge),
-    );
-    insert_value(&mut map, "allow_auto_merge", json!(rest.allow_auto_merge));
-    insert_value(
-        &mut map,
-        "delete_branch_on_merge",
-        json!(rest.delete_branch_on_merge),
-    );
-    insert_value(
-        &mut map,
-        "allow_update_branch",
-        json!(rest.allow_update_branch),
-    );
+    if let Some(value) = rest.allow_squash_merge {
+        insert_value(&mut map, "allow_squash_merge", json!(value));
+    }
+    if let Some(value) = rest.allow_merge_commit {
+        insert_value(&mut map, "allow_merge_commit", json!(value));
+    }
+    if let Some(value) = rest.allow_rebase_merge {
+        insert_value(&mut map, "allow_rebase_merge", json!(value));
+    }
+    if let Some(value) = rest.allow_auto_merge {
+        insert_value(&mut map, "allow_auto_merge", json!(value));
+    }
+    if let Some(value) = rest.delete_branch_on_merge {
+        insert_value(&mut map, "delete_branch_on_merge", json!(value));
+    }
+    if let Some(value) = rest.allow_update_branch {
+        insert_value(&mut map, "allow_update_branch", json!(value));
+    }
     if let Some(value) = rest.use_squash_pr_title_as_default {
         insert_value(&mut map, "use_squash_pr_title_as_default", json!(value));
     }

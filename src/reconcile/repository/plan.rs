@@ -118,102 +118,104 @@ pub fn plan_with_options(
             .as_deref(),
         false,
     );
-    plan_bool_change(
-        &mut changes,
-        &mut rest_patch,
-        "allow_squash_merge",
-        current_settings.allow_squash_merge,
-        current_settings_value_bool(&current_settings, "allow_squash_merge"),
-        desired_setting_bool(desired, "allow_squash_merge"),
-        false,
-    );
-    plan_bool_change(
-        &mut changes,
-        &mut rest_patch,
-        "allow_merge_commit",
-        current_settings.allow_merge_commit,
-        current_settings_value_bool(&current_settings, "allow_merge_commit"),
-        desired_setting_bool(desired, "allow_merge_commit"),
-        false,
-    );
-    plan_bool_change(
-        &mut changes,
-        &mut rest_patch,
-        "allow_rebase_merge",
-        current_settings.allow_rebase_merge,
-        current_settings_value_bool(&current_settings, "allow_rebase_merge"),
-        desired_setting_bool(desired, "allow_rebase_merge"),
-        false,
-    );
-    plan_bool_change(
-        &mut changes,
-        &mut rest_patch,
-        "allow_auto_merge",
-        current_settings.allow_auto_merge,
-        current_settings_value_bool(&current_settings, "allow_auto_merge"),
-        desired_setting_bool(desired, "allow_auto_merge"),
-        false,
-    );
-    plan_bool_change(
-        &mut changes,
-        &mut rest_patch,
-        "delete_branch_on_merge",
-        current_settings.delete_branch_on_merge,
-        current_settings_value_bool(&current_settings, "delete_branch_on_merge"),
-        desired_setting_bool(desired, "delete_branch_on_merge"),
-        false,
-    );
-    plan_bool_change(
-        &mut changes,
-        &mut rest_patch,
-        "allow_update_branch",
-        current_settings.allow_update_branch,
-        current_settings_value_bool(&current_settings, "allow_update_branch"),
-        desired_setting_bool(desired, "allow_update_branch"),
-        false,
-    );
-    plan_bool_change(
-        &mut changes,
-        &mut rest_patch,
-        "use_squash_pr_title_as_default",
-        current.extensions.use_squash_pr_title_as_default,
-        current.extensions.use_squash_pr_title_as_default,
-        desired_setting_bool(desired, "use_squash_pr_title_as_default")
-            .or(desired.extensions.use_squash_pr_title_as_default),
-        false,
-    );
-    plan_optional_string_change(
-        &mut changes,
-        &mut rest_patch,
-        "squash_merge_commit_title",
-        current_settings.squash_merge_commit_title.as_deref(),
-        desired_setting_string(desired, "squash_merge_commit_title"),
-        false,
-    );
-    plan_optional_string_change(
-        &mut changes,
-        &mut rest_patch,
-        "squash_merge_commit_message",
-        current_settings.squash_merge_commit_message.as_deref(),
-        desired_setting_string(desired, "squash_merge_commit_message"),
-        false,
-    );
-    plan_optional_string_change(
-        &mut changes,
-        &mut rest_patch,
-        "merge_commit_title",
-        current_settings.merge_commit_title.as_deref(),
-        desired_setting_string(desired, "merge_commit_title"),
-        false,
-    );
-    plan_optional_string_change(
-        &mut changes,
-        &mut rest_patch,
-        "merge_commit_message",
-        current_settings.merge_commit_message.as_deref(),
-        desired_setting_string(desired, "merge_commit_message"),
-        false,
-    );
+    if !current.extensions.merge_settings_unreadable {
+        plan_bool_change(
+            &mut changes,
+            &mut rest_patch,
+            "allow_squash_merge",
+            current_settings.allow_squash_merge,
+            current_settings_value_bool(&current_settings, "allow_squash_merge"),
+            desired_setting_bool(desired, "allow_squash_merge"),
+            false,
+        );
+        plan_bool_change(
+            &mut changes,
+            &mut rest_patch,
+            "allow_merge_commit",
+            current_settings.allow_merge_commit,
+            current_settings_value_bool(&current_settings, "allow_merge_commit"),
+            desired_setting_bool(desired, "allow_merge_commit"),
+            false,
+        );
+        plan_bool_change(
+            &mut changes,
+            &mut rest_patch,
+            "allow_rebase_merge",
+            current_settings.allow_rebase_merge,
+            current_settings_value_bool(&current_settings, "allow_rebase_merge"),
+            desired_setting_bool(desired, "allow_rebase_merge"),
+            false,
+        );
+        plan_bool_change(
+            &mut changes,
+            &mut rest_patch,
+            "allow_auto_merge",
+            current_settings.allow_auto_merge,
+            current_settings_value_bool(&current_settings, "allow_auto_merge"),
+            desired_setting_bool(desired, "allow_auto_merge"),
+            false,
+        );
+        plan_bool_change(
+            &mut changes,
+            &mut rest_patch,
+            "delete_branch_on_merge",
+            current_settings.delete_branch_on_merge,
+            current_settings_value_bool(&current_settings, "delete_branch_on_merge"),
+            desired_setting_bool(desired, "delete_branch_on_merge"),
+            false,
+        );
+        plan_bool_change(
+            &mut changes,
+            &mut rest_patch,
+            "allow_update_branch",
+            current_settings.allow_update_branch,
+            current_settings_value_bool(&current_settings, "allow_update_branch"),
+            desired_setting_bool(desired, "allow_update_branch"),
+            false,
+        );
+        plan_bool_change(
+            &mut changes,
+            &mut rest_patch,
+            "use_squash_pr_title_as_default",
+            current.extensions.use_squash_pr_title_as_default,
+            current.extensions.use_squash_pr_title_as_default,
+            desired_setting_bool(desired, "use_squash_pr_title_as_default")
+                .or(desired.extensions.use_squash_pr_title_as_default),
+            false,
+        );
+        plan_optional_string_change(
+            &mut changes,
+            &mut rest_patch,
+            "squash_merge_commit_title",
+            current_settings.squash_merge_commit_title.as_deref(),
+            desired_setting_string(desired, "squash_merge_commit_title"),
+            false,
+        );
+        plan_optional_string_change(
+            &mut changes,
+            &mut rest_patch,
+            "squash_merge_commit_message",
+            current_settings.squash_merge_commit_message.as_deref(),
+            desired_setting_string(desired, "squash_merge_commit_message"),
+            false,
+        );
+        plan_optional_string_change(
+            &mut changes,
+            &mut rest_patch,
+            "merge_commit_title",
+            current_settings.merge_commit_title.as_deref(),
+            desired_setting_string(desired, "merge_commit_title"),
+            false,
+        );
+        plan_optional_string_change(
+            &mut changes,
+            &mut rest_patch,
+            "merge_commit_message",
+            current_settings.merge_commit_message.as_deref(),
+            desired_setting_string(desired, "merge_commit_message"),
+            false,
+        );
+    }
     plan_bool_change(
         &mut changes,
         &mut rest_patch,

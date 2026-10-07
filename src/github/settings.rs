@@ -71,17 +71,17 @@ pub struct RepositoryGeneralSettings {
     #[serde(default)]
     pub pull_request_creation_policy: Option<String>,
     #[serde(default)]
-    pub allow_squash_merge: bool,
+    pub allow_squash_merge: Option<bool>,
     #[serde(default)]
-    pub allow_merge_commit: bool,
+    pub allow_merge_commit: Option<bool>,
     #[serde(default)]
-    pub allow_rebase_merge: bool,
+    pub allow_rebase_merge: Option<bool>,
     #[serde(default)]
-    pub allow_auto_merge: bool,
+    pub allow_auto_merge: Option<bool>,
     #[serde(default)]
-    pub delete_branch_on_merge: bool,
+    pub delete_branch_on_merge: Option<bool>,
     #[serde(default)]
-    pub allow_update_branch: bool,
+    pub allow_update_branch: Option<bool>,
     #[serde(default)]
     pub use_squash_pr_title_as_default: Option<bool>,
     #[serde(default)]
@@ -96,6 +96,16 @@ pub struct RepositoryGeneralSettings {
     pub web_commit_signoff_required: bool,
 }
 
+impl RepositoryGeneralSettings {
+    /// GitHub omits the merge settings from `GET /repos/{repo}` unless the caller has push or
+    /// admin access. An omitted field means "not returned", never `false`.
+    pub fn merge_settings_returned(&self) -> bool {
+        self.allow_squash_merge.is_some()
+            && self.allow_merge_commit.is_some()
+            && self.allow_rebase_merge.is_some()
+    }
+}
+
 impl From<RepositoryGeneralSettings> for RepoSettings {
     fn from(value: RepositoryGeneralSettings) -> Self {
         Self {
@@ -105,12 +115,12 @@ impl From<RepositoryGeneralSettings> for RepoSettings {
             has_discussions: value.has_discussions,
             has_pull_requests: value.has_pull_requests,
             pull_request_creation_policy: value.pull_request_creation_policy,
-            allow_squash_merge: value.allow_squash_merge,
-            allow_merge_commit: value.allow_merge_commit,
-            allow_rebase_merge: value.allow_rebase_merge,
-            allow_auto_merge: value.allow_auto_merge,
-            delete_branch_on_merge: value.delete_branch_on_merge,
-            allow_update_branch: value.allow_update_branch,
+            allow_squash_merge: value.allow_squash_merge.unwrap_or_default(),
+            allow_merge_commit: value.allow_merge_commit.unwrap_or_default(),
+            allow_rebase_merge: value.allow_rebase_merge.unwrap_or_default(),
+            allow_auto_merge: value.allow_auto_merge.unwrap_or_default(),
+            delete_branch_on_merge: value.delete_branch_on_merge.unwrap_or_default(),
+            allow_update_branch: value.allow_update_branch.unwrap_or_default(),
             squash_merge_commit_title: value.squash_merge_commit_title,
             squash_merge_commit_message: value.squash_merge_commit_message,
             merge_commit_title: value.merge_commit_title,
