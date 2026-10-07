@@ -68,6 +68,18 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 
 Open an issue. There are no dumb questions.
 
+## Ward manages Ward
+
+This repository checks its own settings with Ward. The manifest is `.github/ward.toml`. It manages the `repository` category (description, homepage, topics and merge settings). All other categories are observe-only.
+
+To change repository settings:
+
+1. Edit `.github/ward.toml` in a PR.
+2. Run `ward --config .github/ward.toml plan` and check the result.
+3. After the PR merges, a maintainer runs `ward --config .github/ward.toml apply --category repository`.
+
+The `Ward drift` workflow runs every Monday, on manual dispatch and when `.github/ward.toml` changes on `main`. It opens or updates one issue titled "Ward drift detected" when GitHub differs from the manifest. It closes the issue when the drift is gone. The job needs a `WARD_DRIFT_TOKEN` repository secret. Without it, the job uses the default workflow token and some admin-level categories report as unreadable.
+
 ## Releasing
 
 Maintainers release with one command from a clean, up-to-date `main`:

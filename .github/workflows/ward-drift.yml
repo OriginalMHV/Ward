@@ -1,0 +1,98 @@
+name: Ward drift
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/ward.toml
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ward-drift
+  cancel-in-progress: false
+
+env:
+  ISSUE_TITLE: Ward drift detected
+
+jobs:
+  drift:
+    name: Check drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Ward
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            https://github.com/OriginalMHV/Ward/releases/latest/download/ward-cli-installer.sh | sh
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Run drift check
+        id: drift
+        env:
+          GH_TOKEN: ${{ secrets.WARD_DRIFT_TOKEN || github.token }}
+          HAS_DRIFT_TOKEN: ${{ secrets.WARD_DRIFT_TOKEN != '' }}
+          NO_COLOR: "1"
+        run: |
+          if [ "$HAS_DRIFT_TOKEN" != "true" ]; then
+            echo "::notice::WARD_DRIFT_TOKEN is not set. Using the workflow token. Admin-level categories may report as unreadable."
+          fi
+          ward --version
+          set +e
+          ward drift --config .github/ward.toml --format json > drift.json
+          json_code=$?
+          ward drift --config .github/ward.toml > drift.txt
+          text_code=$?
+          set -e
+          cat drift.txt
+          code=$json_code
+          if [ "$text_code" -gt "$code" ]; then code=$text_code; fi
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the drift issue
+        if: steps.drift.outputs.exit_code == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "Ward found drift between \`.github/ward.toml\` and GitHub."
+            echo
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo
+            echo '```text'
+            head -c 60000 drift.txt
+            echo
+            echo '```'
+          } > issue-body.md
+          number=$(gh issue list --state open --search "\"$ISSUE_TITLE\" in:title" \
+            --json number,title --jq "[.[] | select(.title == \"$ISSUE_TITLE\")][0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --body-file issue-body.md
+          else
+            gh issue create --title "$ISSUE_TITLE" --body-file issue-body.md
+          fi
+
+      - name: Close the drift issue
+        if: steps.drift.outputs.exit_code == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          number=$(gh issue list --state open --search "\"$ISSUE_TITLE\" in:title" \
+            --json number,title --jq "[.[] | select(.title == \"$ISSUE_TITLE\")][0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue close "$number" --comment "Ward found no drift in $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
+          fi
+
+      - name: Fail when Ward could not run
+        if: steps.drift.outputs.exit_code != '0' && steps.drift.outputs.exit_code != '1'
+        run: |
+          echo "::error::Ward could not run the drift check (exit code ${{ steps.drift.outputs.exit_code }}). See the log above."
+          exit 1
