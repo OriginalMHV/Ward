@@ -2,6 +2,8 @@
 
 Thanks for considering a contribution. Here's how to get started.
 
+All contributors must follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Setup
 
 ```bash
