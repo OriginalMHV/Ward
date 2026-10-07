@@ -1,0 +1,282 @@
+# Ward configuration imported from OriginalMHV/Ward
+# Import is read-only. Run `ward plan` before `ward apply`.
+# Sensitive categories are observe-only until their policy is changed to managed.
+
+[org]
+name = "OriginalMHV"
+
+[file_delivery]
+branch = "chore/ward-sync"
+reviewers = []
+commit_message_prefix = "chore: "
+
+[[systems]]
+id = "Ward"
+name = "Imported from OriginalMHV/Ward"
+match_prefix = false
+repos = ["Ward"]
+
+[schema]
+version = 2
+
+[provenance]
+repository = "OriginalMHV/Ward"
+default_branch = "main"
+repository_node_id = "R_kgDORtERrA"
+default_branch_head_oid = "4adfebc58a324d432c08599859c823c2471052ab"
+
+[categories.security]
+dependabot_alerts = true
+dependabot_security_updates = true
+secret_scanning = true
+secret_scanning_push_protection = true
+secret_scanning_validity_checks = false
+secret_scanning_non_provider_patterns = false
+private_vulnerability_reporting = false
+
+[categories.security.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[categories.security.codeql_default_setup]
+state = "not-configured"
+languages = [
+    "actions",
+    "rust",
+]
+query_suite = "default"
+runner_type = "standard"
+threat_model = "remote"
+
+[categories.repository.policy]
+disposition = "managed"
+prune = false
+sensitive = false
+
+[categories.repository.settings]
+has_issues = true
+has_projects = false
+has_wiki = false
+has_discussions = false
+has_pull_requests = true
+pull_request_creation_policy = "all"
+has_sponsorships_enabled = false
+issue_creation_policy = "all"
+allow_squash_merge = true
+allow_merge_commit = false
+allow_rebase_merge = true
+allow_auto_merge = false
+delete_branch_on_merge = false
+allow_update_branch = false
+squash_merge_commit_title = "PR_TITLE"
+squash_merge_commit_message = "COMMIT_MESSAGES"
+merge_commit_title = "MERGE_MESSAGE"
+merge_commit_message = "PR_TITLE"
+web_commit_signoff_required = false
+use_squash_pr_title_as_default = true
+topics = [
+    "cli",
+    "cli-tool",
+    "devops",
+    "github",
+    "github-config",
+    "github-management",
+    "gitops",
+    "repository-management",
+]
+
+[categories.repository.metadata]
+description = "Declarative GitHub repository management. Plan, apply, verify."
+homepage = "https://crates.io/crates/ward-cli/"
+default_branch = "main"
+visibility = "public"
+archived = false
+is_template = false
+allow_forking = true
+
+[categories.repository.immutable_releases]
+enabled = false
+enforced_by_owner = false
+
+[categories.branch_protection.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[categories.rulesets.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[categories.files]
+include = [
+    ".github/**",
+    ".devcontainer/**",
+    "devcontainer.json",
+    "CODEOWNERS",
+    "docs/CODEOWNERS",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "SUPPORT.md",
+    "CODE_OF_CONDUCT.md",
+    "GOVERNANCE.md",
+    "CITATION.cff",
+    ".gitignore",
+    ".gitattributes",
+    ".editorconfig",
+    "sonar-project.properties",
+    ".shellcheckrc",
+    "renovate.json",
+    "renovate.json5",
+    ".renovaterc",
+    ".renovaterc.json",
+    ".commitlintrc",
+    ".commitlintrc.json",
+    ".commitlintrc.yaml",
+    ".commitlintrc.yml",
+    "commitlint.config.js",
+    "commitlint.config.cjs",
+    ".markdownlint*",
+    ".yamllint*",
+    ".pre-commit-config.yaml",
+    "lefthook.yml",
+    "lefthook.yaml",
+    ".releaserc*",
+    "release.config.js",
+    "release.config.cjs",
+    "release-please-config.json",
+]
+
+[categories.files.policy]
+disposition = "observe"
+prune = false
+sensitive = false
+
+[categories.actions.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[categories.actions.settings]
+enabled = true
+allowed_actions = "all"
+requires_pinned_actions = false
+default_workflow_permissions = "write"
+can_approve_pull_request_reviews = false
+artifact_retention_days = 90
+log_retention_days = 90
+fork_pull_request_contributor_approval = "first_time_contributors"
+
+[[categories.actions.secrets]]
+name = "HOMEBREW_TAP_TOKEN"
+
+[categories.actions.secrets.value_from]
+source = "env"
+key = "WARD_ACTIONS_SECRET_HOMEBREW_TAP_TOKEN"
+
+[[categories.actions.secrets]]
+name = "WARD_DRIFT_TOKEN"
+
+[categories.actions.secrets.value_from]
+source = "env"
+key = "WARD_ACTIONS_SECRET_WARD_DRIFT_TOKEN"
+
+[[categories.actions.workflows]]
+path = ".github/workflows/ci.yml"
+enabled = true
+
+[[categories.actions.workflows]]
+path = ".github/workflows/codeql.yml"
+enabled = true
+
+[[categories.actions.workflows]]
+path = ".github/workflows/release.yml"
+enabled = true
+
+[[categories.actions.workflows]]
+path = ".github/workflows/ward-drift.yml"
+enabled = true
+
+[[categories.actions.workflows]]
+path = "dynamic/dependabot/dependabot-updates"
+enabled = true
+
+[categories.environments.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[categories.access]
+teams = []
+
+[categories.access.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[[categories.access.collaborators]]
+permission = "admin"
+
+[categories.access.collaborators.actor]
+type = "user"
+login = "OriginalMHV"
+
+[categories.integrations.policy]
+disposition = "observe"
+prune = false
+sensitive = true
+
+[[categories.integrations.labels]]
+name = "bug"
+color = "d73a4a"
+description = "Something isn't working"
+default = true
+
+[[categories.integrations.labels]]
+name = "documentation"
+color = "0075ca"
+description = "Improvements or additions to documentation"
+default = true
+
+[[categories.integrations.labels]]
+name = "duplicate"
+color = "cfd3d7"
+description = "This issue or pull request already exists"
+default = true
+
+[[categories.integrations.labels]]
+name = "enhancement"
+color = "a2eeef"
+description = "New feature or request"
+default = true
+
+[[categories.integrations.labels]]
+name = "good first issue"
+color = "7057ff"
+description = "Good for newcomers"
+default = true
+
+[[categories.integrations.labels]]
+name = "help wanted"
+color = "008672"
+description = "Extra attention is needed"
+default = true
+
+[[categories.integrations.labels]]
+name = "invalid"
+color = "e4e669"
+description = "This doesn't seem right"
+default = true
+
+[[categories.integrations.labels]]
+name = "question"
+color = "d876e3"
+description = "Further information is requested"
+default = true
+
+[[categories.integrations.labels]]
+name = "wontfix"
+color = "ffffff"
+description = "This will not be worked on"
+default = true
