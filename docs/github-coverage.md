@@ -54,6 +54,8 @@ Outcomes are:
 
 Collectors are independent. A permission failure in one optional collector does not erase unrelated source state. Use `--strict` when permission-denied or unavailable readable state must fail repository bootstrap.
 
+GitHub returns the merge settings (merge methods, auto-merge, branch update and deletion, merge commit titles and messages, `use_squash_pr_title_as_default`) only to callers with push or admin access. For a read-only token, Ward records `GET /repos/{owner}/{repo} merge settings` as `permission_denied` and plans no changes for those fields. A `ward drift` run reports this as unreadable managed state, not as a change to apply.
+
 Coverage is source evidence, not desired mutable state. Manually authored manifests do not need provenance or coverage records.
 
 ## Public API boundaries

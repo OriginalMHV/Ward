@@ -109,6 +109,10 @@ pub struct GeneralCollectedExtensions {
     #[serde(default)]
     pub graphql_settings_collected: bool,
 
+    /// GitHub did not return the merge settings, so Ward must not plan changes for them.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub merge_settings_unreadable: bool,
+
     #[serde(default)]
     pub labels_collected: bool,
 
@@ -135,6 +139,10 @@ pub struct GeneralCollectedExtensions {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub use_squash_pr_title_as_default: Option<bool>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]

@@ -80,6 +80,7 @@ fn current_state() -> CollectedGeneralState {
         extensions: GeneralCollectedExtensions {
             repository_id: "R_kgDOTest".to_owned(),
             graphql_settings_collected: true,
+            merge_settings_unreadable: false,
             labels_collected: true,
             custom_properties_collected: true,
             immutable_releases_collected: true,
