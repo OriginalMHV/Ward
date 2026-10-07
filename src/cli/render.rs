@@ -37,11 +37,38 @@ pub fn render_error(error: &anyhow::Error, verbose: bool) -> String {
 
 /// How many details are shown under each category before pointing to `--json`.
 const SHOWN_DETAILS: usize = 4;
-/// Longest error text shown under a category.
+/// Longest single line of error text shown under a category.
 const MAX_ERROR_CHARS: usize = 300;
 
-fn one_line_error(error: &str) -> String {
-    let flattened = error.split_whitespace().collect::<Vec<_>>().join(" ");
+/// Most lines shown for one reason.
+const MAX_ERROR_LINES: usize = 8;
+
+/// Write `text` as a block. The first line follows `first`, later lines are
+/// indented under it. Blank lines are dropped and long lines are cut.
+fn write_block(
+    out: &mut impl std::io::Write,
+    first: &str,
+    indent: &str,
+    text: &str,
+) -> std::io::Result<()> {
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    for (index, line) in lines.iter().take(MAX_ERROR_LINES).enumerate() {
+        let prefix = if index == 0 { first } else { indent };
+        writeln!(out, "{prefix}{}", cut(line))?;
+    }
+    let hidden = lines.len().saturating_sub(MAX_ERROR_LINES);
+    if hidden > 0 {
+        writeln!(out, "{indent}... {hidden} more line(s), use --format json")?;
+    }
+    Ok(())
+}
+
+fn cut(line: &str) -> String {
+    let flattened = line.split_whitespace().collect::<Vec<_>>().join(" ");
     if flattened.chars().count() <= MAX_ERROR_CHARS {
         return flattened;
     }
@@ -88,7 +115,7 @@ pub fn render_report_to(
                 .as_deref()
                 .filter(|_| matches!(category.status.as_str(), "failed" | "blocked"))
             {
-                writeln!(out, "        reason: {}", one_line_error(error))?;
+                write_block(out, "        reason: ", "                ", error)?;
             }
             let advised = category
                 .details
@@ -98,7 +125,7 @@ pub fn render_report_to(
                 writeln!(out, "        next: {}", deferred_advice(repo))?;
             }
             for detail in category.details.iter().take(SHOWN_DETAILS) {
-                writeln!(out, "        - {detail}")?;
+                write_block(out, "        - ", "          ", detail)?;
             }
             let hidden = category.details.len().saturating_sub(SHOWN_DETAILS);
             if hidden > 0 {
@@ -242,13 +269,30 @@ mod tests {
 
         let text = render(&report_with(category));
 
-        let reason = text
-            .lines()
-            .find(|line| line.trim_start().starts_with("reason:"))
+        let lines: Vec<&str> = text.lines().collect();
+        let start = lines
+            .iter()
+            .position(|line| line.trim_start().starts_with("reason: PUT failed"))
             .expect("a reason line");
-        assert!(reason.contains("PUT failed with HTTP 422"));
-        assert!(reason.ends_with("..."), "{reason}");
-        assert!(reason.len() < 340, "{}", reason.len());
+        let next = lines[start + 1];
+        assert!(next.trim_start().starts_with("with HTTP 422"), "{next}");
+        assert!(next.ends_with("..."), "{next}");
+        assert!(next.len() < 340, "{}", next.len());
+    }
+
+    #[test]
+    fn multi_line_reasons_keep_one_entry_per_indented_line() {
+        let error = "Could not write repo to GitHub: PATCH /repos/o/r failed with HTTP 422 Unprocessable Entity. Fix the value below in the manifest, then try again.\n  - Repository.name (invalid): name is too long\n  - Label.color (invalid)\nDocumentation: https://docs.github.com/rest/repos/repos";
+        let mut details = vec!["first line\nsecond line".to_owned()];
+        details.push("plain".to_owned());
+        let text = render(&report_with(category(
+            "failed",
+            Some(error.to_owned()),
+            details,
+        )));
+
+        let expected = "        reason: Could not write repo to GitHub: PATCH /repos/o/r failed with HTTP 422 Unprocessable Entity. Fix the value below in the manifest, then try again.\n                - Repository.name (invalid): name is too long\n                - Label.color (invalid)\n                Documentation: https://docs.github.com/rest/repos/repos\n        - first line\n          second line\n        - plain\n";
+        assert!(text.contains(expected), "{text}");
     }
 
     #[test]

@@ -264,3 +264,44 @@ fn no_source_file_says_failed_to_parse() {
         "use read_ctx or a plain-English message instead of \"Failed to parse\" in: {hits:?}"
     );
 }
+
+async fn rendered(template: ResponseTemplate) -> String {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/test-org/r"))
+        .respond_with(template)
+        .mount(&server)
+        .await;
+    let client = Client::new_for_test("test-org", &server.uri());
+    let err = client.get_repo("r").await.expect_err("request must fail");
+    ward::cli::render::render_error(&err, false)
+}
+
+#[tokio::test]
+async fn a_401_prints_the_failure_and_its_next_step() {
+    let text = rendered(json_response(401, json!({"message": "Bad credentials"}))).await;
+    assert_eq!(
+        text,
+        "Error: Could not read repo from GitHub\n  Caused by: GET /repos/test-org/r failed with HTTP 401 Unauthorized. GitHub says: Bad credentials. The token is missing, expired or invalid. Set a valid token in GH_TOKEN or GITHUB_TOKEN, or run `gh auth login`. Then try again."
+    );
+}
+
+#[tokio::test]
+async fn a_422_prints_each_entry_on_its_own_indented_line() {
+    let text = rendered(json_response(
+        422,
+        json!({
+            "message": "Validation Failed",
+            "documentation_url": "https://docs.github.com/rest/repos/repos",
+            "errors": [
+                {"resource": "Repository", "field": "name", "code": "invalid", "message": "name is too long"},
+                {"resource": "Label", "field": "color", "code": "invalid"}
+            ]
+        }),
+    ))
+    .await;
+    assert_eq!(
+        text,
+        "Error: Could not read repo from GitHub\n  Caused by: GET /repos/test-org/r failed with HTTP 422 Unprocessable Entity. GitHub says: Validation Failed. GitHub rejected the data that Ward sent. Fix the value below in the manifest, then try again.\n      - Repository.name (invalid): name is too long\n      - Label.color (invalid)\n    Documentation: https://docs.github.com/rest/repos/repos"
+    );
+}
