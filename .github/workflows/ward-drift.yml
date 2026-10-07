@@ -38,12 +38,15 @@ jobs:
       - name: Run drift check
         id: drift
         env:
-          GH_TOKEN: ${{ secrets.WARD_DRIFT_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.WARD_DRIFT_TOKEN }}
           HAS_DRIFT_TOKEN: ${{ secrets.WARD_DRIFT_TOKEN != '' }}
           NO_COLOR: "1"
         run: |
           if [ "$HAS_DRIFT_TOKEN" != "true" ]; then
-            echo "::notice::WARD_DRIFT_TOKEN is not set. Using the workflow token. Admin-level categories may report as unreadable."
+            # The workflow token cannot read admin settings, so a run would report false drift.
+            echo "::warning::WARD_DRIFT_TOKEN is not set, so the drift check is skipped. See CONTRIBUTING.md."
+            echo "exit_code=skipped" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           ward --version
           set +e
@@ -92,7 +95,7 @@ jobs:
           fi
 
       - name: Fail when Ward could not run
-        if: steps.drift.outputs.exit_code != '0' && steps.drift.outputs.exit_code != '1'
+        if: steps.drift.outputs.exit_code != '0' && steps.drift.outputs.exit_code != '1' && steps.drift.outputs.exit_code != 'skipped'
         run: |
           echo "::error::Ward could not run the drift check (exit code ${{ steps.drift.outputs.exit_code }}). See the log above."
           exit 1
