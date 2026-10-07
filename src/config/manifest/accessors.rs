@@ -35,14 +35,14 @@ impl Manifest {
             std::fs::read_to_string(path).with_context(|| format!("Failed to read {path}"))?;
 
         let table: toml::Table =
-            toml::from_str(&content).with_context(|| format!("Could not read the manifest {path}. It is not valid TOML, or a field has the wrong type"))?;
+            toml::from_str(&content).with_context(|| format!("Could not read the manifest {path}. It is not valid TOML, or a field has the wrong type."))?;
         if table.contains_key("schema") {
             anyhow::bail!(
                 "{path} contains a [schema] table. Ward no longer uses it. Remove the table."
             );
         }
 
-        toml::from_str(&content).with_context(|| format!("Could not read the manifest {path}. It is not valid TOML, or a field has the wrong type"))
+        toml::from_str(&content).with_context(|| format!("Could not read the manifest {path}. It is not valid TOML, or a field has the wrong type."))
     }
 
     pub fn system(&self, id: &str) -> Option<&SystemConfig> {

@@ -140,10 +140,7 @@ fn connect(
                 "{path} does not name an organization. Set name under [org] in the file, or pass --org <name>."
             );
         }
-        anyhow::bail!(
-            "{} Or pass --org <name> to run without a manifest.",
-            missing_manifest_message(path)
-        );
+        anyhow::bail!("{}", missing_manifest_message(path));
     }
 
     let client = Client::new(org, parallelism)?;
