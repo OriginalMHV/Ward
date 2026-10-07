@@ -11,6 +11,7 @@ mod encoding;
 pub mod environments;
 pub mod integrations;
 mod metadata;
+mod outcome;
 mod pagination;
 pub mod pulls;
 pub mod repos;
