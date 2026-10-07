@@ -90,7 +90,7 @@ pub(crate) async fn run_canonical_plan(
     } else if repos.is_empty() {
         println!("  No matching repositories found.");
     } else {
-        unified::render_report(&report, run.title);
+        crate::cli::render::render_report(&report, run.title);
     }
 
     Ok(report)

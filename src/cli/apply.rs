@@ -110,7 +110,7 @@ pub(crate) async fn run_canonical_apply(
     let prepared = unified::prepare_apply(client, manifest, &repos, &options).await?;
 
     if !yes {
-        unified::render_report(&prepared.report(), "Ward Plan (to apply)");
+        crate::cli::render::render_report(&prepared.report(), "Ward Plan (to apply)");
         println!();
         println!(
             "  {} Apply this plan to {} repositor{}?",
@@ -134,7 +134,7 @@ pub(crate) async fn run_canonical_apply(
     if run.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        unified::render_report(&report, run.title);
+        crate::cli::render::render_report(&report, run.title);
     }
 
     if report.has_failures() {
