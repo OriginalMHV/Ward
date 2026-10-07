@@ -15,6 +15,21 @@ assume_yes="${2:-}"
 
 bold() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 fail() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+step() {
+  local label=$1
+  shift
+  local started=$SECONDS log
+  log="$(mktemp)"
+  printf '  %-16s ' "$label"
+  if "$@" >"$log" 2>&1; then
+    printf 'ok (%ss)\n' "$((SECONDS - started))"
+    rm -f "$log"
+  else
+    printf 'FAILED\n'
+    cat "$log" >&2
+    fail "$label failed"
+  fi
+}
 confirm() {
   [[ "$assume_yes" == "--yes" ]] && return 0
   read -r -p "$1 [y/N] " answer
@@ -62,12 +77,12 @@ else
       ' CHANGELOG.md
     [[ "$(manifest_version)" == "$version" ]] || fail "could not update the version in Cargo.toml"
 
-    bold "Running the checks"
+    bold "Running the checks (the first run on a machine compiles everything and takes several minutes)"
     cargo update --workspace --quiet
-    cargo fmt -- --check
-    cargo clippy --quiet --all-targets -- -D warnings
-    cargo test --quiet
-    cargo publish --dry-run --allow-dirty --quiet
+    step "formatting" cargo fmt -- --check
+    step "clippy" cargo clippy --quiet --all-targets -- -D warnings
+    step "tests" cargo test --quiet
+    step "package dry run" cargo publish --dry-run --allow-dirty --quiet
 
     git add Cargo.toml Cargo.lock CHANGELOG.md
     printf 'chore: release %s\n' "$tag" | git commit --quiet -S -F -
@@ -81,7 +96,11 @@ else
   pr="$(gh pr list --repo "$REPO" --head "$branch" --state open --json number --jq '.[0].number')"
   [[ -n "$pr" ]] || fail "no open PR for $branch. Check https://github.com/$REPO/pulls"
   bold "Waiting for CI on PR #$pr"
-  sleep 15
+  # GitHub registers the checks a little after the PR opens.
+  for _ in $(seq 1 30); do
+    [[ -n "$(gh pr checks "$pr" --repo "$REPO" 2>/dev/null)" ]] && break
+    sleep 10
+  done
   gh pr checks "$pr" --repo "$REPO" --watch --interval 20 || fail "CI failed on PR #$pr. Fix it, then re-run this script."
   confirm "Merge PR #$pr into main?"
   gh pr merge "$pr" --repo "$REPO" --squash --delete-branch \
