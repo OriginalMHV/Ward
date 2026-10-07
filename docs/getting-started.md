@@ -172,7 +172,7 @@ ward plan
 The plan reports, per repository and category:
 
 - policy disposition
-- actionable changes
+- changes to make
 - blocked changes
 - warnings
 - coverage outcomes
@@ -231,7 +231,7 @@ Ward:
 4. creates one atomic Git commit
 5. creates or reuses an open pull request
 
-Workflow state, Pages, rulesets, and classic branch protection can depend on files that are not on the default branch yet. Those changes are reported as deferred until the pull request is merged.
+Workflow state, Pages, rulesets, and classic branch protection can depend on files that are not on the default branch yet. Those changes wait for the pull request. The report says which pull request to merge. Then run `ward apply` again.
 
 After merge:
 

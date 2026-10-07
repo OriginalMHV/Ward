@@ -10,23 +10,24 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberI
 use ward::cli::deprecated::LegacyCategory;
 use ward::cli::{Cli, Command};
 use ward::config::Manifest;
+use ward::config::manifest::{DEFAULT_MANIFEST_PATH, missing_manifest_message};
 use ward::github::Client;
 use ward::reconcile::unified::Category;
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    match run().await {
+    let cli = Cli::parse();
+    let verbose = cli.verbose > 0;
+    match run(cli).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("Error: {error:?}");
+            eprintln!("{}", ward::cli::render::render_error(&error, verbose));
             ward::outcome::exit_code(&error)
         }
     }
 }
 
-async fn run() -> Result<()> {
-    let cli = Cli::parse();
-
+async fn run(cli: Cli) -> Result<()> {
     // Completions need no tracing, token or manifest.
     if let Command::Completions { shell } = cli.command {
         let mut cmd = ward::cli::completion_command();
@@ -133,9 +134,13 @@ fn connect(
     let org = org_override.unwrap_or(&manifest.org.name);
 
     if org.is_empty() {
-        anyhow::bail!(
-            "No organization configured. Either set [org] name in ward.toml or pass --org <name>."
-        );
+        let path = config.unwrap_or(DEFAULT_MANIFEST_PATH);
+        if std::path::Path::new(path).exists() {
+            anyhow::bail!(
+                "{path} does not name an organization. Set name under [org] in the file, or pass --org <name>."
+            );
+        }
+        anyhow::bail!("{}", missing_manifest_message(path));
     }
 
     let client = Client::new(org, parallelism)?;

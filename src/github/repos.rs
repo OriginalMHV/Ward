@@ -149,9 +149,9 @@ impl Client {
             .collect();
         let fetched =
             futures_util::future::try_join_all(pending.into_iter().map(|repo_name| async move {
-                self.get_repo(repo_name)
-                    .await
-                    .with_context(|| format!("Failed to fetch explicit repository {repo_name}"))
+                self.get_repo(repo_name).await.with_context(|| {
+                    format!("Could not load the repository {repo_name} that the manifest names")
+                })
             }))
             .await?;
         for repo in fetched {

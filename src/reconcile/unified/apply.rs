@@ -11,7 +11,7 @@ use super::UnifiedOptions;
 use super::gating::{
     actions_plan_for_apply, adjust_for_config_pr, audit_category, blocked_with_message,
     commit_prefix, dependency_deferral, failure, finish_success, finish_success_deferred,
-    integrations_plan_for_apply, sync_branch, verify_actions_safe_subset,
+    integrations_plan_for_apply, name_pull_request, sync_branch, verify_actions_safe_subset,
     verify_integrations_safe_subset,
 };
 use super::model::{CategoryPlan, CategoryPlanKind, RepoPlan, aggregate_repo};
@@ -72,10 +72,11 @@ async fn apply_repo(
     let desired_categories = manifest.categories_for_repo(&repo);
 
     let mut config_pr_pending = existing_config_pr;
+    let mut config_pr_url: Option<String> = None;
     let mut reports = Vec::with_capacity(plan.categories.len());
 
     for category in plan.categories {
-        let report = apply_category(
+        let mut report = apply_category(
             client,
             manifest,
             &desired_categories,
@@ -95,6 +96,16 @@ async fn apply_repo(
         // deferred until the PR merges.
         if report.configuration_pull_request_pending {
             config_pr_pending = true;
+        }
+        if let Some(url) = report
+            .details
+            .iter()
+            .find_map(|detail| detail.strip_prefix("pull request: "))
+        {
+            config_pr_url = Some(url.to_owned());
+        }
+        if let Some(url) = &config_pr_url {
+            name_pull_request(&mut report, url);
         }
 
         reports.push(report);

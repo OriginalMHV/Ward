@@ -100,7 +100,7 @@ Unified planning follows four rules:
 A category result includes:
 
 - disposition
-- actionable, blocked, warning, and deferred counts
+- counts of changes to make, blocked changes, warnings, and deferred changes (JSON fields `actionable`, `blocked`, `warnings`, `deferred`)
 - coverage grouped by outcome
 - human-readable change details
 
@@ -179,7 +179,7 @@ Each category exposes collect, plan, apply, and verify operations.
 
 After apply, Ward re-collects and re-plans. Verification succeeds only when:
 
-- no actionable changes remain
+- no changes to make remain
 - no blockers remain
 - write-only resources converge by observable identity
 

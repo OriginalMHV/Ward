@@ -12,7 +12,7 @@ Only these flags are global. They work before or after the subcommand.
 |------|------|---------|-------------|
 | `--parallelism <N>` | integer | `5` | Max concurrent API calls |
 | `--config <PATH>` | string | `./ward.toml` | Path to config file |
-| `-v` / `-vv` / `-vvv` | count | `0` | Increase log verbosity |
+| `-v` / `-vv` / `-vvv` | count | `0` | Increase log verbosity. With `-v`, errors also print the full cause chain |
 
 ## Target flags
 
@@ -47,6 +47,14 @@ Every command uses the same exit codes.
 | `2` | Ward could not run: authentication, network, configuration parse error, or invalid arguments. |
 
 `ward doctor` exits `0` when it reports only warnings. `ward apply` exits `1` when any category fails or is blocked.
+
+Errors print to stderr. The first line says what failed. Each `Caused by:` line below it gives the reason. Most messages end with the command that fixes the problem. For example:
+
+```text
+Error: No GitHub token found. The GitHub CLI (gh) is not installed. Set GH_TOKEN or GITHUB_TOKEN to a token, or install gh from https://cli.github.com and run 'gh auth login'.
+```
+
+A manifest syntax error shows the file, the line and the column. Use `-v` to print the full cause chain.
 
 ---
 
@@ -124,11 +132,11 @@ ward drift --repo my-service
 ward drift --system backend --format json
 ```
 
-Exit code `0` means all repos are in sync with `ward.toml`. Exit code `1` means drift: actionable, blocked, or deferred changes, or state in a managed category that Ward could not read. Exit code `2` means Ward could not run the check. See [Exit codes](#exit-codes).
+Exit code `0` means all repos are in sync with `ward.toml`. Exit code `1` means drift: changes to make, blocked changes, changes that wait for a pull request, or state in a managed category that Ward could not read. Exit code `2` means Ward could not run the check. See [Exit codes](#exit-codes).
 
 `ward drift check` is a deprecated alias of `ward drift`. It prints `warning: 'ward drift check' is deprecated; use 'ward drift'` to stderr and runs the same check.
 
-Checks every configured category by default. Use `--category <CATEGORY>` (repeatable, comma-separated) to narrow the drift gate, and `--allow-high-impact` to count visibility and archive changes as actionable.
+Checks every configured category by default. Use `--category <CATEGORY>` (repeatable, comma-separated) to narrow the drift gate, and `--allow-high-impact` to count visibility and archive changes as changes to make.
 
 ---
 
@@ -324,7 +332,7 @@ ward plan --format json
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--category <CATEGORY>` | list | all | Limit the plan to selected categories. Repeat the flag or separate values with commas, for example `--category files,security` |
-| `--allow-high-impact` | bool | `false` | Allow visibility and archive changes to become actionable |
+| `--allow-high-impact` | bool | `false` | Allow visibility and archive changes to become changes to make |
 
 The Ward manifest planner covers these categories in safe apply order:
 
@@ -333,8 +341,8 @@ The Ward manifest planner covers these categories in safe apply order:
 
 Category names are case-insensitive. These aliases are also accepted: `repo` and `general` for `repository`, `file` for `files`, `ruleset` for `rulesets`, `protection` and `branch_protection` for `branch-protection`, `teams` for `access`, `environment` for `environments`, and `integration` for `integrations`.
 
-Output distinguishes actionable, blocked, warning, and deferred changes. `--format json`
-emits the stable unified report shape.
+Text output counts each category as changes to make, blocked changes, warnings, and changes that wait for a pull request. A zero count is not shown. When a category could not read some state, a `could not read:` line says why. When changes wait for a pull request, a `next:` line says which pull request to merge before you run `ward apply` again. `--format json`
+emits the stable unified report shape. Its field names (`actionable`, `blocked`, `warnings`, `deferred`) do not change.
 
 ---
 
@@ -361,7 +369,7 @@ ward apply --system backend --format json --yes
 `--format json` never authorizes a mutation by itself; JSON apply requires `--yes`.
 Managed files are committed to the configured Ward branch and opened as a pull
 request. Workflow state, Pages, rulesets, and branch-protection changes that
-depend on that pull request are reported as deferred until it merges.
+depend on that pull request wait for it. The report says which pull request to merge, then run `ward apply` again.
 
 ## `ward completions`
 

@@ -31,6 +31,25 @@ pub(super) fn finish_success(
     category.to_report("success", 0, verified)
 }
 
+/// Marker that [`name_pull_request`] replaces with the pull request URL.
+const MERGE_IT: &str = "Merge it, then run ward apply again.";
+
+fn deferred_detail(count: usize) -> String {
+    format!("{count} change(s) wait for the configuration pull request. {MERGE_IT}")
+}
+
+/// Name the configuration pull request in the deferred details of a report.
+pub(super) fn name_pull_request(report: &mut CategoryReport, url: &str) {
+    for detail in &mut report.details {
+        if detail.ends_with(MERGE_IT) {
+            *detail = detail.replace(
+                MERGE_IT,
+                &format!("Merge {url}, then run ward apply again."),
+            );
+        }
+    }
+}
+
 pub(super) fn finish_success_deferred(
     audit: &AuditLog,
     repo: &str,
@@ -52,9 +71,7 @@ pub(super) fn finish_success_deferred(
     }
     let mut report = category.to_report(status, deferred, verified);
     if deferred > 0 {
-        report
-            .details
-            .push(format!("{deferred} change(s) deferred to configuration PR"));
+        report.details.push(deferred_detail(deferred));
     }
     report
 }
@@ -213,10 +230,7 @@ pub(super) fn adjust_for_config_pr(
         .iter()
         .any(|detail| detail.contains("configuration PR"))
     {
-        report.details.push(format!(
-            "{} change(s) deferred until the configuration PR merges",
-            deferral.total
-        ));
+        report.details.push(deferred_detail(deferral.total));
     }
 
     if planning {
@@ -311,5 +325,38 @@ pub(super) fn commit_prefix(manifest: &Manifest) -> String {
         "chore: ".to_owned()
     } else {
         format!("{prefix} ")
+    }
+}
+
+#[cfg(test)]
+mod pull_request_tests {
+    use super::*;
+
+    #[test]
+    fn the_merge_hint_names_the_pull_request() {
+        let mut report = CategoryReport {
+            category: "actions".to_owned(),
+            disposition: "managed".to_owned(),
+            status: "success".to_owned(),
+            actionable: 0,
+            blocked: 0,
+            warnings: 0,
+            deferred: 1,
+            coverage: Default::default(),
+            coverage_outcomes: Vec::new(),
+            details: vec![deferred_detail(1)],
+            error: None,
+            verified: None,
+            configuration_pull_request_pending: false,
+        };
+
+        name_pull_request(&mut report, "https://github.com/o/r/pull/7");
+
+        assert_eq!(
+            report.details,
+            [
+                "1 change(s) wait for the configuration pull request. Merge https://github.com/o/r/pull/7, then run ward apply again."
+            ]
+        );
     }
 }

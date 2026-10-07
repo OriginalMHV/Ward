@@ -229,7 +229,7 @@ pub fn plan_integrations(
 
     if !desired.labels.is_empty() {
         notes.push(
-            "Labels remain owned by general-settings and are intentionally ignored here."
+            "Labels belong to the repository category, so the integrations category ignores them."
                 .to_owned(),
         );
     }
