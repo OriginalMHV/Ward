@@ -1,9 +1,9 @@
 mod accessors;
+pub mod schema;
 pub mod types;
-pub mod v2;
 
+pub use schema::*;
 pub use types::*;
-pub use v2::*;
 
 #[cfg(test)]
 mod tests;

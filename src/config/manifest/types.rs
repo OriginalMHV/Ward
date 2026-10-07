@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::v2::{CoverageEntry, ManifestCategories, ManifestProvenance, ManifestSchema};
+use super::schema::{CoverageEntry, ManifestCategories, ManifestProvenance, ManifestSchema};
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
