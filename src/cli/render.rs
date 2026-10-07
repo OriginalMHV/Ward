@@ -90,7 +90,11 @@ pub fn render_report_to(
             {
                 writeln!(out, "        reason: {}", one_line_error(error))?;
             }
-            if category.deferred > 0 {
+            let advised = category
+                .details
+                .iter()
+                .any(|detail| detail.ends_with("then run ward apply again."));
+            if category.deferred > 0 && !advised {
                 writeln!(out, "        next: {}", deferred_advice(repo))?;
             }
             for detail in category.details.iter().take(SHOWN_DETAILS) {
@@ -370,5 +374,23 @@ mod tests {
             text.contains("next: merge https://github.com/o/r/pull/7, then run ward apply again"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn a_deferred_detail_that_names_the_pull_request_is_not_repeated() {
+        let mut waiting = category(
+            "deferred",
+            None,
+            vec![
+                "2 change(s) wait for the configuration pull request. Merge https://github.com/o/r/pull/7, then run ward apply again."
+                    .to_owned(),
+            ],
+        );
+        waiting.deferred = 2;
+
+        let text = render(&report_with(waiting));
+
+        assert_eq!(text.matches("pull/7").count(), 1, "{text}");
+        assert!(!text.contains("next:"), "{text}");
     }
 }

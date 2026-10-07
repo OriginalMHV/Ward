@@ -53,9 +53,13 @@ pub async fn resolve_target_repos(
                 }
             }
             if !in_scope {
+                let scope: Vec<String> = system_ids
+                    .iter()
+                    .map(|id| describe_system_scope(manifest, id))
+                    .collect();
                 bail!(
-                    "Repository '{repo_name}' is not in the manifest scope (systems: {}). Add it to a system or check its exclude patterns",
-                    system_ids.join(", ")
+                    "Repository '{repo_name}' is not in the manifest scope. The manifest selects: {}. Add the repository to a system's repos list, or check the system's exclude patterns.",
+                    scope.join("; ")
                 );
             }
         }
@@ -85,6 +89,26 @@ pub async fn resolve_target_repos(
     }
 
     Ok(repos)
+}
+
+/// One system's selection rule in plain words, for error messages.
+fn describe_system_scope(manifest: &Manifest, system_id: &str) -> String {
+    let mut parts = Vec::new();
+    let explicit = manifest.explicit_repos_for_system(system_id);
+    if !explicit.is_empty() {
+        parts.push(format!("repos {}", explicit.join(", ")));
+    }
+    if manifest.matches_prefix_for_system(system_id) {
+        parts.push(format!("names starting with '{system_id}-'"));
+    }
+    let excludes = manifest.exclude_patterns_for_system(system_id);
+    if !excludes.is_empty() {
+        parts.push(format!("except patterns {}", excludes.join(", ")));
+    }
+    if parts.is_empty() {
+        parts.push("no repositories".to_owned());
+    }
+    format!("system '{system_id}' ({})", parts.join(", "))
 }
 
 /// Whether a system selects the named repository: listed explicitly, or

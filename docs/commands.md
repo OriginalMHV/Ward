@@ -369,7 +369,7 @@ ward apply --system backend --format json --yes
 `--format json` never authorizes a mutation by itself; JSON apply requires `--yes`.
 Managed files are committed to the configured Ward branch and opened as a pull
 request. Workflow state, Pages, rulesets, and branch-protection changes that
-depend on that pull request are reported as deferred until it merges.
+depend on that pull request wait for it. The report says which pull request to merge, then run `ward apply` again.
 
 ## `ward completions`
 

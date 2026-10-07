@@ -18,6 +18,7 @@ The `[schema]` table is removed from the manifest. Ward now fails with a clear e
 - A missing manifest now names the path that Ward tried and suggests `ward init` or `ward import <owner/repo>`. An explicit `--config` path that does not exist is now an error. Before, Ward used an empty manifest.
 - A missing token now says what to do. The message covers three cases: the GitHub CLI is not installed, the GitHub CLI is not logged in, and a blank `GH_TOKEN` or `GITHUB_TOKEN`. Each case names the command or variable that fixes it.
 - The text report uses plain words. `actionable` is now `to change`, and `deferred` is now `waiting for a pull request`. Zero counts are hidden. Each category shows why some reads failed (`could not read:`) and, for waiting changes, which pull request to merge (`next:`). The JSON field names do not change.
+- The not-in-scope repository error now lists what each system selects. Deferred changes name the pull request to merge. The drift summary uses the same plain words as the report.
 
 ### Fixed
 

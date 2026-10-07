@@ -545,9 +545,9 @@ async fn repo_flag_outside_manifest_scope_is_an_error() {
     let error = unified::resolve_target_repos(&client, &scoped_manifest(), None, Some("pulse"))
         .await
         .unwrap_err();
-    assert!(
-        error.to_string().contains("not in the manifest scope"),
-        "{error}"
+    assert_eq!(
+        error.to_string(),
+        "Repository 'pulse' is not in the manifest scope. The manifest selects: system 'recall' (repos recall). Add the repository to a system's repos list, or check the system's exclude patterns."
     );
 }
 

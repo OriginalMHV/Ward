@@ -65,8 +65,8 @@ pub fn drift_summary(
     unreadable: bool,
 ) -> String {
     let mut findings = non_zero(&[
-        (actionable, "change", "changes", "to apply"),
-        (deferred, "deferred change", "deferred changes", ""),
+        (actionable, "change", "changes", "to make"),
+        (deferred, "change", "changes", "waiting for a pull request"),
         (failed, "category", "categories", "failed"),
         (blocked, "category", "categories", "blocked"),
     ])
@@ -148,7 +148,7 @@ mod tests {
         use super::drift_summary;
         assert_eq!(
             drift_summary(2, 0, 0, 1, false),
-            "Drift found: 2 changes to apply, 1 category blocked. See the report above."
+            "Drift found: 2 changes to make, 1 category blocked. See the report above."
         );
         assert_eq!(
             drift_summary(0, 0, 0, 0, true),
@@ -156,7 +156,7 @@ mod tests {
         );
         assert_eq!(
             drift_summary(1, 3, 0, 0, true),
-            "Drift found: 1 change to apply, 3 deferred changes. Some managed state could not be read. See the report above."
+            "Drift found: 1 change to make, 3 changes waiting for a pull request. Some managed state could not be read. See the report above."
         );
     }
 
