@@ -3,7 +3,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use ward::config::manifest::{
-    ActorReference, BranchProtectionCategoryV2, CategoryPolicy, ManagementDisposition,
+    ActorReference, BranchProtectionCategory, CategoryPolicy, ManagementDisposition,
 };
 use ward::github::Client;
 use ward::reconcile::security_rules::{
@@ -130,7 +130,7 @@ async fn security_rules_branch_protection_enumerates_all_branches_and_round_trip
         .unwrap();
     assert!(round_trip.matches);
 
-    let desired = BranchProtectionCategoryV2 {
+    let desired = BranchProtectionCategory {
         policy: CategoryPolicy {
             disposition: ManagementDisposition::Managed,
             prune: true,

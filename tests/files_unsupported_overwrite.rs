@@ -1,5 +1,5 @@
 use ward::config::manifest::{
-    CategoryPolicy, FileEncoding, FilesCategoryV2, ManagedFileV2, ManagementDisposition,
+    CategoryPolicy, FileEncoding, FilesCategory, ManagedFile, ManagementDisposition,
 };
 use ward::github::contents::{GitEntryMode, GitObjectType};
 use ward::reconcile::files::{
@@ -7,8 +7,8 @@ use ward::reconcile::files::{
     plan_files_category,
 };
 
-fn desired(path: &str, prune: bool) -> FilesCategoryV2 {
-    FilesCategoryV2 {
+fn desired(path: &str, prune: bool) -> FilesCategory {
+    FilesCategory {
         policy: CategoryPolicy {
             disposition: ManagementDisposition::Managed,
             prune,
@@ -16,7 +16,7 @@ fn desired(path: &str, prune: bool) -> FilesCategoryV2 {
         },
         include: vec![".github/**".to_owned()],
         exclude: Vec::new(),
-        entries: vec![ManagedFileV2 {
+        entries: vec![ManagedFile {
             path: path.to_owned(),
             content: "name: CI\n".to_owned(),
             encoding: FileEncoding::Utf8,
@@ -26,7 +26,7 @@ fn desired(path: &str, prune: bool) -> FilesCategoryV2 {
     }
 }
 
-fn collection(category: &FilesCategoryV2, kind: ScopedRepoFileKind) -> FilesCollection {
+fn collection(category: &FilesCategory, kind: ScopedRepoFileKind) -> FilesCollection {
     FilesCollection {
         category: category.clone(),
         scoped_files: vec![ScopedRepoFile {

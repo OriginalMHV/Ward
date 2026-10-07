@@ -17,9 +17,6 @@ Both setup paths produce the same desired-state manifest. Import adds provenance
 The Ward manifest separates reusable state from how Ward is allowed to manage it.
 
 ```toml
-[schema]
-version = 2
-
 [categories.security.policy]
 disposition = "observe"
 prune = false

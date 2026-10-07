@@ -4,7 +4,7 @@ use super::CategoryPolicy;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct FilesCategoryV2 {
+pub struct FilesCategory {
     #[serde(default)]
     pub policy: CategoryPolicy,
 
@@ -15,12 +15,12 @@ pub struct FilesCategoryV2 {
     pub exclude: Vec<String>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub entries: Vec<ManagedFileV2>,
+    pub entries: Vec<ManagedFile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ManagedFileV2 {
+pub struct ManagedFile {
     pub path: String,
     pub content: String,
 

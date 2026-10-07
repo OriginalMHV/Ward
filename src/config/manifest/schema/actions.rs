@@ -4,7 +4,7 @@ use super::{CategoryPolicy, NamedValueConfig, ReferencedResourceConfig, SecretPl
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ActionsCategoryV2 {
+pub struct ActionsCategory {
     #[serde(default)]
     pub policy: CategoryPolicy,
 
@@ -30,7 +30,7 @@ pub struct ActionsCategoryV2 {
     pub references: Vec<ReferencedResourceConfig>,
 }
 
-impl ActionsCategoryV2 {
+impl ActionsCategory {
     pub fn observe_sensitive() -> Self {
         Self {
             policy: CategoryPolicy::observe_sensitive(),

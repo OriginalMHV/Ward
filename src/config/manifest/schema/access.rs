@@ -5,7 +5,7 @@ use crate::config::manifest::TeamAccess;
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct RepositoryAccessCategoryV2 {
+pub struct RepositoryAccessCategory {
     #[serde(default)]
     pub policy: CategoryPolicy,
 
@@ -25,7 +25,7 @@ pub struct RepositoryAccessCategoryV2 {
     pub references: Vec<ReferencedResourceConfig>,
 }
 
-impl RepositoryAccessCategoryV2 {
+impl RepositoryAccessCategory {
     /// The desired teams, or an empty slice when the manifest does not manage teams.
     pub fn desired_teams(&self) -> &[TeamAccess] {
         self.teams.as_deref().unwrap_or_default()

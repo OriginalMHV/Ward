@@ -9,9 +9,6 @@ use crate::cli::import::{ImportOptions, import_repository};
 const EXAMPLE_MANIFEST: &str = r#"[org]
 name = "your-github-org"
 
-[schema]
-version = 2
-
 [file_delivery]
 branch = "chore/ward-sync"
 reviewers = []
@@ -238,7 +235,6 @@ mod tests {
         let manifest: Manifest = toml::from_str(EXAMPLE_MANIFEST).unwrap();
         let security = manifest.categories.security.as_ref().unwrap();
 
-        assert_eq!(manifest.schema.version, 2);
         assert!(security.secret_scanning.unwrap());
         assert!(security.secret_scanning_push_protection.unwrap());
         assert!(security.secret_scanning_ai_detection.unwrap());

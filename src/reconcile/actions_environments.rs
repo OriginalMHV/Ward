@@ -1,4 +1,4 @@
-//! Snapshot and reconciliation for `ActionsCategoryV2` and `EnvironmentsCategoryV2`.
+//! Snapshot and reconciliation for `ActionsCategory` and `EnvironmentsCategory`.
 //!
 //! Follows the collect/plan/apply/verify shape used by sibling reconcile
 //! modules: `collect_*` observes live GitHub state (scoped to what `desired`
@@ -23,11 +23,10 @@ use super::common::secrets::{resolve_secrets, seal_or_block};
 use super::relax_unrequested;
 
 use crate::config::manifest::{
-    ActionsCategoryV2, ActionsSettingsConfig, ActorReference, CategoryPolicy, CoverageEntry,
-    CoverageOutcome, EnvironmentConfigV2, EnvironmentDeploymentPolicyConfig,
-    EnvironmentsCategoryV2, ExternalValueReference, ManagementDisposition, ManifestCategoryName,
-    NamedValueConfig, ReferencedResourceConfig, ReferencedResourceType, SecretPlaceholderConfig,
-    WorkflowStateConfig,
+    ActionsCategory, ActionsSettingsConfig, ActorReference, CategoryPolicy, CoverageEntry,
+    CoverageOutcome, EnvironmentConfig, EnvironmentDeploymentPolicyConfig, EnvironmentsCategory,
+    ExternalValueReference, ManagementDisposition, ManifestCategoryName, NamedValueConfig,
+    ReferencedResourceConfig, ReferencedResourceType, SecretPlaceholderConfig, WorkflowStateConfig,
 };
 use crate::github::Client;
 use crate::github::access::{NamedRepository, OrgScopedResourceMetadata};
@@ -46,7 +45,7 @@ fn wants_change<T: PartialEq>(desired: Option<&T>, current: Option<&T>) -> bool 
 
 #[derive(Debug, Clone, Default)]
 pub struct ActionsCollection {
-    pub category: ActionsCategoryV2,
+    pub category: ActionsCategory,
     pub coverage: Vec<CoverageEntry>,
     pub issues: Vec<ReconcileIssue>,
     /// Resolution of organization secret/variable *references* against the
@@ -94,7 +93,7 @@ fn reference_kind_label(resource_type: ReferencedResourceType) -> &'static str {
 /// Resolve whether `repo` is covered by a `selected`-visibility
 /// organization secret/variable, given already-classified `metadata` and
 /// `repositories` read outcomes. Shared by the secret/variable resolvers
-/// below; mirrors the analogous pattern used for `RepositoryAccessCategoryV2`
+/// below; mirrors the analogous pattern used for `RepositoryAccessCategory`
 /// references, adapted for this category's own coverage/issue vocabulary.
 fn resolve_selected_repository_association(
     resource: &ReferencedResourceConfig,
@@ -267,7 +266,7 @@ async fn resolve_org_variable_reference(
 pub async fn collect_actions_category(
     client: &Client,
     repo: &str,
-    desired: Option<&ActionsCategoryV2>,
+    desired: Option<&ActionsCategory>,
 ) -> Result<ActionsCollection> {
     let mut settings = ActionsSettingsConfig::default();
     let mut coverage = Vec::new();
@@ -448,9 +447,9 @@ pub async fn collect_actions_category(
         }
     }
 
-    let mut category = ActionsCategoryV2 {
+    let mut category = ActionsCategory {
         settings: Some(settings),
-        ..ActionsCategoryV2::default()
+        ..ActionsCategory::default()
     };
 
     match desired {
@@ -881,16 +880,13 @@ fn is_not_applicable(coverage: &[CoverageEntry], endpoint: &str) -> bool {
 /// Diff `desired` against a prior [`collect_actions_category`] observation.
 /// Pure and synchronous: any resolution requiring network access (e.g.
 /// actor login/slug to id) happens at apply time.
-pub fn plan_actions_category(
-    desired: &ActionsCategoryV2,
-    actual: &ActionsCollection,
-) -> ActionsPlan {
+pub fn plan_actions_category(desired: &ActionsCategory, actual: &ActionsCollection) -> ActionsPlan {
     plan_actions_category_with_env(desired, actual, &process_env)
 }
 
 /// As [`plan_actions_category`], resolving secret values through `env`.
 pub fn plan_actions_category_with_env(
-    desired: &ActionsCategoryV2,
+    desired: &ActionsCategory,
     actual: &ActionsCollection,
     env: EnvLookup<'_>,
 ) -> ActionsPlan {
@@ -1693,7 +1689,7 @@ pub struct ActionsVerifyResult {
 pub async fn verify_actions_category(
     client: &Client,
     repo: &str,
-    desired: &ActionsCategoryV2,
+    desired: &ActionsCategory,
 ) -> Result<ActionsVerifyResult> {
     let actual = collect_actions_category(client, repo, Some(desired)).await?;
     let plan = plan_actions_category(desired, &actual);
@@ -1707,7 +1703,7 @@ pub async fn verify_actions_category(
 
 #[derive(Debug, Clone, Default)]
 pub struct EnvironmentsCollection {
-    pub category: EnvironmentsCategoryV2,
+    pub category: EnvironmentsCategory,
     /// Every environment name observed on the repository, regardless of
     /// whether it was in `desired` and therefore deep-collected. Needed so
     /// `plan_environments_category` can detect prune candidates that were
@@ -1783,7 +1779,7 @@ fn reviewers_from_protection_rules(
 pub async fn collect_environments_category(
     client: &Client,
     repo: &str,
-    desired: Option<&EnvironmentsCategoryV2>,
+    desired: Option<&EnvironmentsCategory>,
 ) -> Result<EnvironmentsCollection> {
     let mut issues = Vec::new();
     let mut coverage = Vec::new();
@@ -1810,9 +1806,9 @@ pub async fn collect_environments_category(
             .context("Failed to list repository environments")?,
     ) else {
         return Ok(EnvironmentsCollection {
-            category: EnvironmentsCategoryV2 {
+            category: EnvironmentsCategory {
                 policy,
-                ..EnvironmentsCategoryV2::default()
+                ..EnvironmentsCategory::default()
             },
             observed_names: Vec::new(),
             deployment_policy_ids: BTreeMap::new(),
@@ -1969,7 +1965,7 @@ pub async fn collect_environments_category(
         })
         .unwrap_or_default();
 
-        entries.push(EnvironmentConfigV2 {
+        entries.push(EnvironmentConfig {
             name: env.name.clone(),
             wait_timer_minutes,
             prevent_self_review,
@@ -1982,7 +1978,7 @@ pub async fn collect_environments_category(
     }
 
     Ok(EnvironmentsCollection {
-        category: EnvironmentsCategoryV2 { policy, entries },
+        category: EnvironmentsCategory { policy, entries },
         observed_names: observed.iter().map(|env| env.name.clone()).collect(),
         deployment_policy_ids,
         deployment_policies_observed,
@@ -2066,7 +2062,7 @@ fn actor_key(actor: &ActorReference) -> String {
 
 /// Diff `desired` against a prior [`collect_environments_category`] observation.
 pub fn plan_environments_category(
-    desired: &EnvironmentsCategoryV2,
+    desired: &EnvironmentsCategory,
     actual: &EnvironmentsCollection,
 ) -> EnvironmentsPlan {
     plan_environments_category_with_env(desired, actual, &process_env)
@@ -2074,7 +2070,7 @@ pub fn plan_environments_category(
 
 /// As [`plan_environments_category`], resolving secret values through `env`.
 pub fn plan_environments_category_with_env(
-    desired: &EnvironmentsCategoryV2,
+    desired: &EnvironmentsCategory,
     actual: &EnvironmentsCollection,
     env: EnvLookup<'_>,
 ) -> EnvironmentsPlan {
@@ -2088,7 +2084,7 @@ pub fn plan_environments_category_with_env(
         };
     }
 
-    let actual_by_name: BTreeMap<&str, &EnvironmentConfigV2> = actual
+    let actual_by_name: BTreeMap<&str, &EnvironmentConfig> = actual
         .category
         .entries
         .iter()
@@ -2625,7 +2621,7 @@ pub struct EnvironmentsVerifyResult {
 pub async fn verify_environments_category(
     client: &Client,
     repo: &str,
-    desired: &EnvironmentsCategoryV2,
+    desired: &EnvironmentsCategory,
 ) -> Result<EnvironmentsVerifyResult> {
     let actual = collect_environments_category(client, repo, Some(desired)).await?;
     let plan = plan_environments_category(desired, &actual);

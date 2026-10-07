@@ -1,9 +1,9 @@
 use serde_json::json;
 use ward::config::manifest::{
-    ActorReference, AutolinkConfigV2, CategoryPolicy, CollaboratorAccessConfig, DeployKeyConfigV2,
-    ExternalValueReference, ManagementDisposition, PagesConfigV2, ReferencedResourceConfig,
-    ReferencedResourceType, RepositoryAccessCategoryV2, RepositoryIntegrationsCategoryV2,
-    TeamAccess, WebhookConfigV2,
+    ActorReference, AutolinkConfig, CategoryPolicy, CollaboratorAccessConfig, DeployKeyConfig,
+    ExternalValueReference, ManagementDisposition, PagesConfig, ReferencedResourceConfig,
+    ReferencedResourceType, RepositoryAccessCategory, RepositoryIntegrationsCategory, TeamAccess,
+    WebhookConfig,
 };
 use ward::github::Client;
 use ward::reconcile::access_integrations::{
@@ -82,7 +82,7 @@ async fn warning_issues_do_not_block_successful_access_or_integration_writes() {
             webhook_actions: Vec::new(),
             deploy_key_actions: Vec::new(),
             pages_action: None,
-            autolink_actions: vec![AutolinkAction::Create(AutolinkConfigV2 {
+            autolink_actions: vec![AutolinkAction::Create(AutolinkConfig {
                 key_prefix: "TICKET-".to_owned(),
                 url_template: "https://tracker.example/TICKET-<num>".to_owned(),
                 is_alphanumeric: None,
@@ -100,7 +100,7 @@ async fn warning_issues_do_not_block_successful_access_or_integration_writes() {
 #[test]
 fn access_sensitive_gate_and_custom_role_reference_blocking_are_visible() {
     let current = AccessCollection {
-        category: RepositoryAccessCategoryV2::default(),
+        category: RepositoryAccessCategory::default(),
         state: CollectedAccessState {
             teams: Vec::new(),
             teams_complete: true,
@@ -120,7 +120,7 @@ fn access_sensitive_gate_and_custom_role_reference_blocking_are_visible() {
         coverage: Vec::new(),
         issues: Vec::new(),
     };
-    let desired = RepositoryAccessCategoryV2 {
+    let desired = RepositoryAccessCategory {
         policy: CategoryPolicy {
             disposition: ManagementDisposition::Managed,
             prune: false,
@@ -130,7 +130,7 @@ fn access_sensitive_gate_and_custom_role_reference_blocking_are_visible() {
             slug: "platform".to_owned(),
             permission: "Custom Maintainer".to_owned(),
         }]),
-        ..RepositoryAccessCategoryV2::default()
+        ..RepositoryAccessCategory::default()
     };
 
     let plan = plan_access(&current, &desired);
@@ -145,7 +145,7 @@ fn access_sensitive_gate_and_custom_role_reference_blocking_are_visible() {
 #[tokio::test]
 async fn pending_invitation_prune_uses_invitation_delete_endpoint() {
     let current = AccessCollection {
-        category: RepositoryAccessCategoryV2::default(),
+        category: RepositoryAccessCategory::default(),
         state: CollectedAccessState {
             teams: Vec::new(),
             teams_complete: true,
@@ -166,10 +166,10 @@ async fn pending_invitation_prune_uses_invitation_delete_endpoint() {
         coverage: Vec::new(),
         issues: Vec::new(),
     };
-    let desired = RepositoryAccessCategoryV2 {
+    let desired = RepositoryAccessCategory {
         policy: managed_sensitive_policy(true),
         collaborators: Some(Vec::new()),
-        ..RepositoryAccessCategoryV2::default()
+        ..RepositoryAccessCategory::default()
     };
     let plan = plan_access(&current, &desired);
 
@@ -187,15 +187,15 @@ async fn pending_invitation_prune_uses_invitation_delete_endpoint() {
 
 #[test]
 fn missing_app_reference_is_blocking_but_unknown_lookup_is_not() {
-    let desired = RepositoryAccessCategoryV2 {
+    let desired = RepositoryAccessCategory {
         references: vec![ReferencedResourceConfig {
             resource_type: ReferencedResourceType::App,
             name: "deploy-protect".to_owned(),
         }],
-        ..RepositoryAccessCategoryV2::default()
+        ..RepositoryAccessCategory::default()
     };
     let missing = AccessCollection {
-        category: RepositoryAccessCategoryV2::default(),
+        category: RepositoryAccessCategory::default(),
         state: CollectedAccessState {
             teams: Vec::new(),
             teams_complete: true,
@@ -245,12 +245,12 @@ fn missing_app_reference_is_blocking_but_unknown_lookup_is_not() {
 #[tokio::test]
 async fn credentialed_webhook_zero_drift_create_blocking_and_pages_blocking_work() {
     let current = IntegrationsCollection {
-        category: RepositoryIntegrationsCategoryV2::default(),
+        category: RepositoryIntegrationsCategory::default(),
         state: CollectedIntegrationsState {
             webhooks: vec![CollectedWebhook {
                 id: 7,
                 canonical_url: canonicalize_url("https://hooks.example.test/events"),
-                config: WebhookConfigV2 {
+                config: WebhookConfig {
                     url: "https://***@hooks.example.test/events".to_owned(),
                     url_from: Some(ExternalValueReference::Env {
                         key: "WARD_WEBHOOK_URL_HOOKS_EXAMPLE_TEST_EVENTS".to_owned(),
@@ -275,16 +275,16 @@ async fn credentialed_webhook_zero_drift_create_blocking_and_pages_blocking_work
         coverage: Vec::new(),
         issues: Vec::new(),
     };
-    let desired_same = RepositoryIntegrationsCategoryV2 {
+    let desired_same = RepositoryIntegrationsCategory {
         policy: managed_sensitive_policy(false),
         webhooks: vec![current.state.webhooks[0].config.clone()],
-        ..RepositoryIntegrationsCategoryV2::default()
+        ..RepositoryIntegrationsCategory::default()
     };
     assert!(plan_integrations(&current, &desired_same).is_empty());
 
-    let desired_create = RepositoryIntegrationsCategoryV2 {
+    let desired_create = RepositoryIntegrationsCategory {
         policy: managed_sensitive_policy(false),
-        webhooks: vec![WebhookConfigV2 {
+        webhooks: vec![WebhookConfig {
             url: "https://***@hooks.example.test/new".to_owned(),
             url_from: Some(ExternalValueReference::Env {
                 key: "WARD_WEBHOOK_URL_NEW".to_owned(),
@@ -297,14 +297,14 @@ async fn credentialed_webhook_zero_drift_create_blocking_and_pages_blocking_work
                 key: "WARD_WEBHOOK_SECRET_NEW".to_owned(),
             }),
         }],
-        pages: Some(PagesConfigV2 {
+        pages: Some(PagesConfig {
             build_type: Some("legacy".to_owned()),
             source_branch: Some("gh-pages".to_owned()),
             source_path: None,
             cname: None,
             https_enforced: None,
         }),
-        ..RepositoryIntegrationsCategoryV2::default()
+        ..RepositoryIntegrationsCategory::default()
     };
     let create_plan = plan_integrations(
         &IntegrationsCollection {
@@ -318,7 +318,7 @@ async fn credentialed_webhook_zero_drift_create_blocking_and_pages_blocking_work
                 autolinks: Vec::new(),
                 autolinks_complete: true,
             },
-            category: RepositoryIntegrationsCategoryV2::default(),
+            category: RepositoryIntegrationsCategory::default(),
             coverage: Vec::new(),
             issues: Vec::new(),
         },
@@ -348,12 +348,12 @@ async fn credentialed_webhook_zero_drift_create_blocking_and_pages_blocking_work
 #[tokio::test]
 async fn existing_webhook_update_preserves_unknown_secret() {
     let current = IntegrationsCollection {
-        category: RepositoryIntegrationsCategoryV2::default(),
+        category: RepositoryIntegrationsCategory::default(),
         state: CollectedIntegrationsState {
             webhooks: vec![CollectedWebhook {
                 id: 7,
                 canonical_url: canonicalize_url("https://hooks.example.test/events"),
-                config: WebhookConfigV2 {
+                config: WebhookConfig {
                     url: "https://***@hooks.example.test/events".to_owned(),
                     url_from: Some(ExternalValueReference::Env {
                         key: "WARD_WEBHOOK_URL_HOOKS_EXAMPLE_TEST_EVENTS".to_owned(),
@@ -376,13 +376,13 @@ async fn existing_webhook_update_preserves_unknown_secret() {
         coverage: Vec::new(),
         issues: Vec::new(),
     };
-    let desired = RepositoryIntegrationsCategoryV2 {
+    let desired = RepositoryIntegrationsCategory {
         policy: managed_sensitive_policy(false),
-        webhooks: vec![WebhookConfigV2 {
+        webhooks: vec![WebhookConfig {
             content_type: Some("form".to_owned()),
             ..current.state.webhooks[0].config.clone()
         }],
-        ..RepositoryIntegrationsCategoryV2::default()
+        ..RepositoryIntegrationsCategory::default()
     };
     let plan = plan_integrations(&current, &desired);
 
@@ -407,12 +407,12 @@ async fn existing_webhook_update_preserves_unknown_secret() {
 #[tokio::test]
 async fn omitted_webhook_fields_apply_github_defaults_and_verify_cleanly() {
     let current = IntegrationsCollection {
-        category: RepositoryIntegrationsCategoryV2::default(),
+        category: RepositoryIntegrationsCategory::default(),
         state: CollectedIntegrationsState {
             webhooks: vec![CollectedWebhook {
                 id: 7,
                 canonical_url: canonicalize_url("https://hooks.example.test/events"),
-                config: WebhookConfigV2 {
+                config: WebhookConfig {
                     url: "https://hooks.example.test/events".to_owned(),
                     url_from: None,
                     active: Some(false),
@@ -433,13 +433,13 @@ async fn omitted_webhook_fields_apply_github_defaults_and_verify_cleanly() {
         coverage: Vec::new(),
         issues: Vec::new(),
     };
-    let desired = RepositoryIntegrationsCategoryV2 {
+    let desired = RepositoryIntegrationsCategory {
         policy: managed_sensitive_policy(false),
-        webhooks: vec![WebhookConfigV2 {
+        webhooks: vec![WebhookConfig {
             url: "https://hooks.example.test/events".to_owned(),
-            ..WebhookConfigV2::default()
+            ..WebhookConfig::default()
         }],
-        ..RepositoryIntegrationsCategoryV2::default()
+        ..RepositoryIntegrationsCategory::default()
     };
     let plan = plan_integrations(&current, &desired);
     assert_eq!(plan.webhook_actions.len(), 1);
@@ -475,7 +475,7 @@ async fn omitted_webhook_fields_apply_github_defaults_and_verify_cleanly() {
             webhooks: vec![CollectedWebhook {
                 id: 7,
                 canonical_url: canonicalize_url("https://hooks.example.test/events"),
-                config: WebhookConfigV2 {
+                config: WebhookConfig {
                     url: "https://hooks.example.test/events".to_owned(),
                     url_from: None,
                     active: Some(true),
@@ -499,13 +499,13 @@ async fn omitted_webhook_fields_apply_github_defaults_and_verify_cleanly() {
 async fn deploy_key_replace_creates_before_delete() {
     // PATH is set in every environment, so the env-backed replacement key resolves without set_var.
     let current = IntegrationsCollection {
-        category: RepositoryIntegrationsCategoryV2::default(),
+        category: RepositoryIntegrationsCategory::default(),
         state: CollectedIntegrationsState {
             webhooks: Vec::new(),
             webhooks_complete: true,
             deploy_keys: vec![CollectedDeployKey {
                 id: 5,
-                config: DeployKeyConfigV2 {
+                config: DeployKeyConfig {
                     title: "readonly".to_owned(),
                     read_only: Some(true),
                     fingerprint: Some("aa:bb".to_owned()),
@@ -521,9 +521,9 @@ async fn deploy_key_replace_creates_before_delete() {
         coverage: Vec::new(),
         issues: Vec::new(),
     };
-    let desired = RepositoryIntegrationsCategoryV2 {
+    let desired = RepositoryIntegrationsCategory {
         policy: managed_sensitive_policy(false),
-        deploy_keys: vec![DeployKeyConfigV2 {
+        deploy_keys: vec![DeployKeyConfig {
             title: "readonly".to_owned(),
             read_only: Some(false),
             fingerprint: Some("aa:bb".to_owned()),
@@ -531,7 +531,7 @@ async fn deploy_key_replace_creates_before_delete() {
                 key: "PATH".to_owned(),
             }),
         }],
-        ..RepositoryIntegrationsCategoryV2::default()
+        ..RepositoryIntegrationsCategory::default()
     };
     let plan = plan_integrations(&current, &desired);
     assert!(matches!(
@@ -570,14 +570,14 @@ async fn deploy_key_replace_creates_before_delete() {
 #[test]
 fn pages_status_autolink_recreate_and_idempotence_work() {
     let current = IntegrationsCollection {
-        category: RepositoryIntegrationsCategoryV2::default(),
+        category: RepositoryIntegrationsCategory::default(),
         state: CollectedIntegrationsState {
             webhooks: Vec::new(),
             webhooks_complete: true,
             deploy_keys: Vec::new(),
             deploy_keys_complete: true,
             pages: Some(CollectedPages {
-                config: PagesConfigV2 {
+                config: PagesConfig {
                     build_type: Some("workflow".to_owned()),
                     source_branch: None,
                     source_path: None,
@@ -589,7 +589,7 @@ fn pages_status_autolink_recreate_and_idempotence_work() {
             pages_complete: true,
             autolinks: vec![CollectedAutolink {
                 id: 10,
-                config: AutolinkConfigV2 {
+                config: AutolinkConfig {
                     key_prefix: "ABC-".to_owned(),
                     url_template: "https://tracker.example/ABC-<num>".to_owned(),
                     is_alphanumeric: Some(true),
@@ -600,19 +600,19 @@ fn pages_status_autolink_recreate_and_idempotence_work() {
         coverage: Vec::new(),
         issues: Vec::new(),
     };
-    let desired = RepositoryIntegrationsCategoryV2 {
+    let desired = RepositoryIntegrationsCategory {
         policy: managed_sensitive_policy(false),
         pages: current
             .state
             .pages
             .as_ref()
             .map(|pages| pages.config.clone()),
-        autolinks: vec![AutolinkConfigV2 {
+        autolinks: vec![AutolinkConfig {
             key_prefix: "ABC-".to_owned(),
             url_template: "https://tracker.example/ABC-<num>".to_owned(),
             is_alphanumeric: Some(false),
         }],
-        ..RepositoryIntegrationsCategoryV2::default()
+        ..RepositoryIntegrationsCategory::default()
     };
     let plan = plan_integrations(&current, &desired);
     assert!(matches!(
@@ -631,7 +631,7 @@ fn pages_status_autolink_recreate_and_idempotence_work() {
             },
             ..current
         },
-        &RepositoryIntegrationsCategoryV2 {
+        &RepositoryIntegrationsCategory {
             autolinks: vec![desired.autolinks[0].clone()],
             pages: desired.pages.clone(),
             ..desired.clone()
@@ -644,12 +644,12 @@ fn pages_status_autolink_recreate_and_idempotence_work() {
 #[test]
 fn prune_and_sensitive_gates_block_mutations() {
     let current = IntegrationsCollection {
-        category: RepositoryIntegrationsCategoryV2::default(),
+        category: RepositoryIntegrationsCategory::default(),
         state: CollectedIntegrationsState {
             webhooks: vec![CollectedWebhook {
                 id: 1,
                 canonical_url: canonicalize_url("https://hooks.example.test"),
-                config: WebhookConfigV2 {
+                config: WebhookConfig {
                     url: "https://hooks.example.test".to_owned(),
                     url_from: None,
                     active: Some(true),
@@ -670,13 +670,13 @@ fn prune_and_sensitive_gates_block_mutations() {
         coverage: Vec::new(),
         issues: Vec::new(),
     };
-    let desired = RepositoryIntegrationsCategoryV2 {
+    let desired = RepositoryIntegrationsCategory {
         policy: CategoryPolicy {
             disposition: ManagementDisposition::Managed,
             prune: true,
             sensitive: false,
         },
-        ..RepositoryIntegrationsCategoryV2::default()
+        ..RepositoryIntegrationsCategory::default()
     };
     let plan = plan_integrations(&current, &desired);
     assert!(plan.is_empty());
@@ -690,7 +690,7 @@ fn prune_and_sensitive_gates_block_mutations() {
 #[test]
 fn sensitive_gate_removes_autolink_create_recreate_and_delete_actions() {
     let current = IntegrationsCollection {
-        category: RepositoryIntegrationsCategoryV2::default(),
+        category: RepositoryIntegrationsCategory::default(),
         state: CollectedIntegrationsState {
             webhooks: Vec::new(),
             webhooks_complete: true,
@@ -701,7 +701,7 @@ fn sensitive_gate_removes_autolink_create_recreate_and_delete_actions() {
             autolinks: vec![
                 CollectedAutolink {
                     id: 10,
-                    config: AutolinkConfigV2 {
+                    config: AutolinkConfig {
                         key_prefix: "ABC-".to_owned(),
                         url_template: "https://tracker.example/ABC-<num>".to_owned(),
                         is_alphanumeric: Some(true),
@@ -709,7 +709,7 @@ fn sensitive_gate_removes_autolink_create_recreate_and_delete_actions() {
                 },
                 CollectedAutolink {
                     id: 11,
-                    config: AutolinkConfigV2 {
+                    config: AutolinkConfig {
                         key_prefix: "STALE-".to_owned(),
                         url_template: "https://tracker.example/STALE-<num>".to_owned(),
                         is_alphanumeric: Some(true),
@@ -721,25 +721,25 @@ fn sensitive_gate_removes_autolink_create_recreate_and_delete_actions() {
         coverage: Vec::new(),
         issues: Vec::new(),
     };
-    let desired = RepositoryIntegrationsCategoryV2 {
+    let desired = RepositoryIntegrationsCategory {
         policy: CategoryPolicy {
             disposition: ManagementDisposition::Managed,
             prune: true,
             sensitive: false,
         },
         autolinks: vec![
-            AutolinkConfigV2 {
+            AutolinkConfig {
                 key_prefix: "ABC-".to_owned(),
                 url_template: "https://tracker.example/ABC-<num>".to_owned(),
                 is_alphanumeric: Some(false),
             },
-            AutolinkConfigV2 {
+            AutolinkConfig {
                 key_prefix: "NEW-".to_owned(),
                 url_template: "https://tracker.example/NEW-<num>".to_owned(),
                 is_alphanumeric: Some(true),
             },
         ],
-        ..RepositoryIntegrationsCategoryV2::default()
+        ..RepositoryIntegrationsCategory::default()
     };
 
     let plan = plan_integrations(&current, &desired);
@@ -763,7 +763,7 @@ async fn apply_with_sensitive_false_never_writes_autolinks() {
         webhook_actions: Vec::new(),
         deploy_key_actions: Vec::new(),
         pages_action: None,
-        autolink_actions: vec![AutolinkAction::Create(AutolinkConfigV2 {
+        autolink_actions: vec![AutolinkAction::Create(AutolinkConfig {
             key_prefix: "ABC-".to_owned(),
             url_template: "https://tracker.example/ABC-<num>".to_owned(),
             is_alphanumeric: Some(true),
@@ -786,7 +786,7 @@ async fn apply_with_sensitive_false_never_writes_autolinks() {
 
 fn current_access_with_team_and_collaborator() -> AccessCollection {
     AccessCollection {
-        category: RepositoryAccessCategoryV2::default(),
+        category: RepositoryAccessCategory::default(),
         state: CollectedAccessState {
             teams: vec![TeamAccess {
                 slug: "legacy".to_owned(),
@@ -815,14 +815,14 @@ fn current_access_with_team_and_collaborator() -> AccessCollection {
 #[test]
 fn absent_collaborators_key_never_revokes_collaborators_even_with_prune() {
     let current = current_access_with_team_and_collaborator();
-    let desired = RepositoryAccessCategoryV2 {
+    let desired = RepositoryAccessCategory {
         policy: managed_sensitive_policy(true),
         teams: Some(vec![TeamAccess {
             slug: "platform".to_owned(),
             permission: "push".to_owned(),
         }]),
         collaborators: None,
-        ..RepositoryAccessCategoryV2::default()
+        ..RepositoryAccessCategory::default()
     };
 
     let plan = plan_access(&current, &desired);
@@ -846,11 +846,11 @@ fn absent_collaborators_key_never_revokes_collaborators_even_with_prune() {
 #[test]
 fn absent_teams_key_never_removes_teams_even_with_prune() {
     let current = current_access_with_team_and_collaborator();
-    let desired = RepositoryAccessCategoryV2 {
+    let desired = RepositoryAccessCategory {
         policy: managed_sensitive_policy(true),
         teams: None,
         collaborators: Some(Vec::new()),
-        ..RepositoryAccessCategoryV2::default()
+        ..RepositoryAccessCategory::default()
     };
 
     let plan = plan_access(&current, &desired);
@@ -862,10 +862,10 @@ fn absent_teams_key_never_removes_teams_even_with_prune() {
 #[test]
 fn explicit_empty_collaborators_with_prune_revokes_every_collaborator() {
     let current = current_access_with_team_and_collaborator();
-    let desired = RepositoryAccessCategoryV2 {
+    let desired = RepositoryAccessCategory {
         policy: managed_sensitive_policy(true),
         collaborators: Some(Vec::new()),
-        ..RepositoryAccessCategoryV2::default()
+        ..RepositoryAccessCategory::default()
     };
 
     let plan = plan_access(&current, &desired);
@@ -879,10 +879,10 @@ fn explicit_empty_collaborators_with_prune_revokes_every_collaborator() {
 #[test]
 fn explicit_collaborators_without_prune_keep_unlisted_collaborators() {
     let current = current_access_with_team_and_collaborator();
-    let desired = RepositoryAccessCategoryV2 {
+    let desired = RepositoryAccessCategory {
         policy: managed_sensitive_policy(false),
         collaborators: Some(Vec::new()),
-        ..RepositoryAccessCategoryV2::default()
+        ..RepositoryAccessCategory::default()
     };
 
     assert!(
@@ -895,11 +895,11 @@ fn explicit_collaborators_without_prune_keep_unlisted_collaborators() {
 #[test]
 fn verification_does_not_flag_unlisted_collaborators_when_the_key_is_absent() {
     let current = current_access_with_team_and_collaborator();
-    let absent = RepositoryAccessCategoryV2 {
+    let absent = RepositoryAccessCategory {
         policy: managed_sensitive_policy(true),
-        ..RepositoryAccessCategoryV2::default()
+        ..RepositoryAccessCategory::default()
     };
-    let explicit = RepositoryAccessCategoryV2 {
+    let explicit = RepositoryAccessCategory {
         collaborators: Some(Vec::new()),
         teams: Some(Vec::new()),
         ..absent.clone()
@@ -919,11 +919,11 @@ fn verification_does_not_flag_unlisted_collaborators_when_the_key_is_absent() {
 
 #[test]
 fn collaborators_key_round_trips_as_absent_or_explicit_empty() {
-    let absent: RepositoryAccessCategoryV2 = toml::from_str("[policy]\nprune = true\n").unwrap();
+    let absent: RepositoryAccessCategory = toml::from_str("[policy]\nprune = true\n").unwrap();
     assert_eq!(absent.collaborators, None);
     assert_eq!(absent.teams, None);
 
-    let explicit: RepositoryAccessCategoryV2 =
+    let explicit: RepositoryAccessCategory =
         toml::from_str("collaborators = []\nteams = []\n").unwrap();
     assert_eq!(explicit.collaborators, Some(Vec::new()));
     assert_eq!(explicit.teams, Some(Vec::new()));

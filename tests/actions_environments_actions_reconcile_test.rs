@@ -14,7 +14,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use ward::config::manifest::{
-    ActionsCategoryV2, ActionsSettingsConfig, CategoryPolicy, CoverageOutcome,
+    ActionsCategory, ActionsSettingsConfig, CategoryPolicy, CoverageOutcome,
     ExternalValueReference, ManagementDisposition, ManifestCategoryName, NamedValueConfig,
     ReferencedResourceConfig, ReferencedResourceType, SecretPlaceholderConfig, WorkflowStateConfig,
 };
@@ -247,7 +247,7 @@ async fn plan_is_empty_when_desired_matches_baseline_idempotence() {
     let server = MockServer::start().await;
     mount_actions_baseline(&server, "my-repo", BaselineOverrides::default()).await;
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         settings: Some(ActionsSettingsConfig {
             enabled: Some(true),
@@ -285,7 +285,7 @@ async fn plan_detects_permissions_drift_and_apply_applies_it() {
         .mount(&server)
         .await;
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         settings: Some(ActionsSettingsConfig {
             enabled: Some(false),
@@ -315,7 +315,7 @@ async fn conflicting_artifact_and_log_retention_is_a_blocker() {
     let server = MockServer::start().await;
     mount_actions_baseline(&server, "my-repo", BaselineOverrides::default()).await;
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         settings: Some(ActionsSettingsConfig {
             artifact_retention_days: Some(30),
@@ -348,7 +348,7 @@ async fn private_fork_pr_workflow_policy_not_applicable_on_public_repo() {
     )
     .await;
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         settings: Some(ActionsSettingsConfig {
             private_fork_workflows_enabled: Some(true),
@@ -393,7 +393,7 @@ async fn workflow_state_change_is_idempotent_when_already_matching() {
     )
     .await;
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         workflows: vec![WorkflowStateConfig {
             path: ".github/workflows/ci.yml".to_owned(),
@@ -427,7 +427,7 @@ async fn disabled_workflow_drift_produces_a_state_change() {
     )
     .await;
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         workflows: vec![WorkflowStateConfig {
             path: ".github/workflows/deploy.yml".to_owned(),
@@ -462,7 +462,7 @@ async fn variables_are_diffed_by_value_and_are_idempotent() {
     )
     .await;
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         variables: vec![NamedValueConfig {
             name: "REGION".to_owned(),
@@ -481,7 +481,7 @@ async fn variables_are_diffed_by_value_and_are_idempotent() {
     );
 
     // Changing the value must produce an upsert.
-    let desired_changed = ActionsCategoryV2 {
+    let desired_changed = ActionsCategory {
         variables: vec![NamedValueConfig {
             name: "REGION".to_owned(),
             value: "us-east-1".to_owned(),
@@ -497,7 +497,7 @@ async fn secret_with_unresolved_manual_placeholder_is_blocked() {
     let server = MockServer::start().await;
     mount_actions_baseline(&server, "my-repo", BaselineOverrides::default()).await;
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         secrets: vec![SecretPlaceholderConfig {
             name: "DEPLOY_TOKEN".to_owned(),
@@ -528,7 +528,7 @@ async fn secret_resolved_from_env_is_encrypted_and_never_logs_plaintext() {
     let env =
         |key: &str| (key == "WARD_TEST_DEPLOY_TOKEN").then(|| "plaintext-secret-value".to_owned());
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         secrets: vec![SecretPlaceholderConfig {
             name: "DEPLOY_TOKEN".to_owned(),
@@ -587,7 +587,7 @@ async fn apply_encrypts_secret_with_target_public_key_before_put() {
     let env =
         |key: &str| (key == "WARD_TEST_APPLY_TOKEN").then(|| "another-plaintext-value".to_owned());
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         secrets: vec![SecretPlaceholderConfig {
             name: "DEPLOY_TOKEN".to_owned(),
@@ -636,7 +636,7 @@ async fn secret_pruning_deletes_remote_only_secrets_when_prune_enabled() {
         .mount(&server)
         .await;
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(true),
         secrets: vec![],
         ..Default::default()
@@ -658,7 +658,7 @@ async fn observe_disposition_never_produces_changes() {
     let server = MockServer::start().await;
     mount_actions_baseline(&server, "my-repo", BaselineOverrides::default()).await;
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: CategoryPolicy::observe(),
         settings: Some(ActionsSettingsConfig {
             enabled: Some(false),
@@ -679,7 +679,7 @@ async fn verify_reports_compliant_when_state_matches_desired() {
     let server = MockServer::start().await;
     mount_actions_baseline(&server, "my-repo", BaselineOverrides::default()).await;
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         settings: Some(ActionsSettingsConfig {
             enabled: Some(true),
@@ -965,7 +965,7 @@ async fn private_fork_pr_workflow_policy_round_trips_all_boolean_values() {
         )
         .await;
 
-        let desired = ActionsCategoryV2 {
+        let desired = ActionsCategory {
             policy: managed_policy(false),
             settings: Some(ActionsSettingsConfig {
                 private_fork_workflows_enabled: Some(desired_value),
@@ -1025,7 +1025,7 @@ async fn private_fork_pr_workflow_explicit_override_is_applied_and_others_preser
         .mount(&server)
         .await;
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         settings: Some(ActionsSettingsConfig {
             send_write_tokens_to_workflows: Some(true),
@@ -1081,7 +1081,7 @@ async fn dependabot_and_codespaces_secret_placeholders_surface_a_warning_when_no
     let server = MockServer::start().await;
     mount_actions_baseline(&server, "my-repo", BaselineOverrides::default()).await;
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         dependabot_secrets: vec![SecretPlaceholderConfig {
             name: "DEPENDABOT_TOKEN".to_owned(),
@@ -1143,7 +1143,7 @@ async fn already_present_secret_is_not_replanned_and_verify_converges() {
     )
     .await;
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         secrets: vec![SecretPlaceholderConfig {
             name: "DEPLOY_TOKEN".to_owned(),
@@ -1198,7 +1198,7 @@ async fn missing_secret_is_still_resolved_when_another_secret_already_exists() {
 
     let env = |key: &str| (key == "WARD_TEST_NEW_TOKEN").then(|| "brand-new-value".to_owned());
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         secrets: vec![
             SecretPlaceholderConfig {
@@ -1342,8 +1342,8 @@ async fn runner_group_visibility_is_recorded_as_an_unsupported_coverage_entry() 
 // while resolving are always surfaced as blockers, never treated as "not
 // associated" or silently satisfied.
 
-fn desired_with_org_secret_reference(policy: CategoryPolicy, name: &str) -> ActionsCategoryV2 {
-    ActionsCategoryV2 {
+fn desired_with_org_secret_reference(policy: CategoryPolicy, name: &str) -> ActionsCategory {
+    ActionsCategory {
         policy,
         references: vec![ReferencedResourceConfig {
             resource_type: ReferencedResourceType::OrganizationSecret,
@@ -1717,7 +1717,7 @@ async fn organization_variable_selected_not_associated_and_prune_disassociates_w
         .await;
 
     // Nothing desired references `LEGACYVAR`; prune + sensitive is set.
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: sensitive_managed_policy(true),
         ..Default::default()
     };
@@ -1772,7 +1772,7 @@ async fn mount_actions_baseline_with_org_variable_visible() {
 
     // No `prune`: the currently-visible-but-undesired variable must not be
     // resolved or disassociated at all (no org-scoped metadata call).
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: sensitive_managed_policy(false),
         ..Default::default()
     };
@@ -1820,7 +1820,7 @@ async fn cache_limits_plan_is_empty_when_desired_matches_observed_idempotence() 
     let server = MockServer::start().await;
     mount_actions_baseline(&server, "my-repo", BaselineOverrides::default()).await;
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         settings: Some(ActionsSettingsConfig {
             cache_retention_limit_days: Some(7),
@@ -1859,7 +1859,7 @@ async fn cache_limits_drift_is_planned_and_applied() {
         .mount(&server)
         .await;
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         settings: Some(ActionsSettingsConfig {
             cache_retention_limit_days: Some(3),
@@ -2017,7 +2017,7 @@ async fn cache_limits_apply_then_verify_is_idempotent() {
     )
     .await;
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         settings: Some(ActionsSettingsConfig {
             cache_retention_limit_days: Some(7),
@@ -2090,7 +2090,7 @@ async fn forbidden_endpoints_the_manifest_does_not_manage_are_not_unknown_state(
     mount_forbidden_optional_actions_endpoints(&server).await;
     mount_actions_baseline(&server, "my-repo", BaselineOverrides::default()).await;
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         ..Default::default()
     };
@@ -2107,7 +2107,7 @@ async fn forbidden_endpoints_the_manifest_manages_stay_unknown_state() {
     mount_forbidden_optional_actions_endpoints(&server).await;
     mount_actions_baseline(&server, "my-repo", BaselineOverrides::default()).await;
 
-    let desired = ActionsCategoryV2 {
+    let desired = ActionsCategory {
         policy: managed_policy(false),
         dependabot_secrets: vec![SecretPlaceholderConfig {
             name: "TOKEN".to_owned(),

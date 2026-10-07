@@ -8,11 +8,11 @@ use clap::Args;
 use console::style;
 
 use crate::config::manifest::{
-    ActionsCategoryV2, BranchProtectionCategoryV2, CategoryPolicy, CoverageEntry, CoverageOutcome,
-    EnvironmentsCategoryV2, ExternalValueReference, FileDeliveryConfig, FilesCategoryV2,
-    LabelConfigV2, Manifest, ManifestCategories, ManifestCategoryName, ManifestProvenance,
-    ManifestSchema, OrgConfig, RepositoryAccessCategoryV2, RepositoryIntegrationsCategoryV2,
-    RulesetsCategoryV2, SecurityCategoryV2, SystemConfig,
+    ActionsCategory, BranchProtectionCategory, CategoryPolicy, CoverageEntry, CoverageOutcome,
+    EnvironmentsCategory, ExternalValueReference, FileDeliveryConfig, FilesCategory, LabelConfig,
+    Manifest, ManifestCategories, ManifestCategoryName, ManifestProvenance, OrgConfig,
+    RepositoryAccessCategory, RepositoryIntegrationsCategory, RulesetsCategory, SecurityCategory,
+    SystemConfig,
 };
 use crate::github::Client;
 use crate::reconcile::access_integrations::{collect_access, collect_integrations};
@@ -284,9 +284,9 @@ async fn snapshot_repository(
     include: &[String],
     exclude: &[String],
 ) -> Result<Snapshot> {
-    let access_seed = RepositoryAccessCategoryV2::observe_sensitive();
-    let integrations_seed = RepositoryIntegrationsCategoryV2::observe_sensitive();
-    let files_seed = FilesCategoryV2 {
+    let access_seed = RepositoryAccessCategory::observe_sensitive();
+    let integrations_seed = RepositoryIntegrationsCategory::observe_sensitive();
+    let files_seed = FilesCategory {
         policy: CategoryPolicy::managed(),
         include: include.to_vec(),
         exclude: exclude.to_vec(),
@@ -334,7 +334,7 @@ async fn snapshot_repository(
                 state
                     .labels
                     .into_iter()
-                    .map(LabelConfigV2::from)
+                    .map(LabelConfig::from)
                     .collect::<Vec<_>>(),
                 non_empty(state.extensions.repository_id),
             )
@@ -371,7 +371,7 @@ async fn snapshot_repository(
                 &mut coverage,
                 &mut warnings,
             );
-            SecurityCategoryV2::observe_sensitive()
+            SecurityCategory::observe_sensitive()
         }
     };
 
@@ -468,7 +468,7 @@ async fn snapshot_repository(
                 &mut coverage,
                 &mut warnings,
             );
-            ActionsCategoryV2::observe_sensitive()
+            ActionsCategory::observe_sensitive()
         }
     };
 
@@ -493,7 +493,7 @@ async fn snapshot_repository(
                 &mut coverage,
                 &mut warnings,
             );
-            EnvironmentsCategoryV2::observe_sensitive()
+            EnvironmentsCategory::observe_sensitive()
         }
     };
 
@@ -512,7 +512,7 @@ async fn snapshot_repository(
                 &mut coverage,
                 &mut warnings,
             );
-            RepositoryAccessCategoryV2::observe_sensitive()
+            RepositoryAccessCategory::observe_sensitive()
         }
     };
 
@@ -537,7 +537,7 @@ async fn snapshot_repository(
                 &mut coverage,
                 &mut warnings,
             );
-            RepositoryIntegrationsCategoryV2::observe_sensitive()
+            RepositoryIntegrationsCategory::observe_sensitive()
         }
     };
     integrations_category.labels = labels;
@@ -597,7 +597,6 @@ async fn snapshot_repository(
             repos: targets.to_vec(),
             categories: ManifestCategories::default(),
         }],
-        schema: ManifestSchema::current(),
         provenance: Some(ManifestProvenance {
             repository: source.full_name(),
             default_branch: Some(default_branch.to_owned()),
@@ -632,8 +631,8 @@ async fn snapshot_repository(
     })
 }
 
-fn empty_repository_category() -> crate::config::manifest::RepositoryCategoryV2 {
-    crate::config::manifest::RepositoryCategoryV2 {
+fn empty_repository_category() -> crate::config::manifest::RepositoryCategory {
+    crate::config::manifest::RepositoryCategory {
         policy: CategoryPolicy::managed(),
         settings: None,
         metadata: None,
@@ -643,16 +642,16 @@ fn empty_repository_category() -> crate::config::manifest::RepositoryCategoryV2 
     }
 }
 
-fn observe_rulesets_category() -> RulesetsCategoryV2 {
-    RulesetsCategoryV2 {
+fn observe_rulesets_category() -> RulesetsCategory {
+    RulesetsCategory {
         policy: CategoryPolicy::observe_sensitive(),
         references: Vec::new(),
         repository_rulesets: Vec::new(),
     }
 }
 
-fn observe_branch_protection_category() -> BranchProtectionCategoryV2 {
-    BranchProtectionCategoryV2 {
+fn observe_branch_protection_category() -> BranchProtectionCategory {
+    BranchProtectionCategory {
         policy: CategoryPolicy::observe_sensitive(),
         default_branch: None,
         default_branch_detailed: None,
@@ -744,20 +743,20 @@ fn category_rank(category: ManifestCategoryName) -> u8 {
     }
 }
 
-fn normalize_actions_placeholders(category: &mut ActionsCategoryV2) {
+fn normalize_actions_placeholders(category: &mut ActionsCategory) {
     normalize_secret_placeholders("WARD_ACTIONS_SECRET", &mut category.secrets);
     normalize_secret_placeholders("WARD_DEPENDABOT_SECRET", &mut category.dependabot_secrets);
     normalize_secret_placeholders("WARD_CODESPACES_SECRET", &mut category.codespaces_secrets);
 }
 
-fn normalize_environment_placeholders(category: &mut EnvironmentsCategoryV2) {
+fn normalize_environment_placeholders(category: &mut EnvironmentsCategory) {
     for environment in &mut category.entries {
         let prefix = format!("WARD_ENV_{}_SECRET", env_component(&environment.name));
         normalize_secret_placeholders(&prefix, &mut environment.secrets);
     }
 }
 
-fn normalize_integration_placeholders(category: &mut RepositoryIntegrationsCategoryV2) {
+fn normalize_integration_placeholders(category: &mut RepositoryIntegrationsCategory) {
     for (index, webhook) in category.webhooks.iter_mut().enumerate() {
         if let Some(url_from) = webhook.url_from.as_mut() {
             normalize_external_value(url_from, format!("WARD_WEBHOOK_URL_{}", index + 1));
@@ -928,8 +927,8 @@ fn print_summary(snapshot: &Snapshot, source: &RepositoryRef, targets: &[String]
 mod tests {
     use super::*;
     use crate::config::manifest::{
-        ActionsSettingsConfig, FileEncoding, ManagedFileV2, ManagementDisposition,
-        RepositoryCategoryV2, RepositoryMetadataConfig, RepositorySettingsConfig,
+        ActionsSettingsConfig, FileEncoding, ManagedFile, ManagementDisposition,
+        RepositoryCategory, RepositoryMetadataConfig, RepositorySettingsConfig,
         SecretPlaceholderConfig,
     };
     use crate::reconcile::general::GeneralLabel;
@@ -991,13 +990,13 @@ mod tests {
 
     #[test]
     fn external_placeholders_become_deterministic_environment_variables() {
-        let mut actions = ActionsCategoryV2 {
+        let mut actions = ActionsCategory {
             settings: Some(ActionsSettingsConfig::default()),
             secrets: vec![SecretPlaceholderConfig {
                 name: "API_TOKEN".to_owned(),
                 value_from: ExternalValueReference::Manual { hint: None },
             }],
-            ..ActionsCategoryV2::default()
+            ..ActionsCategory::default()
         };
 
         normalize_actions_placeholders(&mut actions);
@@ -1039,7 +1038,7 @@ mod tests {
 
     #[test]
     fn rendered_manifest_round_trips_binary_files() {
-        let repository = RepositoryCategoryV2 {
+        let repository = RepositoryCategory {
             policy: CategoryPolicy::managed(),
             settings: Some(RepositorySettingsConfig {
                 has_issues: Some(true),
@@ -1053,11 +1052,11 @@ mod tests {
             immutable_releases: None,
             references: Vec::new(),
         };
-        let files = FilesCategoryV2 {
+        let files = FilesCategory {
             policy: CategoryPolicy::managed(),
             include: vec![".github/**".to_owned()],
             exclude: Vec::new(),
-            entries: vec![ManagedFileV2 {
+            entries: vec![ManagedFile {
                 path: ".github/logo.bin".to_owned(),
                 content: "AAEC".to_owned(),
                 encoding: FileEncoding::Base64,
@@ -1065,15 +1064,15 @@ mod tests {
                 source_sha: Some("abc".to_owned()),
             }],
         };
-        let integrations = RepositoryIntegrationsCategoryV2 {
+        let integrations = RepositoryIntegrationsCategory {
             policy: CategoryPolicy::observe_sensitive(),
-            labels: vec![LabelConfigV2::from(GeneralLabel {
+            labels: vec![LabelConfig::from(GeneralLabel {
                 name: "bug".to_owned(),
                 color: Some("ff0000".to_owned()),
                 description: None,
                 default: false,
             })],
-            ..RepositoryIntegrationsCategoryV2::default()
+            ..RepositoryIntegrationsCategory::default()
         };
         let manifest = Manifest {
             org: OrgConfig {
@@ -1088,7 +1087,6 @@ mod tests {
                 repos: vec!["reference".to_owned()],
                 categories: ManifestCategories::default(),
             }],
-            schema: ManifestSchema::current(),
             provenance: Some(ManifestProvenance {
                 repository: "acme/reference".to_owned(),
                 default_branch: Some("main".to_owned()),

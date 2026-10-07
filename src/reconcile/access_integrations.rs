@@ -6,10 +6,10 @@ use std::env;
 use anyhow::Result;
 
 use crate::config::manifest::{
-    ActorReference, AutolinkConfigV2, CategoryPolicy, CollaboratorAccessConfig, CoverageEntry,
-    CoverageOutcome, DeployKeyConfigV2, ExternalValueReference, ManagementDisposition,
-    ManifestCategoryName, PagesConfigV2, ReferencedResourceConfig, ReferencedResourceType,
-    RepositoryAccessCategoryV2, RepositoryIntegrationsCategoryV2, TeamAccess, WebhookConfigV2,
+    ActorReference, AutolinkConfig, CategoryPolicy, CollaboratorAccessConfig, CoverageEntry,
+    CoverageOutcome, DeployKeyConfig, ExternalValueReference, ManagementDisposition,
+    ManifestCategoryName, PagesConfig, ReferencedResourceConfig, ReferencedResourceType,
+    RepositoryAccessCategory, RepositoryIntegrationsCategory, TeamAccess, WebhookConfig,
 };
 use crate::github::Client;
 use crate::github::access::{
@@ -30,7 +30,7 @@ const BUILTIN_REPOSITORY_PERMISSIONS: &[&str] = &["pull", "triage", "push", "mai
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AccessCollection {
-    pub category: RepositoryAccessCategoryV2,
+    pub category: RepositoryAccessCategory,
     pub state: CollectedAccessState,
     pub coverage: Vec<CoverageEntry>,
     pub issues: Vec<ReconcileIssue>,
@@ -118,7 +118,7 @@ impl AccessVerification {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IntegrationsCollection {
-    pub category: RepositoryIntegrationsCategoryV2,
+    pub category: RepositoryIntegrationsCategory,
     pub state: CollectedIntegrationsState,
     pub coverage: Vec<CoverageEntry>,
     pub issues: Vec<ReconcileIssue>,
@@ -139,26 +139,26 @@ pub struct CollectedIntegrationsState {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CollectedWebhook {
     pub id: u64,
-    pub config: WebhookConfigV2,
+    pub config: WebhookConfig,
     pub canonical_url: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CollectedDeployKey {
     pub id: u64,
-    pub config: DeployKeyConfigV2,
+    pub config: DeployKeyConfig,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CollectedPages {
-    pub config: PagesConfigV2,
+    pub config: PagesConfig,
     pub status: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CollectedAutolink {
     pub id: u64,
-    pub config: AutolinkConfigV2,
+    pub config: AutolinkConfig,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -183,11 +183,11 @@ impl IntegrationsPlan {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum WebhookAction {
-    Create(WebhookConfigV2),
+    Create(WebhookConfig),
     Update {
         hook_id: u64,
         current: CollectedWebhook,
-        desired: WebhookConfigV2,
+        desired: WebhookConfig,
     },
     Delete {
         hook_id: u64,
@@ -197,11 +197,11 @@ pub enum WebhookAction {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeployKeyAction {
-    Create(DeployKeyConfigV2),
+    Create(DeployKeyConfig),
     Replace {
         key_id: u64,
         current_title: String,
-        desired: DeployKeyConfigV2,
+        desired: DeployKeyConfig,
     },
     Delete {
         key_id: u64,
@@ -211,17 +211,17 @@ pub enum DeployKeyAction {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PagesAction {
-    Create(PagesConfigV2),
-    Update(PagesConfigV2),
+    Create(PagesConfig),
+    Update(PagesConfig),
     Delete,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AutolinkAction {
-    Create(AutolinkConfigV2),
+    Create(AutolinkConfig),
     Recreate {
         autolink_id: u64,
-        desired: AutolinkConfigV2,
+        desired: AutolinkConfig,
     },
     Delete {
         autolink_id: u64,
@@ -250,7 +250,7 @@ impl IntegrationsVerification {
 pub async fn collect_access(
     client: &Client,
     repo: &str,
-    desired: &RepositoryAccessCategoryV2,
+    desired: &RepositoryAccessCategory,
 ) -> Result<AccessCollection> {
     let mut coverage = Vec::new();
     let issues = Vec::new();
@@ -359,7 +359,7 @@ pub async fn collect_access(
         &mut coverage,
     )
     .await?;
-    let category = RepositoryAccessCategoryV2 {
+    let category = RepositoryAccessCategory {
         policy: desired.policy.clone(),
         teams: teams_complete.then(|| teams.clone()),
         collaborators: collaborators_complete.then(|| {
@@ -385,7 +385,7 @@ pub async fn collect_access(
     })
 }
 
-pub fn plan_access(current: &AccessCollection, desired: &RepositoryAccessCategoryV2) -> AccessPlan {
+pub fn plan_access(current: &AccessCollection, desired: &RepositoryAccessCategory) -> AccessPlan {
     let mut team_actions = Vec::new();
     let mut collaborator_actions = Vec::new();
     let mut reference_actions = Vec::new();
@@ -772,7 +772,7 @@ pub async fn apply_access(
 pub async fn verify_access(
     client: &Client,
     repo: &str,
-    desired: &RepositoryAccessCategoryV2,
+    desired: &RepositoryAccessCategory,
 ) -> Result<AccessVerification> {
     let current = collect_access(client, repo, desired).await?;
     Ok(verify_access_state(&current, desired))
@@ -780,7 +780,7 @@ pub async fn verify_access(
 
 pub fn verify_access_state(
     current: &AccessCollection,
-    desired: &RepositoryAccessCategoryV2,
+    desired: &RepositoryAccessCategory,
 ) -> AccessVerification {
     let mut verification = AccessVerification::default();
     let current_teams = current
@@ -945,7 +945,7 @@ pub fn verify_access_state(
 pub async fn collect_integrations(
     client: &Client,
     repo: &str,
-    desired: &RepositoryIntegrationsCategoryV2,
+    desired: &RepositoryIntegrationsCategory,
 ) -> Result<IntegrationsCollection> {
     let mut coverage = Vec::new();
     let issues = Vec::new();
@@ -965,7 +965,7 @@ pub async fn collect_integrations(
                     CollectedWebhook {
                         id: webhook.id,
                         canonical_url: canonicalize_url(&display_url),
-                        config: WebhookConfigV2 {
+                        config: WebhookConfig {
                             url: display_url,
                             url_from,
                             active: Some(webhook.active),
@@ -997,7 +997,7 @@ pub async fn collect_integrations(
             keys.into_iter()
                 .map(|key| CollectedDeployKey {
                     id: key.id,
-                    config: DeployKeyConfigV2 {
+                    config: DeployKeyConfig {
                         title: key.title,
                         read_only: Some(key.read_only),
                         fingerprint: key.fingerprint,
@@ -1023,7 +1023,7 @@ pub async fn collect_integrations(
     let (pages, pages_complete) = match pages_outcome? {
         ReadOutcome::Available(Some(pages)) => (
             Some(CollectedPages {
-                config: PagesConfigV2 {
+                config: PagesConfig {
                     build_type: pages.build_type,
                     source_branch: pages.source_branch,
                     source_path: pages.source_path,
@@ -1052,7 +1052,7 @@ pub async fn collect_integrations(
                 .into_iter()
                 .map(|autolink| CollectedAutolink {
                     id: autolink.id,
-                    config: AutolinkConfigV2 {
+                    config: AutolinkConfig {
                         key_prefix: autolink.key_prefix,
                         url_template: autolink.url_template,
                         is_alphanumeric: autolink.is_alphanumeric,
@@ -1072,7 +1072,7 @@ pub async fn collect_integrations(
         }
     };
 
-    let category = RepositoryIntegrationsCategoryV2 {
+    let category = RepositoryIntegrationsCategory {
         policy: desired.policy.clone(),
         webhooks: webhooks.iter().map(|hook| hook.config.clone()).collect(),
         deploy_keys: deploy_keys.iter().map(|key| key.config.clone()).collect(),
@@ -1100,7 +1100,7 @@ pub async fn collect_integrations(
 
 pub fn plan_integrations(
     current: &IntegrationsCollection,
-    desired: &RepositoryIntegrationsCategoryV2,
+    desired: &RepositoryIntegrationsCategory,
 ) -> IntegrationsPlan {
     let mut webhook_actions = Vec::new();
     let mut deploy_key_actions = Vec::new();
@@ -1547,7 +1547,7 @@ pub async fn apply_integrations(
 pub async fn verify_integrations(
     client: &Client,
     repo: &str,
-    desired: &RepositoryIntegrationsCategoryV2,
+    desired: &RepositoryIntegrationsCategory,
 ) -> Result<IntegrationsVerification> {
     let current = collect_integrations(client, repo, desired).await?;
     Ok(verify_integrations_state(&current, desired))
@@ -1555,7 +1555,7 @@ pub async fn verify_integrations(
 
 pub fn verify_integrations_state(
     current: &IntegrationsCollection,
-    desired: &RepositoryIntegrationsCategoryV2,
+    desired: &RepositoryIntegrationsCategory,
 ) -> IntegrationsVerification {
     let mut verification = IntegrationsVerification::default();
     let current_webhooks = current
@@ -2084,7 +2084,7 @@ fn collect_collaborators(
 async fn apply_deploy_key_create(
     client: &Client,
     repo: &str,
-    desired: &DeployKeyConfigV2,
+    desired: &DeployKeyConfig,
 ) -> Result<String> {
     let replacement_key =
         resolve_required_external_value(desired.replacement_key.as_ref(), "deploy key")
@@ -2100,7 +2100,7 @@ async fn apply_deploy_key_create(
     Ok(format!("Created deploy key {}", desired.title))
 }
 
-fn deploy_key_equivalent(current: &CollectedDeployKey, desired: &DeployKeyConfigV2) -> bool {
+fn deploy_key_equivalent(current: &CollectedDeployKey, desired: &DeployKeyConfig) -> bool {
     current.config.title == desired.title
         && current.config.read_only.unwrap_or(true) == desired.read_only.unwrap_or(true)
         && current.config.fingerprint == desired.fingerprint
@@ -2108,7 +2108,7 @@ fn deploy_key_equivalent(current: &CollectedDeployKey, desired: &DeployKeyConfig
 
 fn match_deploy_key<'a>(
     current: &'a CollectedIntegrationsState,
-    desired: &DeployKeyConfigV2,
+    desired: &DeployKeyConfig,
 ) -> Option<(u64, &'a CollectedDeployKey)> {
     if let Some(fingerprint) = desired.fingerprint.as_deref()
         && let Some(entry) = current
@@ -2126,7 +2126,7 @@ fn match_deploy_key<'a>(
         .map(|entry| (entry.id, entry))
 }
 
-fn deploy_key_block_reason(desired: &DeployKeyConfigV2) -> Option<String> {
+fn deploy_key_block_reason(desired: &DeployKeyConfig) -> Option<String> {
     match desired.replacement_key.as_ref() {
         None => Some("replacement_key is required to create or rotate deploy keys.".to_owned()),
         Some(ExternalValueReference::Manual { .. }) => Some(
@@ -2139,7 +2139,7 @@ fn deploy_key_block_reason(desired: &DeployKeyConfigV2) -> Option<String> {
     }
 }
 
-fn webhook_create_block_reason(desired: &WebhookConfigV2) -> Option<String> {
+fn webhook_create_block_reason(desired: &WebhookConfig) -> Option<String> {
     resolve_required_url(desired).err().or_else(|| {
         resolve_required_external_value(desired.secret.as_ref(), "webhook secret").err()
     })
@@ -2147,7 +2147,7 @@ fn webhook_create_block_reason(desired: &WebhookConfigV2) -> Option<String> {
 
 fn webhook_update_block_reason(
     current: &CollectedWebhook,
-    desired: &WebhookConfigV2,
+    desired: &WebhookConfig,
 ) -> Option<String> {
     let desired_normalized = normalized_webhook_config(desired);
     if current.canonical_url != desired_normalized.canonical_url {
@@ -2161,7 +2161,7 @@ fn normalized_webhook(current: &CollectedWebhook) -> NormalizedWebhook {
     normalized_webhook_config(&current.config)
 }
 
-fn normalized_webhook_config(webhook: &WebhookConfigV2) -> NormalizedWebhook {
+fn normalized_webhook_config(webhook: &WebhookConfig) -> NormalizedWebhook {
     NormalizedWebhook {
         canonical_url: canonicalize_url(&webhook.url),
         active: webhook.active.unwrap_or(true),
@@ -2183,7 +2183,7 @@ struct NormalizedWebhook {
     insecure_ssl: bool,
 }
 
-fn normalized_pages(pages: &PagesConfigV2) -> NormalizedPages {
+fn normalized_pages(pages: &PagesConfig) -> NormalizedPages {
     let build_type = pages.build_type.clone();
     let workflow = matches!(build_type.as_deref(), Some("workflow"));
     NormalizedPages {
@@ -2219,7 +2219,7 @@ struct NormalizedAutolink {
     is_alphanumeric: bool,
 }
 
-fn normalized_autolink(autolink: &AutolinkConfigV2) -> NormalizedAutolink {
+fn normalized_autolink(autolink: &AutolinkConfig) -> NormalizedAutolink {
     NormalizedAutolink {
         key_prefix: autolink.key_prefix.clone(),
         url_template: autolink.url_template.clone(),
@@ -2283,7 +2283,7 @@ fn resolve_required_external_value(
     }
 }
 
-fn resolve_required_url(webhook: &WebhookConfigV2) -> Result<String, String> {
+fn resolve_required_url(webhook: &WebhookConfig) -> Result<String, String> {
     if let Some(reference) = webhook.url_from.as_ref() {
         return resolve_required_external_value(Some(reference), "webhook URL");
     }
@@ -2381,7 +2381,7 @@ fn credentialed_webhook_url_env_key(parsed: &reqwest::Url) -> String {
 }
 
 fn derive_access_references(
-    desired: &RepositoryAccessCategoryV2,
+    desired: &RepositoryAccessCategory,
     teams: &[TeamAccess],
     collaborators: &[CollectedCollaborator],
     app_refs: &[ReferencedResourceConfig],
@@ -2523,7 +2523,7 @@ fn record_read_outcome<T>(
 }
 
 fn apply_access_policy_gates(
-    desired: &RepositoryAccessCategoryV2,
+    desired: &RepositoryAccessCategory,
     team_actions: &mut Vec<TeamAccessAction>,
     collaborator_actions: &mut Vec<CollaboratorAccessAction>,
     reference_actions: &mut Vec<AccessReferenceAction>,
@@ -2575,7 +2575,7 @@ fn has_blocker_for_scope(issues: &[ReconcileIssue], scope: &str) -> bool {
         .any(|issue| issue.severity == IssueSeverity::Blocker && issue.scope.starts_with(scope))
 }
 
-fn validate_pages_desired(desired: Option<&PagesConfigV2>) -> Vec<ReconcileIssue> {
+fn validate_pages_desired(desired: Option<&PagesConfig>) -> Vec<ReconcileIssue> {
     let Some(desired) = desired else {
         return Vec::new();
     };
@@ -2608,7 +2608,7 @@ fn validate_pages_desired(desired: Option<&PagesConfigV2>) -> Vec<ReconcileIssue
 }
 
 fn apply_integrations_policy_gates(
-    desired: &RepositoryIntegrationsCategoryV2,
+    desired: &RepositoryIntegrationsCategory,
     webhook_actions: &mut Vec<WebhookAction>,
     deploy_key_actions: &mut Vec<DeployKeyAction>,
     pages_action: &mut Option<PagesAction>,

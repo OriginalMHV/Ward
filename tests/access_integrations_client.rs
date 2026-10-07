@@ -1,7 +1,7 @@
 use serde_json::json;
 use ward::config::manifest::{
-    ReferencedResourceConfig, ReferencedResourceType, RepositoryAccessCategoryV2,
-    RepositoryIntegrationsCategoryV2,
+    ReferencedResourceConfig, ReferencedResourceType, RepositoryAccessCategory,
+    RepositoryIntegrationsCategory,
 };
 use ward::github::Client;
 use ward::github::actions::WriteOutcome;
@@ -69,12 +69,12 @@ async fn collect_access_degrades_on_partial_403_and_uses_documented_app_lookup()
         .await;
 
     let client = Client::new_for_test("test-org", &server.uri());
-    let desired = RepositoryAccessCategoryV2 {
+    let desired = RepositoryAccessCategory {
         references: vec![ReferencedResourceConfig {
             resource_type: ReferencedResourceType::App,
             name: "deploy-protect".to_owned(),
         }],
-        ..RepositoryAccessCategoryV2::default()
+        ..RepositoryAccessCategory::default()
     };
 
     let collection = collect_access(&client, "my-repo", &desired).await.unwrap();
@@ -156,7 +156,7 @@ async fn collect_access_discovers_source_app_references_when_desired_is_empty() 
         .await;
 
     let client = Client::new_for_test("test-org", &server.uri());
-    let collection = collect_access(&client, "my-repo", &RepositoryAccessCategoryV2::default())
+    let collection = collect_access(&client, "my-repo", &RepositoryAccessCategory::default())
         .await
         .unwrap();
 
@@ -263,7 +263,7 @@ async fn collect_integrations_imports_credentialed_webhook_placeholder_and_autol
     let current = collect_integrations(
         &client,
         "my-repo",
-        &RepositoryIntegrationsCategoryV2::default(),
+        &RepositoryIntegrationsCategory::default(),
     )
     .await
     .unwrap();
@@ -312,7 +312,7 @@ async fn collect_access_omits_teams_when_the_read_is_denied() {
     mount_empty_access_reads(&server, 403).await;
     let client = Client::new_for_test("test-org", &server.uri());
 
-    let collection = collect_access(&client, "my-repo", &RepositoryAccessCategoryV2::default())
+    let collection = collect_access(&client, "my-repo", &RepositoryAccessCategory::default())
         .await
         .unwrap();
 
@@ -330,7 +330,7 @@ async fn collect_access_keeps_an_explicit_empty_teams_list_after_a_successful_re
     mount_empty_access_reads(&server, 200).await;
     let client = Client::new_for_test("test-org", &server.uri());
 
-    let collection = collect_access(&client, "my-repo", &RepositoryAccessCategoryV2::default())
+    let collection = collect_access(&client, "my-repo", &RepositoryAccessCategory::default())
         .await
         .unwrap();
 

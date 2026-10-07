@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking changes
+
+The `[schema]` table is removed from the manifest. Ward now fails with a clear error when `ward.toml` still contains it. To upgrade a manifest, delete the `[schema]` table and its `version` line. `ward import` and `ward init` no longer write it.
+
 ## [0.5.0] - 2026-10-06
 
 ### Breaking changes

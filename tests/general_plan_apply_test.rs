@@ -5,7 +5,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use ward::config::manifest::{
-    CategoryPolicy, ImmutableReleasesConfig, RepositoryCategoryV2, RepositoryMetadataConfig,
+    CategoryPolicy, ImmutableReleasesConfig, RepositoryCategory, RepositoryMetadataConfig,
     RepositorySettingsConfig,
 };
 use ward::github::Client;
@@ -17,7 +17,7 @@ use ward::reconcile::general::{
 
 fn current_state() -> CollectedGeneralState {
     CollectedGeneralState {
-        repository: RepositoryCategoryV2 {
+        repository: RepositoryCategory {
             policy: CategoryPolicy::managed(),
             settings: Some(RepositorySettingsConfig {
                 has_issues: Some(true),
@@ -97,7 +97,7 @@ fn current_state() -> CollectedGeneralState {
 fn high_impact_changes_are_blocked_by_default_and_opt_in_when_requested() {
     let current = current_state();
     let desired = GeneralDesiredState {
-        repository: RepositoryCategoryV2 {
+        repository: RepositoryCategory {
             policy: CategoryPolicy::managed(),
             settings: Some(RepositorySettingsConfig {
                 has_discussions: Some(true),
@@ -157,7 +157,7 @@ async fn apply_blocks_when_default_branch_does_not_exist() {
 
     let current = current_state();
     let desired = GeneralDesiredState {
-        repository: RepositoryCategoryV2 {
+        repository: RepositoryCategory {
             policy: CategoryPolicy::managed(),
             settings: None,
             metadata: Some(RepositoryMetadataConfig {
@@ -184,7 +184,7 @@ async fn apply_blocks_when_default_branch_does_not_exist() {
 async fn apply_rejects_mixed_blocked_and_actionable_plan_before_writing() {
     let current = current_state();
     let desired = GeneralDesiredState {
-        repository: RepositoryCategoryV2 {
+        repository: RepositoryCategory {
             policy: CategoryPolicy::managed(),
             settings: Some(RepositorySettingsConfig {
                 has_issues: Some(false),
@@ -223,7 +223,7 @@ fn immutable_releases_enforced_by_owner_are_reference_only() {
     });
 
     let desired = GeneralDesiredState {
-        repository: RepositoryCategoryV2 {
+        repository: RepositoryCategory {
             policy: CategoryPolicy::managed(),
             settings: None,
             metadata: None,
@@ -258,7 +258,7 @@ fn immutable_releases_enforced_by_owner_are_reference_only() {
 fn label_actions_respect_prune_gate_and_default_label_safety() {
     let current = current_state();
     let desired = GeneralDesiredState {
-        repository: RepositoryCategoryV2 {
+        repository: RepositoryCategory {
             policy: CategoryPolicy::managed(),
             settings: None,
             metadata: None,
@@ -333,7 +333,7 @@ fn label_actions_respect_prune_gate_and_default_label_safety() {
 fn plans_multi_select_custom_properties_and_null_clears() {
     let current = current_state();
     let desired = GeneralDesiredState {
-        repository: RepositoryCategoryV2 {
+        repository: RepositoryCategory {
             policy: CategoryPolicy::managed(),
             settings: Some(RepositorySettingsConfig {
                 ..RepositorySettingsConfig::default()
