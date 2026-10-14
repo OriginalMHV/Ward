@@ -18,6 +18,7 @@ use crate::config::auth;
 use super::access::CustomRepositoryRole;
 use super::actions::ReadOutcome;
 use super::metadata;
+use super::repos::OwnerKind;
 use super::response;
 use super::rulesets::{GitHubUser, InstalledApp};
 use super::security::CodeSecurityConfiguration;
@@ -36,6 +37,8 @@ pub(crate) struct OrgLookups {
     pub(crate) custom_roles_checked: OnceCell<ReadOutcome<Vec<CustomRepositoryRole>>>,
     pub(crate) installations: OnceCell<Vec<InstalledApp>>,
     pub(crate) code_security_configurations: OnceCell<Vec<CodeSecurityConfiguration>>,
+    pub(crate) owner_kind: OnceCell<OwnerKind>,
+    pub(crate) authenticated_login: OnceCell<Option<String>>,
     pub(crate) team_ids: KeyedCells<u64>,
     pub(crate) users: KeyedCells<GitHubUser>,
 }

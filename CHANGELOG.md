@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The warnings for deprecated aliases now say that Ward removes them in 0.7.0. The 0.5.0 notes said 0.6.0. The aliases are `--json`, `ward security`, `ward rulesets`, `ward protection`, `ward commit`, `ward teams`, `ward settings` and `ward init --from`. `ward drift check` still warns without a version and is also removed in 0.7.0.
 - `ward completions` is no longer hidden in `ward --help`.
 
+### Fixed
+
+- A personal GitHub account now works as the manifest owner. `ward doctor` reports `user '<name>'` instead of failing with `org not found`. `ward repos list` and prefix matching for systems use the user endpoints. Ward lists private repositories when the token belongs to the owner.
+
 ## [0.6.1] - 2026-10-15
 
 ### Security

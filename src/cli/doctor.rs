@@ -336,7 +336,17 @@ async fn check_api_connectivity(config_path: Option<&str>) -> Check {
         };
     };
 
-    let url = format!("https://api.github.com/orgs/{}", manifest.org.name);
+    probe_owner(&client, "https://api.github.com", &manifest.org.name).await
+}
+
+#[derive(serde::Deserialize)]
+struct OwnerProfile {
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+async fn probe_owner(client: &reqwest::Client, base_url: &str, owner: &str) -> Check {
+    let url = format!("{base_url}/users/{owner}");
     match client.get(&url).send().await {
         Ok(resp) => {
             let status = resp.status();
@@ -344,15 +354,19 @@ async fn check_api_connectivity(config_path: Option<&str>) -> Check {
                 .headers()
                 .get("x-ratelimit-remaining")
                 .and_then(|v| v.to_str().ok())
-                .unwrap_or("?");
+                .unwrap_or("?")
+                .to_owned();
 
             if status.is_success() {
+                let label = match resp.json::<OwnerProfile>().await {
+                    Ok(profile) if profile.kind == "User" => "user",
+                    _ => "org",
+                };
                 Check {
                     name: "API connectivity",
                     status: CheckStatus::Pass,
                     detail: format!(
-                        "authenticated to {} (rate limit: {} remaining)",
-                        manifest.org.name, remaining
+                        "authenticated to {label} '{owner}' (rate limit: {remaining} remaining)"
                     ),
                 }
             } else if status.as_u16() == 401 {
@@ -365,18 +379,14 @@ async fn check_api_connectivity(config_path: Option<&str>) -> Check {
                 Check {
                     name: "API connectivity",
                     status: CheckStatus::Fail,
-                    detail: format!(
-                        "403 Forbidden -- token lacks access to {}",
-                        manifest.org.name
-                    ),
+                    detail: format!("403 Forbidden -- token lacks access to {owner}"),
                 }
             } else if status.as_u16() == 404 {
                 Check {
                     name: "API connectivity",
                     status: CheckStatus::Fail,
                     detail: format!(
-                        "org '{}' not found -- check org.name in ward.toml",
-                        manifest.org.name
+                        "owner '{owner}' not found as a user or an org -- check org.name in ward.toml"
                     ),
                 }
             } else {
@@ -479,5 +489,47 @@ mod tests {
         let check = check_systems(&manifest);
         assert!(matches!(check.status, CheckStatus::Pass));
         assert!(check.detail.contains("backend"));
+    }
+
+    async fn probe(status: u16, body: serde_json::Value) -> Check {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/users/octo"))
+            .respond_with(ResponseTemplate::new(status).set_body_json(body))
+            .mount(&server)
+            .await;
+        probe_owner(&reqwest::Client::new(), &server.uri(), "octo").await
+    }
+
+    #[tokio::test]
+    async fn api_connectivity_passes_for_a_user_owner() {
+        let check = probe(200, serde_json::json!({"login": "octo", "type": "User"})).await;
+        assert!(matches!(check.status, CheckStatus::Pass));
+        assert!(check.detail.contains("user 'octo'"), "{}", check.detail);
+    }
+
+    #[tokio::test]
+    async fn api_connectivity_passes_for_an_org_owner() {
+        let check = probe(
+            200,
+            serde_json::json!({"login": "octo", "type": "Organization"}),
+        )
+        .await;
+        assert!(matches!(check.status, CheckStatus::Pass));
+        assert!(check.detail.contains("org 'octo'"), "{}", check.detail);
+    }
+
+    #[tokio::test]
+    async fn api_connectivity_fails_for_an_unknown_owner() {
+        let check = probe(404, serde_json::json!({"message": "Not Found"})).await;
+        assert!(matches!(check.status, CheckStatus::Fail));
+        assert!(
+            check.detail.contains("'octo' not found"),
+            "{}",
+            check.detail
+        );
     }
 }

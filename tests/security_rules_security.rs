@@ -566,3 +566,45 @@ fn security_rules_plan_uses_current_documented_bypass_patch_schema() {
         ])
     );
 }
+
+#[tokio::test]
+async fn security_rules_user_owner_reports_org_configurations_as_not_applicable() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/octo"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"login": "octo", "type": "User"})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/octo/example"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 42,
+            "name": "example",
+            "full_name": "octo/example",
+            "archived": false,
+            "default_branch": "main",
+            "visibility": "public",
+            "security_and_analysis": {}
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/orgs/octo/code-security/configurations"))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("octo", &server.uri());
+    let collected = collect_security_category(&client, "example", None)
+        .await
+        .unwrap();
+
+    assert!(collected.available_configurations.is_empty());
+    assert!(collected.coverage.iter().any(|entry| {
+        entry.endpoint == "GET /orgs/{org}/code-security/configurations"
+            && entry.outcome == CoverageOutcome::NotApplicable
+    }));
+}

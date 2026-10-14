@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::Client;
 use super::pagination;
-use super::response;
+use super::response::{self, ClassifiedResponse};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Repository {
@@ -44,6 +44,24 @@ impl Repository {
     }
 }
 
+/// Whether the configured owner is an organization or a personal account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnerKind {
+    Organization,
+    User,
+}
+
+#[derive(Deserialize)]
+struct OwnerProfile {
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+#[derive(Deserialize)]
+struct AuthenticatedUser {
+    login: String,
+}
+
 /// Response wrapper for the GitHub search repositories API.
 #[derive(Debug, Deserialize)]
 struct SearchResponse {
@@ -51,8 +69,81 @@ struct SearchResponse {
 }
 
 impl Client {
-    /// List all repositories for the configured org, handling pagination.
+    /// Detect whether the configured owner is an organization or a user.
+    ///
+    /// The result is cached for the run. An owner that GitHub cannot find is treated as an
+    /// organization, so the later reads report the missing owner with their own errors.
+    pub async fn owner_kind(&self) -> Result<OwnerKind> {
+        self.cached_org(|lookups| &lookups.owner_kind, self.fetch_owner_kind())
+            .await
+    }
+
+    async fn fetch_owner_kind(&self) -> Result<OwnerKind> {
+        let path = format!("/users/{}", self.org);
+        let classified =
+            response::classify_json::<OwnerProfile>(self.get(&path).await?, "GET", &path)
+                .await
+                .read_ctx("owner lookup")?;
+        match classified {
+            ClassifiedResponse::Success(profile) if profile.kind == "User" => Ok(OwnerKind::User),
+            // Any other answer keeps the organization endpoints that Ward used before user owners,
+            // so a failed lookup cannot break an organization that worked.
+            _ => Ok(OwnerKind::Organization),
+        }
+    }
+
+    /// The login of the token owner, or `None` when the token has no user (for example a GitHub App token).
+    async fn authenticated_login(&self) -> Result<Option<String>> {
+        self.cached_org(
+            |lookups| &lookups.authenticated_login,
+            self.fetch_authenticated_login(),
+        )
+        .await
+    }
+
+    async fn fetch_authenticated_login(&self) -> Result<Option<String>> {
+        let path = "/user";
+        let classified =
+            response::classify_json::<AuthenticatedUser>(self.get(path).await?, "GET", path)
+                .await
+                .read_ctx("authenticated user lookup")?;
+        match classified {
+            ClassifiedResponse::Success(user) => Ok(Some(user.login)),
+            ClassifiedResponse::NoContent
+            | ClassifiedResponse::Forbidden(_)
+            | ClassifiedResponse::NotFound(_) => Ok(None),
+            ClassifiedResponse::Unprocessable(error) | ClassifiedResponse::Other(error) => {
+                Err(error).read_ctx("authenticated user lookup")
+            }
+        }
+    }
+
+    /// List all repositories for the configured owner, handling pagination.
+    ///
+    /// A user owner is listed through `GET /user/repos?affiliation=owner` when it is the
+    /// token owner, so private repositories are included. Other users list public repositories only.
     pub async fn list_repos(&self) -> Result<Vec<Repository>> {
+        if self.owner_kind().await? == OwnerKind::User {
+            let own_account = self
+                .authenticated_login()
+                .await?
+                .is_some_and(|login| login.eq_ignore_ascii_case(&self.org));
+            return pagination::collect_paginated(self, |page| {
+                if own_account {
+                    format!(
+                        "/user/repos?affiliation=owner&per_page={}&page={}",
+                        page.per_page, page.number
+                    )
+                } else {
+                    format!(
+                        "/users/{}/repos?type=owner&per_page={}&page={}",
+                        self.org, page.per_page, page.number
+                    )
+                }
+            })
+            .await
+            .read_ctx("repo list");
+        }
         pagination::collect_paginated(self, |page| {
             format!(
                 "/orgs/{}/repos?per_page={}&page={}&type=all",
@@ -67,9 +158,13 @@ impl Client {
     /// Uses the GitHub search API which is much faster than listing all repos
     /// and filtering client-side.
     async fn search_repos_by_name(&self, name_query: &str) -> Result<Vec<Repository>> {
-        // Build query: org:<org>+<name_query>+in:name
+        // Build query: <org|user>:<owner>+<name_query>+in:name
         // The `+` in the query string acts as a space/AND for GitHub search.
-        let query = format!("org:{}+{}+in:name", self.org, name_query);
+        let qualifier = match self.owner_kind().await? {
+            OwnerKind::Organization => "org",
+            OwnerKind::User => "user",
+        };
+        let query = format!("{qualifier}:{}+{}+in:name", self.org, name_query);
         let mut page = 1u32;
         let mut all_repos = Vec::new();
 
