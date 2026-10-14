@@ -97,6 +97,7 @@ Changed or lost capabilities:
 - Generic managed-file delivery settings moved from `[templates]` to `[file_delivery]`
 - Focused plan/apply commands now use the same reconciliation engine and exact category scope as `ward plan` and `ward apply`
 - Per-system category blocks replace the corresponding global category while omitted categories inherit global desired state
+- `ward plan` on 10 repositories takes 28.6 s instead of 130.9 s in 0.4.2 (median of 3 runs, 4.6× faster)
 
 ### Removed
 

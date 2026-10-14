@@ -16,7 +16,6 @@
 - **Verify after apply.** Ward reads the state back from GitHub and checks it against the manifest.
 - **Drift checks for CI.** `ward drift` exits with `0` (in sync), `1` (drift) or `2` (could not run).
 - **Start from what you have.** `ward import` turns an existing repository into your baseline manifest.
-- **Measured speed.** On 10 repositories, `ward plan` took 130.9 s in 0.4.2 and 28.6 s in 0.5.0 (median of 3 runs, 4.6× faster).
 
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Terminal recording: ward import, plan, apply and drift against a demo repository" width="100%">
