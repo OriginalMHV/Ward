@@ -1,6 +1,6 @@
 # Contributing to Ward
 
-Thanks for considering a contribution. Here's how to get started.
+Thanks for considering a contribution. Follow these steps to get started.
 
 All contributors must follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
@@ -26,12 +26,12 @@ Requires Rust >= 1.88. Integration tests use wiremock and need no GitHub token. 
 ```bash
 cargo fmt -- --check
 cargo clippy --all-targets -- -D warnings
-cargo nextest run --all-targets
+cargo test --all-targets
 cargo test --doc
 cargo deny check
 ```
 
-All checks must pass. `cargo deny check` validates license and advisory compliance. Install [cargo-nextest](https://nexte.st) with `cargo install cargo-nextest --locked`. Plain `cargo test` also works.
+All checks must pass. `cargo deny check` validates license and advisory compliance. You can run `cargo nextest run --all-targets` instead of `cargo test --all-targets`. Install [cargo-nextest](https://nexte.st) with `cargo install cargo-nextest --locked`. Nextest is optional.
 
 Lints: unsafe code is forbidden, and `dbg!` and `todo!` are denied. `unwrap`, `expect` and `panic` warn outside tests. Do not call `std::env::set_var`, `std::env::remove_var`, `std::env::var` or `std::thread::sleep`. Pass an injected lookup or policy instead. `src/reconcile`, `src/github` and `src/config` must not print or import `crate::cli`. CI checks these layer rules.
 
@@ -85,7 +85,7 @@ The `Ward drift` workflow runs every Monday, on manual dispatch and when `.githu
 Maintainers release with one command from a clean, up-to-date `main`:
 
 ```bash
-scripts/release.sh 0.5.0
+scripts/release.sh 0.7.0
 ```
 
 The script opens a release PR that bumps the version and dates the CHANGELOG, waits for CI, and merges it. It then pushes a signed tag, which makes cargo-dist build the GitHub release and update the Homebrew tap. Last, it publishes the crate to crates.io. It asks before each step that cannot be undone. Run it again with the same version to continue after a failure.

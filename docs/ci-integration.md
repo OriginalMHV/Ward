@@ -192,7 +192,7 @@ jobs:
         run: ward audit --system backend --format json > audit-report.json
 
       - name: Upload report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: security-audit
           path: audit-report.json

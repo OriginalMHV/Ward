@@ -7,7 +7,7 @@ ward config path
 ward config show
 ```
 
-The Ward manifest can be authored directly or generated through repository bootstrap. Every command reads the same category-based desired state.
+The Ward manifest can be authored directly or generated with `ward import`. Every command reads the same category-based desired state.
 
 Ward rejects unknown keys in every table. The error names the key and its line.
 
@@ -27,7 +27,7 @@ default_branch_head_oid = "..."
 | Table | Purpose |
 |---|---|
 | `[org]` | Owner containing the existing target repositories |
-| `[provenance]` | Optional source branch and stable source identity captured during repository bootstrap |
+| `[provenance]` | Optional source branch and stable source identity captured by `ward import` |
 
 Manually authored manifests need only `[org]`, targets, and desired categories. Targets must remain under the configured owner. Ward does not create, rename, transfer, or delete repositories.
 
@@ -48,7 +48,7 @@ sensitive = true
 | `prune` | boolean | Whether target-only collection entries may be removed |
 | `sensitive` | boolean | Enables the category's high-impact mutation gate |
 
-Repository-bootstrap defaults:
+Defaults that `ward import` writes:
 
 | Category | Default |
 |---|---|
@@ -62,7 +62,7 @@ Repository-bootstrap defaults:
 | `access` | observe + sensitive |
 | `integrations` | observe + sensitive |
 
-Changing `disposition` to `managed` is the explicit opt-in for a bootstrapped sensitive category. Manually authored manifests set the same policy fields directly. Keep `prune = false` until removal of target-only entries is intentional.
+Changing `disposition` to `managed` is the explicit opt-in for a sensitive category that `ward import` wrote. Manually authored manifests set the same policy fields directly. Keep `prune = false` until removal of target-only entries is intentional.
 
 ## `[categories.repository]`
 
@@ -123,9 +123,19 @@ enabled = true
 enforced_by_owner = false
 ```
 
+Observed references use `[[categories.repository.references]]`. Each entry has a `type` and a `name`:
+
+```toml
+[[categories.repository.references]]
+type = "app"
+name = "dependabot"
+```
+
+Allowed `type` values are `app`, `team`, `role`, `runner_group`, `organization_secret`, `organization_variable`, `code_security_configuration`, `protection_rule`, and `runner`. Ward treats references as stable names. It never recreates them.
+
 Visibility and archive changes require `--allow-high-impact` unless the repository category itself is marked sensitive.
 
-Labels are serialized under `categories.integrations.labels` but are planned with the repository category:
+Labels are written under `categories.integrations.labels`. The `repository` category plans and applies them. Its policy decides whether Ward manages them:
 
 ```toml
 [[categories.integrations.labels]]
@@ -171,6 +181,59 @@ type = "code_security_configuration"
 name = "Recommended"
 ```
 
+CodeQL default setup also accepts `languages`, `runner_label`, and `threat_model`:
+
+```toml
+[categories.security.codeql_default_setup]
+state = "configured"
+languages = ["java-kotlin", "actions"]
+query_suite = "default"
+runner_type = "labeled"
+runner_label = "self-hosted-codeql"
+threat_model = "remote"
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `state` | string | Default setup state, for example `configured` |
+| `languages` | array of strings | Languages that CodeQL analyzes |
+| `query_suite` | string | Query suite, for example `default` |
+| `runner_type` | string | Runner type, for example `standard` |
+| `runner_label` | string | Runner label. Use it with a labeled runner type |
+| `threat_model` | string | CodeQL threat model |
+
+Ward sends these strings to GitHub as written. GitHub defines the allowed values.
+
+Delegated alert dismissal and delegated bypass have a reviewer list each. Write each reviewer as an actor with an optional `mode`. The `mode` is `ALWAYS` or `EXEMPT` (Ward accepts any letter case):
+
+```toml
+[categories.security]
+secret_scanning_delegated_alert_dismissal = true
+secret_scanning_delegated_bypass = true
+
+[[categories.security.secret_scanning_delegated_alert_dismissal_options.reviewers]]
+mode = "ALWAYS"
+[categories.security.secret_scanning_delegated_alert_dismissal_options.reviewers.actor]
+type = "team"
+slug = "security-reviewers"
+
+[[categories.security.secret_scanning_delegated_bypass_options.reviewers]]
+mode = "EXEMPT"
+[categories.security.secret_scanning_delegated_bypass_options.reviewers.actor]
+type = "team"
+slug = "release-managers"
+```
+
+The manifest also accepts two flat actor lists. They are `delegated_alert_dismissal_reviewers` and `delegated_bypass_reviewers`. Each entry is an inline actor with no mode:
+
+```toml
+[categories.security]
+delegated_alert_dismissal_reviewers = [{ type = "team", slug = "security-reviewers" }]
+delegated_bypass_reviewers = [{ type = "user", login = "octocat" }]
+```
+
+Other observed resources use `[[categories.security.references]]` with the same `type` and `name` fields as the repository references.
+
 Delegated reviewer entries use stable actors and preserve reviewer mode. Repository fields that GitHub exposes but does not document as repository-writable remain observed/reference state and are never sent in an unsupported PATCH.
 
 ## `[categories.rulesets]`
@@ -204,18 +267,31 @@ type = "team"
 slug = "platform"
 ```
 
-Stable actor forms:
+Stable actor forms. Each line is one actor, shown as an inline table:
 
-```toml
-type = "organization_admin"
-type = "team"       # slug = "..."
-type = "user"       # login = "..."
-type = "app"        # slug = "..."
-type = "role"       # name = "..."
-type = "unresolved" # actor_type = "...", optional actor_id
+```text
+{ type = "organization_admin" }
+{ type = "team", slug = "platform" }
+{ type = "user", login = "octocat" }
+{ type = "app", slug = "dependabot" }
+{ type = "role", name = "maintain" }
+{ type = "unresolved", actor_type = "Integration", actor_id = 123 }
 ```
 
-Inherited organization or enterprise rulesets are stored under `[[categories.rulesets.references]]` with name, target, enforcement, source, and source type. They are never recreated as repository-owned rulesets.
+The `actor_id` field of `unresolved` is optional.
+
+Inherited organization or enterprise rulesets are stored under `[[categories.rulesets.references]]`. Every field is required. They are never recreated as repository-owned rulesets.
+
+```toml
+[[categories.rulesets.references]]
+name = "Org baseline"
+target = "branch"
+enforcement = "active"
+source_type = "Organization"
+source = "acme"
+```
+
+`bypass_mode` defaults to `always` when you leave it out.
 
 ### Copilot code review ruleset
 
@@ -266,17 +342,67 @@ context = "build"
 app_slug = "github-actions"
 ```
 
-Additional protected branches use `[[categories.branch_protection.protected_branches]]` and can include:
+The `default_branch` table and every `protection` sub-table use these keys:
 
-- status check contexts and app bindings
-- push and dismissal restrictions
-- pull-request bypass allowances
-- last-push approval
-- block creations
-- conversation resolution
-- signed commits
-- branch lock
-- fork syncing
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `enabled` | boolean | `false` | Whether the branch has protection |
+| `required_approvals` | integer | `1` | Required approving reviews |
+| `dismiss_stale_reviews` | boolean | `false` | Dismiss approvals when new commits arrive |
+| `require_code_owner_reviews` | boolean | `false` | Require review from code owners |
+| `require_status_checks` | boolean | `false` | Require status checks |
+| `strict_status_checks` | boolean | `false` | Require the branch to be up to date before merge |
+| `enforce_admins` | boolean | `false` | Apply the rules to administrators |
+| `required_linear_history` | boolean | `false` | Require linear history |
+| `allow_force_pushes` | boolean | `false` | Allow force pushes |
+| `allow_deletions` | boolean | `false` | Allow branch deletion |
+
+Detailed state for the default branch uses `[categories.branch_protection.default_branch_detailed]`. Additional protected branches use `[[categories.branch_protection.protected_branches]]` with a required `name`. Both accept the keys below. The detailed form nests the table above under a `protection` sub-table:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `protection` | table | The compact keys from the table above |
+| `status_check_contexts` | array of strings | Required status check names with no app binding |
+| `status_checks` | array of tables | Required checks with `context` and an optional `app_id` (integer) or `app_slug` (string) |
+| `push_restrictions` | array of actors | Who can push |
+| `dismissal_restrictions` | array of actors | Who can dismiss reviews |
+| `pull_request_bypass_allowances` | array of actors | Who can bypass pull request rules |
+| `require_last_push_approval` | boolean | Require approval from someone other than the last pusher |
+| `block_creations` | boolean | Block creation of matching branches |
+| `required_reviewers` | free-form value | Passed to GitHub as `required_reviewers` and compared as JSON |
+| `require_conversation_resolution` | boolean | Require resolved conversations |
+| `require_signed_commits` | boolean | Require signed commits |
+| `lock_branch` | boolean | Make the branch read-only |
+| `allow_fork_syncing` | boolean | Allow fork syncing |
+
+Example for a detailed default branch and one extra protected branch:
+
+```toml
+[categories.branch_protection.default_branch_detailed]
+status_check_contexts = ["lint"]
+push_restrictions = [{ type = "team", slug = "platform" }]
+require_last_push_approval = true
+require_conversation_resolution = true
+require_signed_commits = true
+lock_branch = false
+allow_fork_syncing = true
+
+[categories.branch_protection.default_branch_detailed.protection]
+enabled = true
+required_approvals = 2
+enforce_admins = true
+
+[[categories.branch_protection.default_branch_detailed.status_checks]]
+context = "build"
+app_id = 15368
+
+[[categories.branch_protection.protected_branches]]
+name = "release"
+block_creations = true
+
+[categories.branch_protection.protected_branches.protection]
+enabled = true
+```
 
 Branch names and actor/app identities are validated before apply.
 
@@ -305,7 +431,24 @@ workflow_access_level = "organization"
 oidc_use_default = true
 oidc_use_immutable_subject = true
 oidc_subject_claim_include_keys = ["repo", "context"]
+cache_retention_limit_days = 7
+cache_storage_limit_gb = 10
 ```
+
+More `settings` keys:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `fork_pull_request_workflows_enabled` | boolean | Same GitHub setting as `private_fork_workflows_enabled`. If you set both with different values, `ward plan` reports a blocker |
+| `send_write_tokens_to_workflows` | boolean | Send write tokens to workflows from fork pull requests |
+| `send_secrets_and_variables` | boolean | Send secrets and variables to workflows from fork pull requests |
+| `require_approval_for_fork_pr_workflows` | boolean | Require approval for fork pull request workflows |
+| `private_fork_workflow_approval` | string | Accepted by the manifest. Ward does not plan or apply it |
+| `oidc_subject_claim_template` | string | Observed only. GitHub has no writable template, so Ward warns and changes nothing |
+| `cache_retention_limit_days` | integer | Maximum days that GitHub keeps dependency caches. Separate from `artifact_retention_days` and `log_retention_days` |
+| `cache_storage_limit_gb` | integer | Maximum cache size in GB. It is a limit, not the current usage |
+
+The four fork pull request keys apply to private and internal repositories only. Ward warns for a public repository. Keys that you leave out keep their live value.
 
 Readable variables are copied:
 
@@ -508,7 +651,9 @@ Supported write modes are `100644` and `100755`. Symlinks, submodules, LFS paylo
 
 ## External values
 
-```toml
+Every `value_from` table, and the webhook `secret` table, has one of two forms. This example is illustrative. `some` stands for any table that takes an external value:
+
+```text
 [some.value_from]
 source = "env"
 key = "WARD_VALUE"
@@ -516,7 +661,7 @@ key = "WARD_VALUE"
 
 Manual placeholders are also accepted:
 
-```toml
+```text
 [some.value_from]
 source = "manual"
 hint = "Supply this value before apply"

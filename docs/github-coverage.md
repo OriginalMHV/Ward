@@ -1,26 +1,28 @@
 # GitHub Coverage
 
-Ward represents repository configuration available through GitHub's documented public APIs. A manifest can be authored manually or bootstrapped from a repository; both use the same category model for planning and reconciliation.
+Ward represents repository configuration available through GitHub's documented public APIs. A manifest can be authored manually or generated from a repository with `ward import`. Both use the same category model for planning and reconciliation.
 
 ## Repository categories
 
 | Category | Represented state |
 |---|---|
-| General | Description, homepage, default branch, visibility, archive state, repository features, issue/PR creation policy, merge methods and messages, auto-merge, branch updates/deletion, web commit signoff, topics, labels, custom properties, immutable releases |
-| Security | Advanced Security and code-security state, Dependabot alerts and updates, secret-scanning options, delegated bypass settings, private vulnerability reporting, CodeQL default setup, attached code-security configuration references |
-| Rules | Every repository-owned ruleset with target, enforcement, conditions, rule parameters, and stable bypass actors; inherited organization/enterprise rulesets as references |
-| Branch protection | Detailed protection for the default branch and every protected branch, including status-check app bindings, restrictions, bypass actors, last-push approval, conversation resolution, signatures, lock, and fork syncing |
-| Actions | Actions policy, selected-action allowlist, SHA pinning, workflow token permissions, artifact/log retention, fork policies, workflow access, OIDC settings, workflow enabled state, variables, secret names, organization secret/variable references, self-hosted runner observations |
-| Environments | Environment settings, reviewers, branch/tag deployment policies, protection apps, variables, and secret names |
-| Access | Direct teams, collaborators, pending invitations, custom-role references, and visible GitHub App references |
-| Integrations | Webhooks, deploy keys, Pages, autolinks, and labels |
-| Files | Binary-safe configuration files, executable mode, source SHA, include/exclude globs, and atomic create/update/delete plans |
+| `repository` | Description, homepage, default branch, visibility, archive state, repository features, issue/PR creation policy, merge methods and messages, auto-merge, branch updates/deletion, web commit signoff, topics, custom properties, immutable releases, labels |
+| `security` | Advanced Security and code-security state, Dependabot alerts and updates, secret-scanning options, delegated bypass settings, private vulnerability reporting, CodeQL default setup, attached code-security configuration references |
+| `rulesets` | Every repository-owned ruleset with target, enforcement, conditions, rule parameters, and stable bypass actors; inherited organization/enterprise rulesets as references |
+| `branch-protection` | Detailed protection for the default branch and every protected branch, including status-check app bindings, restrictions, bypass actors, last-push approval, conversation resolution, signatures, lock, and fork syncing |
+| `actions` | Actions policy, selected-action allowlist, SHA pinning, workflow token permissions, artifact/log retention, fork policies, workflow access, OIDC settings, workflow enabled state, variables, secret names, organization secret/variable references, self-hosted runner observations |
+| `environments` | Environment settings, reviewers, branch/tag deployment policies, protection apps, variables, and secret names |
+| `access` | Direct teams, collaborators, pending invitations, custom-role references, and visible GitHub App references |
+| `integrations` | Webhooks, deploy keys, Pages, and autolinks |
+| `files` | Binary-safe configuration files, executable mode, source SHA, include/exclude globs, and atomic create/update/delete plans |
+
+Labels belong to the `repository` category. The manifest writes them under `[[categories.integrations.labels]]`, but Ward plans and applies them with the `repository` category. Run `ward plan --category repository` to see label changes.
 
 See the [configuration reference](configuration.md) for the exact manifest shape of each category.
 
 ## Configuration-file selection
 
-Repository bootstrap selects configuration rather than application source. When no `--include` glob is supplied, the built-in registry includes:
+`ward import` selects configuration rather than application source. When no `--include` glob is supplied, the built-in registry includes:
 
 - `.github/**`, CODEOWNERS, community, and security files
 - devcontainer configuration
@@ -33,7 +35,7 @@ Customize the selection with repeatable `--include` and `--exclude` globs. Ward 
 
 ## Coverage evidence
 
-Repository bootstrap records what GitHub returned instead of treating missing information as a default:
+`ward import` records what GitHub returned instead of treating missing information as a default:
 
 ```toml
 [[coverage]]
@@ -52,7 +54,7 @@ Outcomes are:
 - `unavailable`
 - `not_applicable`
 
-Collectors are independent. A permission failure in one optional collector does not erase unrelated source state. Use `--strict` when permission-denied or unavailable readable state must fail repository bootstrap.
+Collectors are independent. A permission failure in one optional collector does not erase unrelated source state. Use `--strict` when permission-denied or unavailable readable state must fail `ward import`.
 
 GitHub returns the merge settings (merge methods, auto-merge, branch update and deletion, merge commit titles and messages, `use_squash_pr_title_as_default`) only to callers with push or admin access. For a read-only token, Ward records `GET /repos/{owner}/{repo} merge settings` as `permission_denied` and plans no changes for those fields. A `ward drift` run reports this as unreadable managed state, not as a change to apply.
 
@@ -79,7 +81,7 @@ Additional boundaries:
 
 ## Write-only values
 
-GitHub never returns secret values. Repository bootstrap records their names with deterministic environment-variable references:
+GitHub never returns secret values. `ward import` records their names with deterministic environment-variable references:
 
 ```toml
 [[categories.actions.secrets]]
