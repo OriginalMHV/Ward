@@ -547,7 +547,7 @@ repos = ["payments-api", "payments-worker"]
 exclude = []
 ```
 
-When `match_prefix = true`, Ward finds repositories named exactly `id` or beginning with `id-`, applies exclusion regexes, then adds explicit `repos`. Imported manifests use explicit-only targeting.
+`match_prefix` defaults to `true`. Then Ward finds repositories named exactly `id` or beginning with `id-`, applies exclusion regexes, then adds explicit `repos`. Set `match_prefix = false` to select only the repositories in `repos`. Imported manifests use explicit-only targeting.
 
 Global `--repo` and `--system` flags narrow this set.
 

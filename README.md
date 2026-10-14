@@ -38,7 +38,17 @@ curl --proto '=https' --tlsv1.2 -LsSf \
 powershell -ExecutionPolicy ByPass -c "irm https://github.com/OriginalMHV/Ward/releases/latest/download/ward-cli-installer.ps1 | iex"
 ```
 
-Building from source needs Rust 1.88 or newer. Ward reads its token from `GH_TOKEN`, `GITHUB_TOKEN` or `gh auth token`. Run `ward doctor` to check your setup. The [GitHub coverage](docs/github-coverage.md) page lists the permissions each category needs.
+Building from source needs Rust 1.88 or newer. Ward reads its token from `GH_TOKEN`, `GITHUB_TOKEN` or `gh auth token`. Run `ward doctor` to check your setup.
+
+### Token permissions
+
+Ward works with your own access. If you are logged in with `gh`, Ward can do what your account can do. It needs no GitHub App and no organization admin rights.
+
+- `ward plan`, `ward drift` and `ward audit` only read.
+- GitHub returns merge settings only to callers with push access. A read-only token cannot see them. For a fine-grained token, give Contents read and write.
+- Changing branch protection and rulesets needs admin access to the repository.
+- Changing files under `.github/workflows/` needs workflow permission: the `workflow` scope on a classic token, or Workflows read and write on a fine-grained token.
+- When the token cannot read a setting, Ward reports it as `could not read` and does not guess its value.
 
 ## Quick start
 
@@ -87,7 +97,7 @@ Pass any of these to `--category`. Separate several with commas.
 | `access` | Teams, collaborators, invitations, App references |
 | `integrations` | Webhooks, deploy keys, Pages, autolinks |
 
-`ward audit` supports the `security`, `rulesets`, `branch-protection` and `access` sections. See [GitHub coverage](docs/github-coverage.md) for the full matrix and the public API limits.
+`ward audit` supports the `security`, `rulesets`, `branch-protection` and `access` sections. See [GitHub coverage](docs/github-coverage.md) for what each category covers and the public API limits.
 
 ## Commands
 
@@ -118,6 +128,7 @@ name = "my-github-org"
 [[systems]]
 id = "backend"
 name = "Backend Services"
+match_prefix = false
 repos = ["backend-api", "backend-worker"]
 
 [categories.repository.policy]
@@ -192,11 +203,11 @@ How we compared: Ward cells come from [commands](docs/commands.md), [architectur
 
 </details>
 
-The Terraform provider has broader organization-level coverage. If you already run Terraform, it fits that workflow. safe-settings runs continuously and reacts to GitHub events. Ward is a CLI that you run on demand or in CI, and it needs no deployed service.
+The Terraform provider has broader organization-level coverage. If you already run Terraform, it fits that workflow. safe-settings runs continuously and reacts to GitHub events, but it is a GitHub App that an organization owner installs and that you host. Ward is a CLI that you run on demand or in CI with your own access, and it needs no deployed service.
 
 ## Safety
 
-- **No global apply-all.** `ward apply` works one category at a time, in a fixed safe order, and shows the plan first.
+- **One category at a time.** `ward apply` applies categories one by one, in a fixed safe order. Without `--category` it goes through every category. It shows the plan and asks before it writes, and it writes only `managed` categories.
 - **Sensitive categories are gated.** They need `sensitive = true` and `disposition = "managed"` before Ward writes them.
 - **Secret values stay out of Ward.** Ward never reads secret values from GitHub, and never stores them in the manifest, the plan or the audit log. It resolves each value from your environment only when it writes.
 - **Audit log.** Every change is appended to `~/.ward/audit.log`. On Windows this is `.ward\audit.log` in your user profile folder.
