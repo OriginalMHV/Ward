@@ -86,12 +86,9 @@ impl Client {
                 .read_ctx("owner lookup")?;
         match classified {
             ClassifiedResponse::Success(profile) if profile.kind == "User" => Ok(OwnerKind::User),
-            ClassifiedResponse::Success(_)
-            | ClassifiedResponse::NoContent
-            | ClassifiedResponse::NotFound(_) => Ok(OwnerKind::Organization),
-            ClassifiedResponse::Forbidden(error)
-            | ClassifiedResponse::Unprocessable(error)
-            | ClassifiedResponse::Other(error) => Err(error).read_ctx("owner lookup"),
+            // Any other answer keeps the organization endpoints that Ward used before user owners,
+            // so a failed lookup cannot break an organization that worked.
+            _ => Ok(OwnerKind::Organization),
         }
     }
 
@@ -112,7 +109,12 @@ impl Client {
                 .read_ctx("authenticated user lookup")?;
         match classified {
             ClassifiedResponse::Success(user) => Ok(Some(user.login)),
-            _ => Ok(None),
+            ClassifiedResponse::NoContent
+            | ClassifiedResponse::Forbidden(_)
+            | ClassifiedResponse::NotFound(_) => Ok(None),
+            ClassifiedResponse::Unprocessable(error) | ClassifiedResponse::Other(error) => {
+                Err(error).read_ctx("authenticated user lookup")
+            }
         }
     }
 

@@ -322,3 +322,76 @@ async fn prefix_search_for_user_owner_uses_the_user_qualifier() {
     assert_eq!(repos.len(), 1);
     assert_eq!(repos[0].name, "frontend-foo");
 }
+
+#[tokio::test]
+async fn failed_owner_lookup_keeps_the_org_listing() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/acme"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({"message": "Forbidden"})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/orgs/acme/repos"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!([make_repo_json("alpha", false)])),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("acme", &server.uri());
+    let repos = client.list_repos().await.unwrap();
+
+    assert_eq!(repos.len(), 1);
+}
+
+#[tokio::test]
+async fn token_without_a_user_lists_public_repos_of_a_user_owner() {
+    let server = MockServer::start().await;
+    mount_owner(&server, "octo", "User").await;
+    Mock::given(method("GET"))
+        .and(path("/user"))
+        .respond_with(
+            ResponseTemplate::new(403)
+                .set_body_json(json!({"message": "Resource not accessible by integration"})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/users/octo/repos"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!([make_repo_json("public-one", false)])),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("octo", &server.uri());
+    let repos = client.list_repos().await.unwrap();
+
+    assert_eq!(repos.len(), 1);
+}
+
+#[tokio::test]
+async fn failed_token_user_lookup_is_an_error_instead_of_hiding_private_repos() {
+    let server = MockServer::start().await;
+    mount_owner(&server, "octo", "User").await;
+    Mock::given(method("GET"))
+        .and(path("/user"))
+        .respond_with(
+            ResponseTemplate::new(401).set_body_json(json!({"message": "Bad credentials"})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/users/octo/repos"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("octo", &server.uri());
+
+    assert!(client.list_repos().await.is_err());
+}
