@@ -129,7 +129,7 @@ pub enum Command {
     Import(import::ImportCommand),
 
     /// Generate shell completions
-    #[command(hide = true)]
+    #[command(display_order = 61)]
     Completions {
         /// Shell to generate completions for
         #[arg(value_enum)]

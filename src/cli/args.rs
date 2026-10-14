@@ -69,7 +69,7 @@ impl OutputArgs {
         if self.json {
             if first_use(&JSON_WARNED) {
                 eprintln!(
-                    "warning: '--json' is deprecated and will be removed in 0.6.0; use '--format json'"
+                    "warning: '--json' is deprecated and will be removed in 0.7.0; use '--format json'"
                 );
             }
             return Format::Json;

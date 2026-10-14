@@ -31,7 +31,7 @@ Each category stores:
 - stable references to externally owned resources
 - placeholders for write-only values
 
-Manually authored and imported manifests use the same categories. `ward plan --category C` and `ward apply --category C` are exact-scope views over that same desired state. The old per-category commands (`security`, `commit`, `rulesets`, `protection`, `settings`, `teams`) are hidden aliases of them in 0.5.x.
+Manually authored and imported manifests use the same categories. `ward plan --category C` and `ward apply --category C` are exact-scope views over that same desired state. The old per-category commands (`security`, `commit`, `rulesets`, `protection`, `settings`, `teams`) are deprecated hidden aliases of them. Ward removes them in 0.7.0.
 
 ## Import pipeline
 
@@ -226,13 +226,14 @@ Entries contain repository, category/action, status, and structural before/after
 | `src/cli/plan.rs` | unified plan presentation |
 | `src/cli/apply.rs` | unified confirmation and apply entry point |
 | `src/config/manifest/` | manifest schema, parsing, accessors |
-| `src/reconcile/general.rs` | General settings and labels |
-| `src/reconcile/security_rules.rs` | security, rulesets, detailed branch protection |
-| `src/reconcile/actions_environments.rs` | Actions and environments |
-| `src/reconcile/access_integrations.rs` | access and integrations |
+| `src/reconcile/unified/` | cross-category planning (`plan`), ordering and deferral (`gating`), `apply`, `targets`, `report`, and shared types (`model`) |
+| `src/reconcile/{repository,security,rulesets,branch_protection,actions,environments,access,integrations}/` | one directory per category, each with `collect`, `plan`, and `apply` files |
+| `src/reconcile/common/` | helpers that categories share: actors, coverage, issues, and secrets |
+| `src/reconcile/general.rs`, `security_rules.rs`, `actions_environments.rs`, `access_integrations.rs` | thin re-export shims over the category directories |
 | `src/reconcile/files.rs` | binary-safe configuration files |
-| `src/reconcile/unified.rs` | cross-category planning, ordering, deferral, verification |
 | `src/github/` | typed REST, GraphQL, Git Data, and classification helpers |
+| `src/github/outcome.rs` | result type for GitHub writes that can be blocked without failing the run |
+| `src/outcome.rs` | command outcome type that maps to exit code 1 |
 | `src/engine/` | append-only audit logging |
 | `tests/` | Wiremock clients, reconciliation, safety, and CLI integration tests |
 

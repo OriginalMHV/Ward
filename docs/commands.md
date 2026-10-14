@@ -10,7 +10,7 @@ Only these flags are global. They work before or after the subcommand.
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--parallelism <N>` | integer | `5` | Max concurrent API calls |
+| `--parallelism <N>` | integer | `5` | Max concurrent operations |
 | `--config <PATH>` | string | `./ward.toml` | Path to config file |
 | `-v` / `-vv` / `-vvv` | count | `0` | Increase log verbosity. With `-v`, errors also print the full cause chain |
 
@@ -30,7 +30,7 @@ Only these flags are global. They work before or after the subcommand.
 
 `plan`, `apply`, `drift`, `audit`, `repos list` and `doctor` take `--format text|json`. The default is `text`. JSON goes to stdout. Progress lines and warnings go to stderr, so you can pipe JSON to `jq`.
 
-`--format table` is accepted as an alias of `--format text`. The old `--json` flag is hidden and deprecated. It works as `--format json` and prints `warning: '--json' is deprecated and will be removed in 0.6.0; use '--format json'` to stderr. It is removed in 0.6.0.
+`--format table` is accepted as an alias of `--format text`. The old `--json` flag is hidden and deprecated. It still works as `--format json` and prints `warning: '--json' is deprecated and will be removed in 0.7.0; use '--format json'` to stderr. Ward removes it in 0.7.0.
 
 ## Confirmation
 
@@ -87,7 +87,7 @@ Output columns: Repository, Language, Visibility, Default Branch.
 
 ## Deprecated per-category commands
 
-`ward security`, `ward rulesets`, `ward protection`, `ward commit`, `ward teams`, and `ward settings` are hidden aliases in 0.5.x. Each one prints a warning to stderr and then runs the replacement. They are removed in 0.6.0.
+`ward security`, `ward rulesets`, `ward protection`, `ward commit`, `ward teams`, and `ward settings` are deprecated hidden aliases. Each one still works, prints a warning to stderr, and then runs the replacement. Ward removes them in 0.7.0.
 
 | Old invocation | New invocation |
 |----------------|----------------|
@@ -107,7 +107,7 @@ Output columns: Repository, Language, Visibility, Default Branch.
 The warning has this form:
 
 ```
-warning: 'ward security plan' is deprecated and will be removed in 0.6.0; use 'ward plan --category security'
+warning: 'ward security plan' is deprecated and will be removed in 0.7.0; use 'ward plan --category security'
 ```
 
 `ward commit audit` never existed and has no replacement. Use `ward plan --category files`.
@@ -134,7 +134,7 @@ ward drift --system backend --format json
 
 Exit code `0` means all repos are in sync with `ward.toml`. Exit code `1` means drift: changes to make, blocked changes, changes that wait for a pull request, or state in a managed category that Ward could not read. Exit code `2` means Ward could not run the check. See [Exit codes](#exit-codes).
 
-`ward drift check` is a deprecated alias of `ward drift`. It prints `warning: 'ward drift check' is deprecated; use 'ward drift'` to stderr and runs the same check.
+`ward drift check` is a deprecated alias of `ward drift`. Ward removes it in 0.7.0. It prints `warning: 'ward drift check' is deprecated; use 'ward drift'` to stderr and runs the same check.
 
 Checks every configured category by default. Use `--category <CATEGORY>` (repeatable, comma-separated) to narrow the drift gate, and `--allow-high-impact` to count visibility and archive changes as changes to make.
 
@@ -226,7 +226,7 @@ ward init
 |------|---------|-------------|
 | `--non-interactive` | `false` | Accepted for compatibility. It changes nothing, because init never prompts |
 
-`ward init --from OWNER/REPO` is a hidden deprecated alias of `ward import OWNER/REPO`. It accepts the same options, prints `warning: 'ward init --from' is deprecated and will be removed in 0.6.0; use 'ward import <SOURCE>'` to stderr, and is removed in 0.6.0.
+`ward init --from OWNER/REPO` is a hidden deprecated alias of `ward import OWNER/REPO`. It accepts the same options, prints `warning: 'ward init --from' is deprecated and will be removed in 0.7.0; use 'ward import <SOURCE>'` to stderr, and Ward removes it in 0.7.0.
 
 ---
 
@@ -380,5 +380,7 @@ ward completions bash > ~/.bash_completion.d/ward
 ward completions zsh  > ~/.zfunc/_ward
 ward completions fish > ~/.config/fish/completions/ward.fish
 ```
+
+Supported shells are `bash`, `zsh`, `fish`, `elvish` and `powershell`.
 
 ---

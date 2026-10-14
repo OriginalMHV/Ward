@@ -19,7 +19,7 @@ Categories: `repository`, `files`, `security`, `rulesets`, `branch-protection`, 
 - Target flags go after the subcommand. Only `--config`, `--parallelism` and `-v` are global.
 - Exit codes: `0` clean, `1` Ward ran and found a problem (drift, failed check, failed apply category), `2` Ward could not run (auth, network, parse error, bad arguments).
 - `ward import SOURCE` writes a manifest from an existing repository. It replaces `ward init --from`.
-- Deprecated hidden aliases warn on stderr and run the new command. They go away in 0.6.0: `ward security|rulesets|protection|commit|teams|settings ...`, `ward drift check`, `ward init --from`, `--json`. Do not add new uses of them.
+- Deprecated hidden aliases warn on stderr and run the new command. They go away in 0.7.0: `ward security|rulesets|protection|commit|teams|settings ...`, `ward drift check`, `ward init --from`, `--json`. Do not add new uses of them.
 - See `docs/commands.md` for the full reference.
 
 ## Module layout

@@ -47,7 +47,7 @@ ward import https://github.com/acme/reference-service
 ward import git@github.com:acme/reference-service.git
 ```
 
-`ward init --from` is a deprecated alias of `ward import` and is removed in 0.6.0.
+`ward init --from` is a deprecated alias of `ward import`. It still works with a warning. Ward removes it in 0.7.0.
 
 The default file registry selects repository configuration such as `.github/**`, CODEOWNERS, devcontainers, Renovate, lint, pre-commit, and release files. Customize it with repeatable globs:
 

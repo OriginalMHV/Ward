@@ -75,7 +75,7 @@ impl InitCommand {
 
     /// The warning for `init --from`, without a trailing newline.
     pub fn deprecation_warning() -> &'static str {
-        "warning: 'ward init --from' is deprecated and will be removed in 0.6.0; use 'ward import <SOURCE>'"
+        "warning: 'ward init --from' is deprecated and will be removed in 0.7.0; use 'ward import <SOURCE>'"
     }
 
     /// `parallelism` is the global `--parallelism` value.

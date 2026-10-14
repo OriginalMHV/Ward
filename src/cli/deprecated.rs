@@ -1,8 +1,9 @@
 //! Deprecated per-category commands.
 //!
 //! `ward security`, `rulesets`, `protection` and `commit` were focused wrappers
-//! over one category each. They stay for 0.5.x as hidden aliases that warn and
-//! then run the same code as `ward plan`, `apply` and `audit`.
+//! over one category each. They are deprecated hidden aliases that warn and
+//! then run the same code as `ward plan`, `apply` and `audit`. Ward removes
+//! them in 0.7.0.
 
 use anyhow::{Result, bail};
 use clap::{Args, Subcommand};
@@ -308,7 +309,7 @@ impl LegacyCategory {
     /// The deprecation warning, without a trailing newline.
     pub fn warning(&self) -> String {
         format!(
-            "warning: 'ward {} {}' is deprecated and will be removed in 0.6.0; use '{}'",
+            "warning: 'ward {} {}' is deprecated and will be removed in 0.7.0; use '{}'",
             self.command,
             self.subcommand,
             self.replacement()
@@ -485,19 +486,19 @@ mod tests {
     fn warning_names_the_replacement_and_the_removal_release() {
         assert_eq!(
             legacy(&["ward", "security", "plan"]).warning(),
-            "warning: 'ward security plan' is deprecated and will be removed in 0.6.0; use 'ward plan --category security'"
+            "warning: 'ward security plan' is deprecated and will be removed in 0.7.0; use 'ward plan --category security'"
         );
         assert_eq!(
             legacy(&["ward", "protection", "apply", "-y"]).warning(),
-            "warning: 'ward protection apply' is deprecated and will be removed in 0.6.0; use 'ward apply --category branch-protection'"
+            "warning: 'ward protection apply' is deprecated and will be removed in 0.7.0; use 'ward apply --category branch-protection'"
         );
         assert_eq!(
             legacy(&["ward", "rulesets", "audit"]).warning(),
-            "warning: 'ward rulesets audit' is deprecated and will be removed in 0.6.0; use 'ward audit --category rulesets'"
+            "warning: 'ward rulesets audit' is deprecated and will be removed in 0.7.0; use 'ward audit --category rulesets'"
         );
         assert_eq!(
             legacy(&["ward", "commit", "plan"]).warning(),
-            "warning: 'ward commit plan' is deprecated and will be removed in 0.6.0; use 'ward plan --category files'"
+            "warning: 'ward commit plan' is deprecated and will be removed in 0.7.0; use 'ward plan --category files'"
         );
     }
 
@@ -545,7 +546,7 @@ mod tests {
         assert!(apply.note.is_some());
         assert_eq!(
             apply.warning(),
-            "warning: 'ward teams apply' is deprecated and will be removed in 0.6.0; use 'ward apply --category access'"
+            "warning: 'ward teams apply' is deprecated and will be removed in 0.7.0; use 'ward apply --category access'"
         );
     }
 
@@ -556,14 +557,14 @@ mod tests {
         assert!(list.audit_section().is_some());
         assert_eq!(
             list.warning(),
-            "warning: 'ward teams list' is deprecated and will be removed in 0.6.0; use 'ward audit --category access'"
+            "warning: 'ward teams list' is deprecated and will be removed in 0.7.0; use 'ward audit --category access'"
         );
 
         let audit = legacy(&["ward", "teams", "audit"]);
         assert_eq!(audit.action, LegacyAction::Drift);
         assert_eq!(
             audit.warning(),
-            "warning: 'ward teams audit' is deprecated and will be removed in 0.6.0; use 'ward drift --category access'"
+            "warning: 'ward teams audit' is deprecated and will be removed in 0.7.0; use 'ward drift --category access'"
         );
     }
 
@@ -575,14 +576,14 @@ mod tests {
         assert!(plan.note.is_some_and(|note| note.contains("wider")));
         assert_eq!(
             plan.warning(),
-            "warning: 'ward settings plan' is deprecated and will be removed in 0.6.0; use 'ward plan --category repository'"
+            "warning: 'ward settings plan' is deprecated and will be removed in 0.7.0; use 'ward plan --category repository'"
         );
 
         let audit = legacy(&["ward", "settings", "audit"]);
         assert_eq!(audit.action, LegacyAction::Drift);
         assert_eq!(
             audit.warning(),
-            "warning: 'ward settings audit' is deprecated and will be removed in 0.6.0; use 'ward drift --category repository'"
+            "warning: 'ward settings audit' is deprecated and will be removed in 0.7.0; use 'ward drift --category repository'"
         );
     }
 
