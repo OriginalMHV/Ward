@@ -125,11 +125,11 @@ fn deprecated_commands_warn_before_they_need_a_token() {
     for (args, warning) in [
         (
             vec!["security", "plan"],
-            "warning: 'ward security plan' is deprecated and will be removed in 0.6.0; use 'ward plan --category security'",
+            "warning: 'ward security plan' is deprecated and will be removed in 0.7.0; use 'ward plan --category security'",
         ),
         (
             vec!["teams", "audit"],
-            "warning: 'ward teams audit' is deprecated and will be removed in 0.6.0; use 'ward drift --category access'",
+            "warning: 'ward teams audit' is deprecated and will be removed in 0.7.0; use 'ward drift --category access'",
         ),
         (
             vec!["drift", "check"],
