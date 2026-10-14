@@ -207,7 +207,7 @@ The Terraform provider has broader organization-level coverage. If you already r
 
 ## Safety
 
-- **One category at a time.** `ward apply` applies categories one by one, in a fixed safe order. Without `--category` it goes through every category. It shows the plan and asks before it writes, and it writes only `managed` categories.
+- **Plan first, then ask.** `ward apply` shows one plan and asks once before it writes. `--yes` skips the question, and a non-interactive run without `--yes` stops. Ward applies categories one by one, in a fixed safe order. Without `--category` it goes through every category, and it writes only `managed` categories.
 - **Sensitive categories are gated.** They need `sensitive = true` and `disposition = "managed"` before Ward writes them.
 - **Secret values stay out of Ward.** Ward never reads secret values from GitHub, and never stores them in the manifest, the plan or the audit log. It resolves each value from your environment only when it writes.
 - **Audit log.** Every change is appended to `~/.ward/audit.log`. On Windows this is `.ward\audit.log` in your user profile folder.
