@@ -439,6 +439,7 @@ More `settings` keys:
 
 | Key | Type | Description |
 |-----|------|-------------|
+| `fork_pull_request_contributor_approval` | string | Which outside contributors need approval before workflows run on their fork pull requests. Ward sends the value to GitHub as `approval_policy`, for example `first_time_contributors` |
 | `fork_pull_request_workflows_enabled` | boolean | Same GitHub setting as `private_fork_workflows_enabled`. If you set both with different values, `ward plan` reports a blocker |
 | `send_write_tokens_to_workflows` | boolean | Send write tokens to workflows from fork pull requests |
 | `send_secrets_and_variables` | boolean | Send secrets and variables to workflows from fork pull requests |
@@ -448,7 +449,7 @@ More `settings` keys:
 | `cache_retention_limit_days` | integer | Maximum days that GitHub keeps dependency caches. Separate from `artifact_retention_days` and `log_retention_days` |
 | `cache_storage_limit_gb` | integer | Maximum cache size in GB. It is a limit, not the current usage |
 
-The four fork pull request keys apply to private and internal repositories only. Ward warns for a public repository. Keys that you leave out keep their live value.
+These five keys apply to private and internal repositories only: `private_fork_workflows_enabled`, `fork_pull_request_workflows_enabled`, `send_write_tokens_to_workflows`, `send_secrets_and_variables` and `require_approval_for_fork_pr_workflows`. Ward warns for a public repository. Keys that you leave out keep their live value.
 
 Readable variables are copied:
 

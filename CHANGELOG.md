@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The warnings for deprecated aliases now say that Ward removes them in 0.7.0. The 0.5.0 notes said 0.6.0. The aliases are `--json`, `ward security`, `ward rulesets`, `ward protection`, `ward commit`, `ward teams`, `ward settings`, `ward init --from` and `ward drift check`.
+- The warnings for deprecated aliases now say that Ward removes them in 0.7.0. The 0.5.0 notes said 0.6.0. The aliases are `--json`, `ward security`, `ward rulesets`, `ward protection`, `ward commit`, `ward teams`, `ward settings` and `ward init --from`. `ward drift check` still warns without a version and is also removed in 0.7.0.
 - `ward completions` is no longer hidden in `ward --help`.
 
 ## [0.6.1] - 2026-10-15
