@@ -26,10 +26,12 @@ default_branch_head_oid = "..."
 
 | Table | Purpose |
 |---|---|
-| `[org]` | Owner containing the existing target repositories |
+| `[org]` | Owner containing the existing target repositories. The owner can be an organization or a personal user account |
 | `[provenance]` | Optional source branch and stable source identity captured by `ward import` |
 
 Manually authored manifests need only `[org]`, targets, and desired categories. Targets must remain under the configured owner. Ward does not create, rename, transfer, or delete repositories.
+
+For a personal account, set `name` to your user login. Ward lists your own repositories, including private ones, when the token belongs to that account. Settings that exist only for organizations, such as teams, custom roles, and organization secrets, are reported as not applicable or as unavailable.
 
 ## Category policies
 

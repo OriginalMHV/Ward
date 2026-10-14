@@ -119,7 +119,7 @@ Common options go after the subcommand: `--category C,..`, `--org`, `--system`, 
 
 ## Configuration
 
-A manifest names the organization, the systems and the categories to manage:
+A manifest names the owner (an organization or a personal account), the systems and the categories to manage:
 
 ```toml
 [org]

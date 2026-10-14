@@ -215,3 +215,110 @@ async fn explicit_only_system_skips_repository_search() {
     assert_eq!(repos.len(), 1);
     assert_eq!(repos[0].name, "reference");
 }
+
+async fn mount_owner(server: &MockServer, owner: &str, kind: &str) {
+    Mock::given(method("GET"))
+        .and(path(format!("/users/{owner}")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"login": owner, "type": kind})),
+        )
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn list_repos_for_own_user_account_includes_private_repos() {
+    let server = MockServer::start().await;
+    mount_owner(&server, "octo", "User").await;
+    Mock::given(method("GET"))
+        .and(path("/user"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"login": "Octo"})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/user/repos"))
+        .and(query_param("affiliation", "owner"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            make_repo_json("public-one", false),
+            make_repo_json("private-one", false),
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("octo", &server.uri());
+    let repos = client.list_repos().await.unwrap();
+
+    assert_eq!(repos.len(), 2);
+}
+
+#[tokio::test]
+async fn list_repos_for_another_user_uses_the_public_listing() {
+    let server = MockServer::start().await;
+    mount_owner(&server, "octo", "User").await;
+    Mock::given(method("GET"))
+        .and(path("/user"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"login": "someone-else"})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/users/octo/repos"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!([make_repo_json("public-one", false)])),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("octo", &server.uri());
+    let repos = client.list_repos().await.unwrap();
+
+    assert_eq!(repos.len(), 1);
+}
+
+#[tokio::test]
+async fn list_repos_for_organization_owner_uses_the_org_listing() {
+    let server = MockServer::start().await;
+    mount_owner(&server, "acme", "Organization").await;
+    Mock::given(method("GET"))
+        .and(path("/orgs/acme/repos"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!([make_repo_json("alpha", false)])),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("acme", &server.uri());
+    let repos = client.list_repos().await.unwrap();
+
+    assert_eq!(repos.len(), 1);
+}
+
+#[tokio::test]
+async fn prefix_search_for_user_owner_uses_the_user_qualifier() {
+    let server = MockServer::start().await;
+    mount_owner(&server, "octo", "User").await;
+    Mock::given(method("GET"))
+        .and(path("/search/repositories"))
+        .and(query_param("q", "user:octo frontend in:name"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "total_count": 2,
+            "items": [
+                make_repo_json("frontend-foo", false),
+                make_repo_json("webapp-baz", false),
+            ]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = Client::new_for_test("octo", &server.uri());
+    let repos = client
+        .list_repos_for_system("frontend", true, &[], &[])
+        .await
+        .unwrap();
+
+    assert_eq!(repos.len(), 1);
+    assert_eq!(repos[0].name, "frontend-foo");
+}

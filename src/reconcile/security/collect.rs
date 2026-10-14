@@ -10,6 +10,7 @@ use crate::config::manifest::{
     SecurityReviewerOptionsConfig,
 };
 use crate::github::Client;
+use crate::github::repos::OwnerKind;
 use crate::github::security::{
     CodeqlDefaultSetupState, RepositoryCodeSecurityConfiguration, RepositorySecurityBaseline,
 };
@@ -226,22 +227,31 @@ pub async fn collect_security_category_with_baseline(
         }
     };
 
-    let available_configurations = match client.list_code_security_configurations().await {
-        Ok(mut value) => {
-            coverage.push(collected_entry(
-                ManifestCategoryName::Security,
-                "GET /orgs/{org}/code-security/configurations",
-            ));
-            value.sort_by(|left, right| left.name.cmp(&right.name));
-            value
-        }
-        Err(error) => {
-            coverage.push(unavailable_entry(
-                ManifestCategoryName::Security,
-                "GET /orgs/{org}/code-security/configurations",
-                format!("{error:#}"),
-            ));
-            Vec::new()
+    let available_configurations = if client.owner_kind().await? == OwnerKind::User {
+        coverage.push(not_applicable_entry(
+            ManifestCategoryName::Security,
+            "GET /orgs/{org}/code-security/configurations",
+            "code security configurations exist only for organizations".to_owned(),
+        ));
+        Vec::new()
+    } else {
+        match client.list_code_security_configurations().await {
+            Ok(mut value) => {
+                coverage.push(collected_entry(
+                    ManifestCategoryName::Security,
+                    "GET /orgs/{org}/code-security/configurations",
+                ));
+                value.sort_by(|left, right| left.name.cmp(&right.name));
+                value
+            }
+            Err(error) => {
+                coverage.push(unavailable_entry(
+                    ManifestCategoryName::Security,
+                    "GET /orgs/{org}/code-security/configurations",
+                    format!("{error:#}"),
+                ));
+                Vec::new()
+            }
         }
     };
 
