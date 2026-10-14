@@ -26,7 +26,7 @@ Ward is designed to run in CI pipelines for drift detection, compliance reportin
 
 ## Authentication
 
-Ward needs a GitHub token with `repo`, `read:org`, and `workflow` scopes. In GitHub Actions, use a secret or the built-in `GITHUB_TOKEN`:
+Ward needs a token that can read the repositories in `ward.toml`, and write to them for `ward apply`. See [Token permissions](../README.md#token-permissions). In GitHub Actions, store the token as a secret:
 
 ```yaml
 env:
@@ -39,7 +39,7 @@ Ward checks for tokens in this order:
 2. `GITHUB_TOKEN` environment variable
 3. `gh auth token` (GitHub CLI)
 
-For organization-wide operations, a personal access token or GitHub App token with org-level permissions is usually required. The default `GITHUB_TOKEN` is scoped to the current repository only.
+Do not use the built-in `GITHUB_TOKEN`. It covers only the current repository, and it cannot read admin settings, so Ward reports those settings as `could not read`. Use a fine-grained personal access token or a GitHub App token with access to every repository in `ward.toml`.
 
 ---
 

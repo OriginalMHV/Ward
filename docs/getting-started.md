@@ -3,9 +3,9 @@
 Ward supports two first-class setup paths:
 
 1. author the desired state directly in `ward.toml`
-2. bootstrap `ward.toml` from a repository that already has the configuration you want
+2. import `ward.toml` from a repository that already has the configuration you want
 
-Both produce a normal manifest and use the same plan/apply/verify lifecycle. Repository bootstrap is read-only and creates a static snapshot; the source repository has no special role after the manifest is written.
+Both produce a normal manifest and use the same plan/apply/verify lifecycle. `ward import` is read-only and creates a static snapshot. The source repository has no special role after Ward writes the manifest.
 
 ## Prerequisites
 
@@ -33,7 +33,7 @@ For real onboarding, use `ward import OWNER/REPO` instead.
 
 Review and extend the result using the [configuration reference](configuration.md). A manual Ward manifest can use every category and does not require source provenance or coverage records.
 
-### Bootstrap from an existing repository
+### Import an existing repository
 
 ```bash
 ward import acme/reference-service
@@ -101,7 +101,7 @@ exclude = ["operations?", "system"]
 
 It can also use an explicit `repos` list.
 
-A repository bootstrap targets only the source repository by default. This makes its first plan a zero-drift safety check. Select other existing same-owner targets during bootstrap:
+`ward import` targets only the source repository by default. This makes its first plan a zero-drift safety check. Select other existing same-owner targets during import:
 
 ```bash
 ward import acme/reference-service \
@@ -121,7 +121,7 @@ match_prefix = false
 repos = ["api-service", "worker-service"]
 ```
 
-You may edit that system like any manually authored target definition after bootstrap.
+After import, you can edit that system like any manually authored target definition.
 
 Confirm the target set before applying:
 
@@ -145,14 +145,14 @@ prune = false
 sensitive = true
 ```
 
-Manually authored manifests set category policies directly. Repository bootstrap starts with conservative defaults:
+Manually authored manifests set category policies directly. `ward import` starts with conservative defaults:
 
 - repository metadata/settings and configuration files: `managed`
 - security, rulesets, branch protection, Actions, environments, access, and integrations: `observe + sensitive`
 - collection pruning: disabled
 - visibility/archive changes: blocked unless high-impact changes are explicitly allowed
 
-To opt into a bootstrapped sensitive category, change only that category's disposition:
+To opt into an imported sensitive category, change only the disposition of that category:
 
 ```toml
 [categories.actions.policy]
@@ -242,7 +242,7 @@ ward apply
 
 ## 7. Supply external values
 
-Both setup paths use external references for write-only values. GitHub never returns secret values, so repository bootstrap creates those references automatically for imported names:
+Both setup paths use external references for write-only values. GitHub never returns secret values, so `ward import` creates those references automatically for imported names:
 
 ```toml
 [[categories.actions.secrets]]
@@ -287,7 +287,7 @@ ward doctor
 The normal lifecycle is:
 
 ```text
-create or bootstrap manifest -> review policies and targets -> plan -> apply
+create or import manifest -> review policies and targets -> plan -> apply
 -> merge config PR when present -> plan -> apply deferred state
 ```
 
