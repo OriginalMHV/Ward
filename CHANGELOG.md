@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-15
+
 ### Changed
 
 - The warnings for deprecated aliases now say that Ward removes them in 0.7.0. The 0.5.0 notes said 0.6.0. The aliases are `--json`, `ward security`, `ward rulesets`, `ward protection`, `ward commit`, `ward teams`, `ward settings` and `ward init --from`. `ward drift check` still warns without a version and is also removed in 0.7.0.
@@ -244,7 +246,8 @@ Changed or lost capabilities:
 - JSON lines audit trail logged to `~/.ward/audit.log`
 - Custom template support via `~/.ward/templates/` directory
 
-[Unreleased]: https://github.com/OriginalMHV/Ward/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/OriginalMHV/Ward/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/OriginalMHV/Ward/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/OriginalMHV/Ward/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/OriginalMHV/Ward/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/OriginalMHV/Ward/compare/v0.4.2...v0.5.0
